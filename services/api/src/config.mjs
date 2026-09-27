@@ -13,6 +13,7 @@ export const config = {
   ownerUserId: process.env.OWNER_USER_ID || "",
   maxUploadBytes: Number(process.env.MAX_UPLOAD_MB || 60) * 1024 * 1024,
   cacheMinutes: Number(process.env.MEDIA_CACHE_MINUTES || 20),
+  mediaTicketMinutes: Number(process.env.MEDIA_TICKET_MINUTES || 10),
 };
 
 export function readiness() {

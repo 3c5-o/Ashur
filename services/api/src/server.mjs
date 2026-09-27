@@ -20,6 +20,7 @@ import {
   uploadToChannel,
   downloadMessageMedia,
   testTelegramConnection,
+  testTelegramChannel,
 } from "./telegram.mjs";
 import { sendPush, notificationsConfigured } from "./onesignal.mjs";
 
@@ -1444,7 +1445,7 @@ async function testAdminChannel(req, res, channelKey) {
   );
   const channel = rows?.[0];
   if (!channel) return json(res, 404, { error: "القناة غير موجودة" });
-  const result = await testTelegramConnection().catch((error) => ({ ok: false, detail: error.message }));
+  const result = await testTelegramChannel(channel.channel_id).catch((error) => ({ ok: false, detail: error.message }));
   await update("storage_channels", "channel_key=eq." + encodeURIComponent(channelKey), {
     status: result.ok ? "connected" : "error",
     last_test_at: new Date().toISOString(),

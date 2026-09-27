@@ -16,6 +16,8 @@
     profileTab:"posts",
     searchType:"all",
     chatTimer:null,
+    reelObserver:null,
+    activePage:"homePage",
     features:{},
     limits:{}
   };
@@ -65,29 +67,40 @@
   }
 
   async function hydrateMedia(root=document){
-    const nodes=[...root.querySelectorAll("[data-media-id]")];
-    await Promise.all(nodes.map(async node=>{
-      if(node.dataset.mediaReady==="1")return;
-      try{
-        const access=await mediaAccess(node.dataset.mediaId);
-        if(access.mime_type?.startsWith("video/") && node.tagName==="IMG"){
-          const video=document.createElement("video");
-          video.className=node.className;
-          video.dataset.mediaId=node.dataset.mediaId;
-          video.dataset.mediaReady="1";
-          video.src=access.url;
-          video.controls=true;
-          video.playsInline=true;
-          video.preload="metadata";
-          node.replaceWith(video);
-        }else{
-          node.src=access.url;
-          node.dataset.mediaReady="1";
+    const nodes=[...root.querySelectorAll("[data-media-id]")].filter(node=>node.dataset.mediaReady!=="1");
+    if(!nodes.length)return;
+    let cursor=0;
+    const worker=async()=>{
+      while(cursor<nodes.length){
+        const node=nodes[cursor++];
+        if(!node?.isConnected)continue;
+        try{
+          const access=await mediaAccess(node.dataset.mediaId);
+          if(!node.isConnected)continue;
+          if(access.mime_type?.startsWith("video/") && node.tagName==="IMG"){
+            const video=document.createElement("video");
+            video.className=node.className;
+            video.dataset.mediaId=node.dataset.mediaId;
+            video.dataset.mediaReady="1";
+            video.src=access.url;
+            video.controls=true;
+            video.playsInline=true;
+            video.preload="metadata";
+            node.replaceWith(video);
+          }else{
+            node.src=access.url;
+            node.dataset.mediaReady="1";
+          }
+        }catch(_){
+          if(node?.isConnected){
+            node.removeAttribute("src");
+            node.dataset.mediaError="1";
+          }
         }
-      }catch(_){
-        node.removeAttribute("src");
       }
-    }));
+    };
+    const workers=Array.from({length:Math.min(4,nodes.length)},()=>worker());
+    await Promise.all(workers);
   }
 
   async function accessToken(){
@@ -109,6 +122,19 @@
   function showAuthMessage(text, good=false){
     const el=$("#authMessage"); el.textContent=text; el.className="message "+(good?"success":"error");
   }
+
+  function errorMarkup(message,view){
+    return `<div class="empty error-state"><div><b>تعذر التحميل</b><p>${escapeHtml(message||"تحقق من اتصال الإنترنت وحاول مرة أخرى.")}</p><button type="button" data-retry-view="${escapeHtml(view||"homePage")}">إعادة المحاولة</button></div></div>`;
+  }
+
+  document.addEventListener("click",e=>{
+    const retry=e.target.closest?.("[data-retry-view]");
+    if(!retry)return;
+    const view=retry.dataset.retryView||"homePage";
+    retry.disabled=true;
+    const job=view==="homePage"?loadHome():navigateTo(view);
+    Promise.resolve(job).finally(()=>{if(retry.isConnected)retry.disabled=false});
+  });
 
   function showApp(loggedIn){
     $("#auth").classList.toggle("hidden", loggedIn);
@@ -385,11 +411,15 @@
   };
 
   async function navigateTo(page){
+    if(!document.getElementById(page))page="homePage";
     closeTransientDialogs();
-    $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    state.activePage=page;
+    $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
+      state.reelObserver?.disconnect?.();
+      state.reelObserver=null;
     }
     if(page==="searchPage")await loadExplore();
     if(page==="reelsPage")await loadReels();
@@ -411,7 +441,7 @@
 
   async function loadStories(){
     const since=new Date().toISOString();
-    const {data,error}=await client.from("stories").select("id,author_id,media_id,caption,expires_at").gt("expires_at",since).order("created_at",{ascending:false}).limit(30);
+    const {data,error}=await client.from("stories").select("id,author_id,media_id,caption,expires_at").gt("expires_at",since).order("created_at",{ascending:false}).limit(20);
     if(error){$("#stories").innerHTML="";return}
     const ids=[...new Set((data||[]).map(x=>x.author_id))];
     const profiles=await profilesMap(ids);
@@ -479,9 +509,9 @@
     const {data,error}=await client.from("posts")
       .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
       .order("created_at",{ascending:false})
-      .limit(30);
+      .limit(20);
     if(error){
-      $("#feed").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      $("#feed").innerHTML=errorMarkup(error.message,"homePage");
       return;
     }
     if(!data?.length){
@@ -632,7 +662,7 @@
       .select("id,media_id,caption,author_id,created_at")
       .eq("explore_enabled",true)
       .order("created_at",{ascending:false})
-      .limit(30);
+      .limit(18);
     if(query)request=request.ilike("caption",`%${query.replace(/[,%()]/g,"")}%`);
     const {data,error}=await request;
     if(error)throw error;
@@ -695,7 +725,7 @@
       });
     }catch(error){
       $("#searchResults").classList.remove("explore-media-grid");
-      $("#searchResults").innerHTML=`<div class="empty error">${escapeHtml(error.message||"تعذر تحميل البحث")}</div>`;
+      $("#searchResults").innerHTML=errorMarkup(error.message||"تعذر تحميل البحث","searchPage");
     }
   }
 
@@ -734,9 +764,9 @@
     const {data,error}=await client.from("reels")
       .select("id,author_id,media_id,caption,created_at,comments_enabled")
       .order("created_at",{ascending:false})
-      .limit(30);
+      .limit(12);
     if(error){
-      $("#reelsFeed").innerHTML='<div class="empty error">تعذر تحميل الريلز.</div>';
+      $("#reelsFeed").innerHTML=errorMarkup("تعذر تحميل الريلز.","reelsPage");
       return;
     }
     if(!data?.length){
@@ -800,6 +830,8 @@
   }
 
   function initReelPlayers(){
+    state.reelObserver?.disconnect?.();
+    state.reelObserver=null;
     const reels=[...$("#reelsFeed").querySelectorAll(".reel")];
     if(!reels.length)return;
 
@@ -819,6 +851,7 @@
         }
       });
     },{root:$("#reelsFeed"),threshold:[.2,.72,.95]});
+    state.reelObserver=observer;
 
     reels.forEach(reel=>{
       const video=reel.querySelector("video");
@@ -888,7 +921,7 @@
       await hydrateMedia($("#conversationList"));
       $("#conversationList").querySelectorAll("[data-conversation]").forEach(b=>b.onclick=()=>openChat(b.dataset.conversation,b.dataset.title));
     }catch(e){
-      $("#conversationList").innerHTML=`<div class="empty error">${escapeHtml(e.message)}</div>`;
+      $("#conversationList").innerHTML=errorMarkup(e.message,"messagesPage");
     }
   }
 
@@ -1014,7 +1047,8 @@
   $("#closeComments").onclick=()=>$("#commentsDialog").close();
 
   async function loadProfile(){
-    await refreshProfile();
+    try{
+      await refreshProfile();
     const [{count:posts},{count:followers},{count:following}] = await Promise.all([
       client.from("posts").select("*",{count:"exact",head:true}).eq("author_id",state.user.id),
       client.from("follows").select("*",{count:"exact",head:true}).eq("following_id",state.user.id).eq("status","accepted"),
@@ -1052,6 +1086,10 @@
     $("#profileSettingsFab").onclick=openSettings;
     await hydrateMedia($("#profileCard"));
     await loadProfileContent(state.profileTab);
+    }catch(error){
+      $("#profileCard").innerHTML=errorMarkup(error.message||"تعذر تحميل الملف الشخصي","profilePage");
+      $("#profileContent").innerHTML="";
+    }
   }
 
   async function loadProfileContent(kind="posts"){

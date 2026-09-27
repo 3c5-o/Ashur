@@ -1240,6 +1240,12 @@
     $("#settingsDialog").showModal();
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
+  $("#settingsLogoutButton").onclick=async()=>{
+    $("#settingsLogoutButton").disabled=true;
+    await client.auth.signOut();
+    $("#settingsLogoutButton").disabled=false;
+    $("#settingsDialog").close();
+  };
   $("#settingsEditProfile").onclick=()=>{
     $("#settingsDialog").close();
     openEditProfile();

@@ -65,6 +65,53 @@ async function api(path,opt={}){
   if(!r.ok)throw new Error(b.error||"تعذر تنفيذ الطلب");
   return b
 }
+async function mediaAccess(id){
+  if(!id)return null;
+  return api("/v1/media-ticket/"+encodeURIComponent(id));
+}
+async function hydrateAdminMedia(root=document){
+  const nodes=[...root.querySelectorAll("[data-media-id]:not([data-media-ready])")];
+  await Promise.all(nodes.map(async node=>{
+    try{
+      const access=await mediaAccess(node.dataset.mediaId);
+      node.dataset.mediaReady="1";
+      if(access.mime_type?.startsWith("video/")){
+        const v=document.createElement("video");
+        v.className=node.className;
+        v.src=access.url;
+        v.controls=true;
+        v.playsInline=true;
+        v.preload="metadata";
+        node.replaceWith(v);
+      }else{
+        node.src=access.url;
+      }
+    }catch{
+      node.classList.add("media-error");
+    }
+  }));
+}
+function formatBytes(value){
+  const n=Number(value||0);
+  if(n<1024)return n+" B";
+  if(n<1024*1024)return (n/1024).toFixed(1)+" KB";
+  if(n<1024*1024*1024)return (n/1024/1024).toFixed(1)+" MB";
+  return (n/1024/1024/1024).toFixed(2)+" GB";
+}
+function statusLabel(s){
+  return ({
+    active:"نشط",hidden:"مخفي",open:"جديد",review:"قيد المراجعة",resolved:"تم الحل",rejected:"مرفوض",
+    queued:"بالانتظار",receiving:"جارٍ الاستلام",storing:"جارٍ التخزين",completed:"مكتمل",failed:"فشل",
+    cancelled:"ملغي",in_progress:"قيد المتابعة",answered:"تم الرد",closed:"مغلق",new:"جديد",
+    draft:"مسودة",testing:"اختبار",published:"منشور",retired:"متقاعد",scheduled:"مجدول",sent:"تم الإرسال",
+    processing:"قيد الإرسال",pending:"قيد الانتظار"
+  })[s]||s||"—";
+}
+function pillClass(s){
+  return ["active","resolved","completed","sent","published","connected","answered"].includes(s)?"ok":
+    ["failed","cancelled","rejected","hidden","error"].includes(s)?"bad":"";
+}
+
 function showApp(ok){
   $("#loginView").classList.toggle("hidden",ok);
   $("#adminApp").classList.toggle("hidden",!ok)

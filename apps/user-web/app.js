@@ -21,6 +21,7 @@
     storyTimer:null,
     activePage:"homePage",
     previewUrl:null,
+    previewUrls:[],
     chatPreviewUrl:null,
     commentReply:null,
     currentPublicProfile:null,
@@ -1793,11 +1794,16 @@
   $("#publishButton").onclick=()=>openDialog($("#publishDialog"));
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
+
   function clearComposerPreview(){
-    if(state.previewUrl){
-      URL.revokeObjectURL(state.previewUrl);
-      state.previewUrl=null;
+    for(const url of state.previewUrls||[]){
+      try{URL.revokeObjectURL(url)}catch(_){}
     }
+    if(state.previewUrl){
+      try{URL.revokeObjectURL(state.previewUrl)}catch(_){}
+    }
+    state.previewUrl=null;
+    state.previewUrls=[];
     $("#composerPreview").innerHTML="";
     $("#composerPreview").classList.add("hidden");
     $("#composerFileMeta").textContent="";
@@ -1809,8 +1815,12 @@
     $("#publishDialog").close();
     $("#composerTitle").textContent=type==="story"?"إنشاء قصة":type==="reel"?"إنشاء ريلز":"إنشاء منشور";
     $("#composerFile").accept=type==="reel"?"video/*":"image/*,video/*";
+    $("#composerFile").multiple=type==="post";
     $("#composerFile").value="";
     $("#composerCaption").value="";
+    $("#composerVisibility").value="public";
+    $("#composerCommentsEnabled").checked=true;
+    $("#composerOptions").classList.toggle("hidden",type==="story");
     $("#composerMessage").textContent="";
     clearComposerPreview();
     openDialog($("#composerDialog"));
@@ -1818,24 +1828,48 @@
 
   $("#composerFile").onchange=()=>{
     clearComposerPreview();
-    const file=$("#composerFile").files[0];
-    if(!file)return;
-    if(state.composerType==="reel" && !file.type.startsWith("video/")){
+    const files=[...$("#composerFile").files];
+    if(!files.length)return;
+    if(state.composerType!=="post"&&files.length>1){
       $("#composerFile").value="";
-      $("#composerMessage").textContent="الريلز يقبل فيديو فقط";
+      $("#composerMessage").textContent="هذا النوع يقبل ملفًا واحدًا فقط.";
       return;
     }
-    if(!file.type.startsWith("image/") && !file.type.startsWith("video/")){
+    if(state.composerType==="post"&&files.length>10){
       $("#composerFile").value="";
-      $("#composerMessage").textContent="نوع الملف غير مدعوم";
+      $("#composerMessage").textContent="يمكن إضافة 10 ملفات كحد أقصى للمنشور.";
       return;
     }
-    state.previewUrl=URL.createObjectURL(file);
-    $("#composerPreview").innerHTML=file.type.startsWith("video/")
-      ? `<video src="${state.previewUrl}" controls playsinline preload="metadata"></video>`
-      : `<img src="${state.previewUrl}" alt="معاينة">`;
+    for(const file of files){
+      if(state.composerType==="reel"&&!file.type.startsWith("video/")){
+        $("#composerFile").value="";
+        $("#composerMessage").textContent="الريلز يقبل فيديو فقط.";
+        return;
+      }
+      if(!file.type.startsWith("image/")&&!file.type.startsWith("video/")){
+        $("#composerFile").value="";
+        $("#composerMessage").textContent="نوع الملف غير مدعوم.";
+        return;
+      }
+    }
+
+    const previews=[];
+    let total=0;
+    files.forEach(file=>{
+      const url=URL.createObjectURL(file);
+      state.previewUrls.push(url);
+      total+=file.size;
+      previews.push(file.type.startsWith("video/")
+        ?'<video src="'+url+'" controls playsinline preload="metadata"></video>'
+        :'<img src="'+url+'" alt="معاينة">');
+    });
+    state.previewUrl=state.previewUrls[0]||null;
+    $("#composerPreview").innerHTML=previews.join("");
+    $("#composerPreview").classList.toggle("composer-preview-grid",files.length>1);
     $("#composerPreview").classList.remove("hidden");
-    $("#composerFileMeta").textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)} MB`;
+    $("#composerFileMeta").textContent=files.length===1
+      ?files[0].name+" · "+(files[0].size/1024/1024).toFixed(1)+" MB"
+      :files.length+" ملفات · "+(total/1024/1024).toFixed(1)+" MB";
     $("#composerFileMeta").classList.remove("hidden");
     $("#composerMessage").textContent="";
   };
@@ -1854,25 +1888,66 @@
   };
 
   $("#submitComposer").onclick=async()=>{
-    const file=$("#composerFile").files[0], caption=$("#composerCaption").value.trim();
-    if(!file)return $("#composerMessage").textContent="اختر ملفًا أولًا";
-    const uploadLimit=state.composerType==="story"
-      ?Number(state.limits.story_mb||30)
-      :file.type.startsWith("image/")
-        ?Number(state.limits.image_mb||10)
-        :Number(state.limits.max_upload_mb||cfg.maxUploadMb||60);
-    if(file.size>uploadLimit*1024*1024)return $("#composerMessage").textContent=`الحد الأقصى ${uploadLimit} ميغابايت`;
-    $("#submitComposer").disabled=true; $("#composerMessage").textContent="جارٍ الرفع...";
+    const files=[...$("#composerFile").files];
+    const caption=$("#composerCaption").value.trim();
+    if(!files.length)return $("#composerMessage").textContent="اختر ملفًا أولًا";
+
+    for(const file of files){
+      const uploadLimit=state.composerType==="story"
+        ?Number(state.limits.story_mb||30)
+        :file.type.startsWith("image/")
+          ?Number(state.limits.image_mb||10)
+          :Number(state.limits.max_upload_mb||cfg.maxUploadMb||60);
+      if(file.size>uploadLimit*1024*1024){
+        $("#composerMessage").textContent="الملف "+file.name+" أكبر من الحد "+uploadLimit+" ميغابايت.";
+        return;
+      }
+    }
+
+    $("#submitComposer").disabled=true;
+    $("#composerMessage").textContent="جارٍ الرفع...";
     try{
-      const kind=state.composerType==="reel"?"reel":state.composerType==="story"?"story":file.type.startsWith("video/")?"post_video":"post_image";
-      const media=await uploadFile(file,kind);
+      const uploaded=[];
+      for(let i=0;i<files.length;i++){
+        const file=files[i];
+        $("#composerMessage").textContent="جارٍ رفع "+(i+1)+" من "+files.length+"...";
+        const kind=state.composerType==="reel"
+          ?"reel"
+          :state.composerType==="story"
+            ?"story"
+            :file.type.startsWith("video/")?"post_video":"post_image";
+        uploaded.push(await uploadFile(file,kind));
+      }
+
+      const visibility=$("#composerVisibility").value==="followers"?"followers":"public";
+      const commentsEnabled=$("#composerCommentsEnabled").checked;
       if(state.composerType==="reel"){
-        const {error}=await client.from("reels").insert({author_id:state.user.id,media_id:media.id,caption}); if(error)throw error;
+        const {error}=await client.from("reels").insert({
+          author_id:state.user.id,
+          media_id:uploaded[0].id,
+          caption,
+          visibility,
+          comments_enabled:commentsEnabled
+        });
+        if(error)throw error;
       }else if(state.composerType==="story"){
-        const {error}=await client.from("stories").insert({author_id:state.user.id,media_id:media.id,caption}); if(error)throw error;
+        const {error}=await client.from("stories").insert({
+          author_id:state.user.id,
+          media_id:uploaded[0].id,
+          caption
+        });
+        if(error)throw error;
       }else{
-        const {data:post,error}=await client.from("posts").insert({author_id:state.user.id,caption}).select("id").single(); if(error)throw error;
-        const {error:mediaErr}=await client.from("post_media").insert({post_id:post.id,media_id:media.id,sort_order:0}); if(mediaErr)throw mediaErr;
+        const {data:post,error}=await client.from("posts").insert({
+          author_id:state.user.id,
+          caption,
+          visibility,
+          comments_enabled:commentsEnabled
+        }).select("id").single();
+        if(error)throw error;
+        const mediaRows=uploaded.map((media,index)=>({post_id:post.id,media_id:media.id,sort_order:index}));
+        const {error:mediaErr}=await client.from("post_media").insert(mediaRows);
+        if(mediaErr)throw mediaErr;
       }
       clearComposerPreview();
       $("#composerDialog").close();
@@ -1881,8 +1956,9 @@
       await loadHome();
     }catch(e){
       $("#composerMessage").textContent=e.message+" — يمكنك الضغط على «نشر الآن» لإعادة المحاولة.";
+    }finally{
+      $("#submitComposer").disabled=false;
     }
-    finally{$("#submitComposer").disabled=false}
   };
 
   async function uploadFile(file,kind,{silent=false}={}){

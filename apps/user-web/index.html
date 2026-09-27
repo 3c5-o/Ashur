@@ -3,40 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#12100f">
+  <meta name="theme-color" content="#050706">
+  <meta name="color-scheme" content="dark">
   <title>آشور</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <div id="splash" class="splash">
-    <div class="brand-mark">𒀸</div>
-    <div class="brand-title">آشور</div>
+    <div class="splash-glow"></div>
+    <img src="./assets/logo.svg" class="splash-logo" alt="آشور">
+    <div class="splash-name">آشور</div>
+    <div class="splash-subtitle">تواصل بطريقتك</div>
   </div>
 
   <div id="auth" class="auth-shell hidden">
     <section class="auth-card">
-      <div class="brand-mark small">𒀸</div>
-      <h1>آشور</h1>
-      <p>تواصل، شارك، واكتشف.</p>
+      <div class="auth-brand">
+        <div class="auth-logo-wrap"><img src="./assets/logo.svg" alt="آشور"></div>
+        <div><h1>آشور</h1><p>منصة اجتماعية عربية حديثة</p></div>
+      </div>
 
       <div class="auth-tabs">
-        <button id="loginTab" class="active">تسجيل الدخول</button>
-        <button id="registerTab">إنشاء حساب</button>
+        <button id="loginTab" class="active" type="button">تسجيل الدخول</button>
+        <button id="registerTab" type="button">إنشاء حساب</button>
       </div>
 
       <form id="loginForm" class="form">
-        <label>البريد الإلكتروني<input id="loginEmail" type="email" required autocomplete="email"></label>
-        <label>كلمة المرور<input id="loginPassword" type="password" required autocomplete="current-password"></label>
+        <label><span>البريد الإلكتروني</span><input id="loginEmail" type="email" required autocomplete="email" placeholder="اكتب بريدك الإلكتروني"></label>
+        <label><span>كلمة المرور</span><input id="loginPassword" type="password" required autocomplete="current-password" placeholder="اكتب كلمة المرور"></label>
         <button class="primary" type="submit">دخول</button>
         <button class="link-button" id="forgotPassword" type="button">نسيت كلمة المرور؟</button>
       </form>
 
       <form id="registerForm" class="form hidden">
-        <label>الاسم<input id="registerName" maxlength="80" required></label>
-        <label>اسم المستخدم<input id="registerUsername" maxlength="24" required autocapitalize="none"></label>
-        <label>البريد الإلكتروني<input id="registerEmail" type="email" required autocomplete="email"></label>
-        <label>كلمة المرور<input id="registerPassword" type="password" minlength="8" required autocomplete="new-password"></label>
-        <label>تأكيد كلمة المرور<input id="registerPassword2" type="password" minlength="8" required autocomplete="new-password"></label>
+        <label><span>الاسم</span><input id="registerName" maxlength="80" required placeholder="اسمك الظاهر"></label>
+        <label><span>اسم المستخدم</span><input id="registerUsername" maxlength="24" required autocapitalize="none" placeholder="اسم المستخدم"></label>
+        <label><span>البريد الإلكتروني</span><input id="registerEmail" type="email" required autocomplete="email" placeholder="البريد الإلكتروني"></label>
+        <label><span>كلمة المرور</span><input id="registerPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="٨ أحرف أو أكثر"></label>
+        <label><span>تأكيد كلمة المرور</span><input id="registerPassword2" type="password" minlength="8" required autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></label>
         <button class="primary" type="submit">إنشاء الحساب</button>
       </form>
       <p id="authMessage" class="message"></p>
@@ -45,29 +49,38 @@
 
   <div id="app" class="app hidden">
     <header class="topbar">
-      <button id="publishButton" class="icon-button" aria-label="نشر">
+      <button id="publishButton" class="top-action publish-action" aria-label="إنشاء جديد">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
-      <button id="brandButton" class="top-brand" aria-label="آشور">
-        <span class="top-symbol">𒀸</span><span>آشور</span>
+      <button id="brandButton" class="top-brand" aria-label="الرئيسية">
+        <img src="./assets/logo.svg" alt="">
+        <span>آشور</span>
       </button>
-      <button id="notificationsButton" class="icon-button badge-wrap" aria-label="الإشعارات">
+      <button id="notificationsButton" class="top-action badge-wrap" aria-label="الإشعارات">
         <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
         <span id="notificationBadge" class="badge hidden">0</span>
       </button>
     </header>
 
-    <main id="main">
+    <main id="main" class="main-shell">
       <section id="homePage" class="page active">
-        <div id="stories" class="stories"></div>
-        <div id="homeStatus" class="status-line"></div>
+        <div class="home-intro">
+          <div id="stories" class="stories"></div>
+          <div id="homeStatus" class="status-line"></div>
+        </div>
         <div id="feed" class="feed"></div>
       </section>
 
       <section id="searchPage" class="page">
-        <div class="page-head">
-          <h2>البحث</h2>
-          <input id="searchInput" class="search-input" placeholder="ابحث عن حساب أو محتوى">
+        <div class="section-head sticky-head">
+          <div>
+            <span class="eyebrow">اكتشف</span>
+            <h2>البحث</h2>
+          </div>
+          <div class="search-box">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            <input id="searchInput" placeholder="ابحث عن حساب أو محتوى" autocomplete="off">
+          </div>
         </div>
         <div class="chips">
           <button class="chip active" data-search-type="all">الكل</button>
@@ -75,7 +88,7 @@
           <button class="chip" data-search-type="posts">المنشورات</button>
           <button class="chip" data-search-type="reels">الريلز</button>
         </div>
-        <div id="searchResults" class="results"></div>
+        <div id="searchResults" class="results explore-grid"></div>
       </section>
 
       <section id="reelsPage" class="page reels-page">
@@ -83,26 +96,38 @@
       </section>
 
       <section id="messagesPage" class="page">
-        <div class="page-head row">
-          <h2>الرسائل</h2>
-          <button id="newMessageButton" class="small-button">محادثة جديدة</button>
+        <div class="section-head messages-head">
+          <div><span class="eyebrow">تواصل</span><h2>الرسائل</h2></div>
+          <button id="newMessageButton" class="round-primary" aria-label="محادثة جديدة">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
         </div>
-        <div id="conversationList" class="list"></div>
+        <div class="messages-search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <span>محادثاتك تظهر هنا</span>
+        </div>
+        <div id="conversationList" class="list conversation-list"></div>
       </section>
 
-      <section id="profilePage" class="page">
+      <section id="profilePage" class="page profile-page">
         <div id="profileCard" class="profile-card"></div>
         <div class="profile-tabs">
-          <button class="active">المنشورات</button>
-          <button>الريلز</button>
+          <button class="active" type="button">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <span>المنشورات</span>
+          </button>
+          <button type="button">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg>
+            <span>الريلز</span>
+          </button>
         </div>
-        <div id="profileContent" class="feed"></div>
+        <div id="profileContent" class="feed profile-feed"></div>
       </section>
     </main>
 
     <nav class="bottom-nav">
       <button class="nav-item active" data-page="homePage" aria-label="الرئيسية">
-        <svg viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8V21h-6v-6H9v6H3Z"/></svg><span>الرئيسية</span>
+        <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3Z"/></svg><span>الرئيسية</span>
       </button>
       <button class="nav-item" data-page="searchPage" aria-label="البحث">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>البحث</span>
@@ -121,101 +146,110 @@
 
   <dialog id="publishDialog" class="sheet">
     <div class="sheet-handle"></div>
-    <h3>إنشاء جديد</h3>
-    <button data-publish="story">قصة</button>
-    <button data-publish="post">منشور</button>
-    <button data-publish="reel">ريلز</button>
-    <button id="closePublish">إلغاء</button>
+    <div class="sheet-title"><div><span class="eyebrow">إنشاء</span><h3>ماذا تريد أن تنشر؟</h3></div></div>
+    <div class="publish-options">
+      <button data-publish="story"><span class="option-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg></span><span><b>قصة</b><small>صورة أو فيديو لمدة ٢٤ ساعة</small></span></button>
+      <button data-publish="post"><span class="option-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m7 16 4-4 3 3 3-4 3 5"/></svg></span><span><b>منشور</b><small>صورة أو فيديو مع وصف</small></span></button>
+      <button data-publish="reel"><span class="option-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg></span><span><b>ريلز</b><small>فيديو عمودي قصير</small></span></button>
+    </div>
+    <button id="closePublish" class="secondary-wide" type="button">إلغاء</button>
   </dialog>
 
   <dialog id="composerDialog" class="sheet composer">
     <div class="sheet-handle"></div>
-    <h3 id="composerTitle">إنشاء منشور</h3>
+    <div class="sheet-title"><div><span class="eyebrow">نشر جديد</span><h3 id="composerTitle">إنشاء منشور</h3></div></div>
     <label class="file-drop">
       <input id="composerFile" type="file" accept="image/*,video/*">
-      <span>اختر صورة أو فيديو</span>
+      <span class="upload-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 15v5h16v-5"/></svg></span>
+      <b>اختر صورة أو فيديو</b>
+      <small>الحد الأقصى حسب نوع المحتوى</small>
     </label>
-    <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا..."></textarea>
+    <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا للمحتوى..."></textarea>
     <div id="uploadProgress" class="progress hidden"><div></div></div>
-    <button id="submitComposer" class="primary">نشر</button>
-    <button id="cancelComposer">إلغاء</button>
+    <button id="submitComposer" class="primary" type="button">نشر الآن</button>
+    <button id="cancelComposer" class="secondary-wide" type="button">إلغاء</button>
     <p id="composerMessage" class="message"></p>
   </dialog>
 
   <dialog id="notificationsDialog" class="panel-dialog">
-    <div class="dialog-head"><h3>الإشعارات</h3><button id="closeNotifications">إغلاق</button></div>
-    <div id="notificationsList" class="list"></div>
+    <div class="dialog-head"><div><span class="eyebrow">نشاطك</span><h3>الإشعارات</h3></div><button id="closeNotifications" class="close-btn" aria-label="إغلاق">×</button></div>
+    <div id="notificationsList" class="list notification-list"></div>
   </dialog>
 
   <dialog id="chatDialog" class="panel-dialog chat-dialog">
-    <div class="dialog-head"><h3 id="chatTitle">المحادثة</h3><button id="closeChat">إغلاق</button></div>
+    <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3></div><button id="closeChat" class="close-btn" aria-label="إغلاق">×</button></div>
     <div id="chatMessages" class="chat-messages"></div>
     <form id="chatForm" class="chat-form">
       <input id="chatInput" maxlength="4000" placeholder="اكتب رسالة...">
-      <button class="primary" type="submit">إرسال</button>
+      <button class="send-button" type="submit" aria-label="إرسال">
+        <svg viewBox="0 0 24 24"><path d="m4 4 17 8-17 8 4-8Z"/><path d="M8 12h13"/></svg>
+      </button>
     </form>
   </dialog>
 
   <dialog id="systemDialog" class="panel-dialog system-dialog">
     <div class="dialog-body system-message">
-      <div class="brand-mark small">𒀸</div>
+      <img src="./assets/logo.svg" class="system-logo" alt="">
       <h3 id="systemTitle">آشور</h3>
       <p id="systemMessage"></p>
       <a id="systemPrimary" class="primary hidden" target="_blank" rel="noopener">تحديث التطبيق</a>
-      <button id="systemLater" class="small-button hidden" type="button">لاحقًا</button>
+      <button id="systemLater" class="secondary-wide hidden" type="button">لاحقًا</button>
     </div>
   </dialog>
 
   <dialog id="commentsDialog" class="panel-dialog chat-dialog">
-    <div class="dialog-head"><h3>التعليقات</h3><button id="closeComments">إغلاق</button></div>
-    <div id="commentsList" class="chat-messages"></div>
+    <div class="dialog-head"><div><span class="eyebrow">التفاعل</span><h3>التعليقات</h3></div><button id="closeComments" class="close-btn" aria-label="إغلاق">×</button></div>
+    <div id="commentsList" class="chat-messages comments-list"></div>
     <form id="commentForm" class="chat-form">
       <input id="commentInput" maxlength="2000" placeholder="اكتب تعليقًا...">
-      <button class="primary" type="submit">إرسال</button>
+      <button class="send-button" type="submit" aria-label="إرسال"><svg viewBox="0 0 24 24"><path d="m4 4 17 8-17 8 4-8Z"/><path d="M8 12h13"/></svg></button>
     </form>
   </dialog>
 
   <dialog id="newConversationDialog" class="panel-dialog">
-    <div class="dialog-head"><h3>محادثة جديدة</h3><button id="closeNewConversation">إغلاق</button></div>
+    <div class="dialog-head"><div><span class="eyebrow">تواصل</span><h3>محادثة جديدة</h3></div><button id="closeNewConversation" class="close-btn" aria-label="إغلاق">×</button></div>
     <div class="dialog-body">
-      <label>اسم المستخدم<input id="newConversationUsername" placeholder="اسم المستخدم"></label>
-      <button id="findConversationUser" class="primary" type="button">بحث</button>
+      <div class="search-box standalone"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="newConversationUsername" placeholder="اكتب اسم المستخدم"></div>
+      <button id="findConversationUser" class="primary" type="button">بحث عن الحساب</button>
       <div id="newConversationResult" class="list"></div>
     </div>
   </dialog>
 
   <dialog id="editProfileDialog" class="panel-dialog">
-    <div class="dialog-head"><h3>تعديل الحساب</h3><button id="closeEditProfile">إغلاق</button></div>
+    <div class="dialog-head"><div><span class="eyebrow">حسابك</span><h3>تعديل الملف الشخصي</h3></div><button id="closeEditProfile" class="close-btn" aria-label="إغلاق">×</button></div>
     <form id="editProfileForm" class="dialog-body form">
-      <label>الاسم<input id="editName" maxlength="80" required></label>
-      <label>اسم المستخدم<input id="editUsername" maxlength="24" required autocapitalize="none"></label>
-      <label>نبذة<textarea id="editBio" maxlength="300"></textarea></label>
-      <label class="check-line"><input id="editPrivate" type="checkbox"> حساب خاص</label>
-      <label class="file-drop">
-        <input id="editAvatarFile" type="file" accept="image/*">
-        <span>تغيير صورة الحساب</span>
-      </label>
+      <div class="edit-media-grid">
+        <label class="media-picker cover-picker"><input id="editCoverFile" type="file" accept="image/*"><span>تغيير الغلاف</span></label>
+        <label class="media-picker avatar-picker"><input id="editAvatarFile" type="file" accept="image/*"><span>تغيير الصورة</span></label>
+      </div>
+      <label><span>الاسم</span><input id="editName" maxlength="80" required></label>
+      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="24" required autocapitalize="none"></label>
+      <label><span>نبذة</span><textarea id="editBio" maxlength="300" placeholder="اكتب نبذة قصيرة عنك"></textarea></label>
+      <label><span>الرابط</span><input id="editProfileLink" maxlength="220" placeholder="رابط موقعك أو حسابك"></label>
+      <label class="switch-row"><span><b>حساب خاص</b><small>المتابعة تحتاج موافقتك</small></span><input id="editPrivate" type="checkbox"></label>
       <button class="primary" type="submit">حفظ التعديلات</button>
       <p id="editProfileMessage" class="message"></p>
     </form>
   </dialog>
 
   <dialog id="settingsDialog" class="panel-dialog">
-    <div class="dialog-head"><h3>الإعدادات</h3><button id="closeSettings">إغلاق</button></div>
-    <form id="notificationSettingsForm" class="dialog-body form">
-      <h4>الإشعارات</h4>
-      <label class="check-line"><input id="notifyMessages" type="checkbox"> الرسائل</label>
-      <label class="check-line"><input id="notifyGroups" type="checkbox"> المجموعات</label>
-      <label class="check-line"><input id="notifyLikes" type="checkbox"> الإعجابات</label>
-      <label class="check-line"><input id="notifyComments" type="checkbox"> التعليقات</label>
-      <label class="check-line"><input id="notifyFollows" type="checkbox"> المتابعات</label>
-      <label class="check-line"><input id="notifyStories" type="checkbox"> القصص</label>
-      <label class="check-line"><input id="notifySystem" type="checkbox"> إشعارات النظام</label>
-      <label class="check-line"><input id="notifyPreview" type="checkbox"> معاينة نص الرسالة</label>
-      <button class="primary" type="submit">حفظ الإعدادات</button>
+    <div class="dialog-head"><div><span class="eyebrow">التحكم</span><h3>الإعدادات</h3></div><button id="closeSettings" class="close-btn" aria-label="إغلاق">×</button></div>
+    <form id="notificationSettingsForm" class="dialog-body form settings-form">
+      <div class="settings-group">
+        <h4>الإشعارات</h4>
+        <label class="switch-row"><span><b>الرسائل</b><small>الرسائل الخاصة الجديدة</small></span><input id="notifyMessages" type="checkbox"></label>
+        <label class="switch-row"><span><b>المجموعات</b><small>تنبيهات المجموعات</small></span><input id="notifyGroups" type="checkbox"></label>
+        <label class="switch-row"><span><b>الإعجابات</b><small>إعجابات المنشورات والريلز</small></span><input id="notifyLikes" type="checkbox"></label>
+        <label class="switch-row"><span><b>التعليقات</b><small>التعليقات والردود</small></span><input id="notifyComments" type="checkbox"></label>
+        <label class="switch-row"><span><b>المتابعات</b><small>المتابعات والطلبات</small></span><input id="notifyFollows" type="checkbox"></label>
+        <label class="switch-row"><span><b>القصص</b><small>تفاعلات القصص</small></span><input id="notifyStories" type="checkbox"></label>
+        <label class="switch-row"><span><b>إشعارات النظام</b><small>التحديثات والتنبيهات المهمة</small></span><input id="notifySystem" type="checkbox"></label>
+        <label class="switch-row"><span><b>معاينة الرسالة</b><small>إظهار جزء من النص في الإشعار</small></span><input id="notifyPreview" type="checkbox"></label>
+      </div>
+      <button class="primary" type="submit">حفظ إعدادات الإشعارات</button>
     </form>
-    <div class="dialog-body">
-      <h4>طلبات المتابعة</h4>
+    <div class="dialog-body follow-requests">
+      <div class="settings-group-title"><div><span class="eyebrow">الخصوصية</span><h4>طلبات المتابعة</h4></div></div>
       <div id="followRequestsList" class="list compact"></div>
     </div>
   </dialog>

@@ -1827,6 +1827,12 @@
     }
   }
 
+  let messagesSearchTimer;
+  $("#messagesSearchInput").oninput=()=>{
+    clearTimeout(messagesSearchTimer);
+    messagesSearchTimer=setTimeout(()=>loadConversations(),180);
+  };
+
   $("#newMessageButton").onclick=()=>{
     $("#newConversationUsername").value="";
     $("#newConversationResult").innerHTML="";
@@ -2100,46 +2106,87 @@
   }
 
   $("#blockedAccountsButton").onclick=async()=>{
-    const {data,error}=await client.from("blocks")
-      .select("blocked_id,created_at")
-      .eq("blocker_id",state.user.id)
-      .order("created_at",{ascending:false});
-    if(error){
-      return openInfoDialog("الحسابات المحظورة",'<div class="empty error">تعذر تحميل القائمة.</div>');
+    try{
+      const result=await api("/v1/social/blocked");
+      const html=(result.items||[]).map(p=>
+        '<div class="list-card">'+avatar(p)+
+        '<div class="grow"><b>'+escapeHtml(p.name||"مستخدم")+'</b><div>@'+escapeHtml(p.username||"")+'</div></div>'+
+        '<button class="small-button" data-unblock="'+escapeHtml(p.id)+'" type="button">رفع الحظر</button></div>'
+      ).join("")||'<div class="empty">لا توجد حسابات محظورة.</div>';
+      openInfoDialog("الحسابات المحظورة",'<div id="blockedList" class="list compact">'+html+'</div>');
+      await hydrateMedia($("#infoDialogBody"));
+      $("#infoDialogBody").querySelectorAll("[data-unblock]").forEach(btn=>btn.onclick=async()=>{
+        try{
+          await api("/v1/social/block/"+btn.dataset.unblock,{method:"POST",body:JSON.stringify({blocked:false})});
+          btn.closest(".list-card")?.remove();
+          if(!$("#blockedList").children.length)$("#blockedList").innerHTML='<div class="empty">لا توجد حسابات محظورة.</div>';
+        }catch(error){alert(error.message)}
+      });
+    }catch(error){
+      openInfoDialog("الحسابات المحظورة",'<div class="empty error">'+escapeHtml(error.message)+'</div>');
     }
-    const profiles=await profilesMap((data||[]).map(x=>x.blocked_id));
-    const html=(data||[]).map(row=>{
-      const p=profiles[row.blocked_id]||{};
-      return `<div class="list-card">
-        ${avatar(p)}
-        <div class="grow"><b>${escapeHtml(p.name||"مستخدم")}</b><div>@${escapeHtml(p.username||"")}</div></div>
-        <button class="small-button" data-unblock="${row.blocked_id}" type="button">رفع الحظر</button>
-      </div>`;
-    }).join("")||'<div class="empty">لا توجد حسابات محظورة.</div>';
-    openInfoDialog("الحسابات المحظورة",`<div id="blockedList" class="list compact">${html}</div>`);
-    await hydrateMedia($("#infoDialogBody"));
-    $("#infoDialogBody").querySelectorAll("[data-unblock]").forEach(btn=>btn.onclick=async()=>{
-      const {error:removeError}=await client.from("blocks")
-        .delete()
-        .eq("blocker_id",state.user.id)
-        .eq("blocked_id",btn.dataset.unblock);
-      if(!removeError)btn.closest(".list-card")?.remove();
-    });
   };
 
   $("#securitySessionsButton").onclick=()=>{
     const email=state.user?.email||"غير متوفر";
-    openInfoDialog("الأمان والجلسات",`
-      <div class="settings-info">
-        <div class="info-row"><span>البريد الحالي</span><b>${escapeHtml(email)}</b></div>
-        <div class="info-row"><span>حالة الجلسة</span><b>نشطة</b></div>
-        <button id="globalSignOutButton" class="danger-wide" type="button">تسجيل الخروج من جميع الأجهزة</button>
-      </div>`);
+    openInfoDialog("الأمان والجلسات",
+      '<div class="settings-info">'+
+        '<div class="info-row"><span>البريد الحالي</span><b>'+escapeHtml(email)+'</b></div>'+
+        '<div class="info-row"><span>حالة الجلسة</span><b>نشطة</b></div>'+
+        '<div class="settings-group"><h4>تغيير كلمة المرور</h4>'+
+          '<label><span>كلمة المرور الجديدة</span><input id="securityPassword1" type="password" minlength="8" autocomplete="new-password"></label>'+
+          '<label><span>تأكيد كلمة المرور</span><input id="securityPassword2" type="password" minlength="8" autocomplete="new-password"></label>'+
+          '<button id="changePasswordButton" class="primary" type="button">تغيير كلمة المرور</button>'+
+        '</div>'+
+        '<div class="settings-group"><h4>تغيير البريد</h4>'+
+          '<label><span>البريد الجديد</span><input id="securityEmail" type="email" autocomplete="email" placeholder="name@example.com"></label>'+
+          '<button id="changeEmailButton" class="secondary-wide" type="button">إرسال طلب تغيير البريد</button>'+
+        '</div>'+
+        '<button id="globalSignOutButton" class="danger-wide" type="button">تسجيل الخروج من جميع الأجهزة</button>'+
+        '<p id="securityMessage" class="message"></p>'+
+      '</div>');
+    $("#changePasswordButton").onclick=async()=>{
+      const p1=$("#securityPassword1").value;
+      const p2=$("#securityPassword2").value;
+      if(p1.length<8)return $("#securityMessage").textContent="كلمة المرور يجب ألا تقل عن ٨ أحرف.";
+      if(p1!==p2)return $("#securityMessage").textContent="كلمتا المرور غير متطابقتين.";
+      $("#changePasswordButton").disabled=true;
+      const {error}=await client.auth.updateUser({password:p1});
+      $("#changePasswordButton").disabled=false;
+      $("#securityMessage").textContent=error?error.message:"تم تغيير كلمة المرور.";
+    };
+    $("#changeEmailButton").onclick=async()=>{
+      const next=$("#securityEmail").value.trim();
+      if(!next)return $("#securityMessage").textContent="اكتب البريد الجديد.";
+      $("#changeEmailButton").disabled=true;
+      const {error}=await client.auth.updateUser({email:next});
+      $("#changeEmailButton").disabled=false;
+      $("#securityMessage").textContent=error?error.message:"تم إرسال طلب تغيير البريد. أكمل التحقق من البريد.";
+    };
     $("#globalSignOutButton").onclick=async()=>{
       $("#globalSignOutButton").disabled=true;
       await client.auth.signOut({scope:"global"});
       $("#infoDialog").close();
     };
+  };
+
+  $("#supportTicketsButton").onclick=()=>openSupportCenter();
+  $("#savedContentButton").onclick=()=>openSavedContent();
+  $("#deleteAccountButton").onclick=async()=>{
+    const confirmText=prompt("اكتب كلمة حذف لتأكيد حذف الحساب نهائيًا.");
+    if(confirmText!=="حذف")return;
+    if(!confirm("سيتم حذف الحساب ولن تتمكن من التراجع. هل تريد المتابعة؟"))return;
+    $("#deleteAccountButton").disabled=true;
+    try{
+      await api("/v1/account",{method:"DELETE",body:JSON.stringify({confirm:"DELETE"})});
+      await client.auth.signOut().catch(()=>{});
+      $("#settingsDialog").close();
+      showApp(false);
+      showAuthMessage("تم حذف الحساب.");
+    }catch(error){
+      alert(error.message);
+      $("#deleteAccountButton").disabled=false;
+    }
   };
 
   $("#helpButton").onclick=()=>{

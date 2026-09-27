@@ -115,6 +115,26 @@
     $("#app").classList.toggle("hidden", !loggedIn);
   }
 
+  function closeTransientDialogs(except=null){
+    document.querySelectorAll("dialog[open]").forEach(dialog=>{
+      if(dialog===except)return;
+      if(dialog.id==="systemDialog" && dialog.dataset.blocking==="1")return;
+      if(dialog.id==="chatDialog"){
+        clearInterval(state.chatTimer);
+        state.chatTimer=null;
+        state.activeConversation=null;
+      }
+      try{dialog.close()}catch(_){}
+    });
+  }
+
+  function openDialog(dialog){
+    if(!dialog)return;
+    closeTransientDialogs(dialog);
+    if(!dialog.open)openDialog(dialog);
+  }
+
+
   function compareVersions(a,b){
     const pa=String(a||"0").split(".").map(n=>Number(n)||0);
     const pb=String(b||"0").split(".").map(n=>Number(n)||0);
@@ -159,7 +179,7 @@
       $("#systemPrimary").classList.add("hidden");
       $("#systemLater").classList.add("hidden");
       $("#systemDialog").dataset.blocking="1";
-      if(!$("#systemDialog").open)$("#systemDialog").showModal();
+      if(!$("#systemDialog").open)openDialog($("#systemDialog"));
       return;
     }
 
@@ -175,7 +195,7 @@
       }
       $("#systemLater").classList.toggle("hidden",required);
       $("#systemDialog").dataset.blocking=required?"1":"0";
-      if(!$("#systemDialog").open)$("#systemDialog").showModal();
+      if(!$("#systemDialog").open)openDialog($("#systemDialog"));
       return;
     }
 
@@ -309,8 +329,9 @@
   };
 
   async function navigateTo(page){
+    closeTransientDialogs();
     $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
     }
@@ -320,7 +341,7 @@
     if(page==="profilePage")await loadProfile();
     window.scrollTo({top:0,behavior:"smooth"});
   }
-  $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $$$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){
@@ -360,7 +381,7 @@
     $("#storyViewerCaption").textContent=story.caption||"";
     $("#storyViewerMedia").innerHTML='<div class="empty">جارٍ تحميل القصة...</div>';
     $("#storyProgressBar").style.width="0%";
-    dialog.showModal();
+    openDialog(dialog);
     await hydrateMedia(user);
     try{
       const access=await mediaAccess(story.media_id);
@@ -818,7 +839,7 @@
   async function openChat(id,title){
     state.activeConversation=id;
     $("#chatTitle").textContent=title||"المحادثة";
-    $("#chatDialog").showModal();
+    openDialog($("#chatDialog"));
     await loadChat();
     clearInterval(state.chatTimer);
     state.chatTimer=setInterval(()=>{
@@ -877,7 +898,12 @@
 
   async function openComments(type,id){
     state.commentTarget={type,id};
-    $("#commentsDialog").showModal();
+    if($("#chatDialog")?.open){
+      clearInterval(state.chatTimer);
+      state.chatTimer=null;
+      state.activeConversation=null;
+    }
+    openDialog($("#commentsDialog"));
     await loadComments();
   }
 
@@ -1020,7 +1046,7 @@
         </div>
       </div>`;
     await hydrateMedia($("#publicProfileCard"));
-    $("#publicProfileDialog").showModal();
+    openDialog($("#publicProfileDialog"));
     $("#publicFollowButton").onclick=()=>followUser(uid,$("#publicFollowButton"));
     $("#publicMessageButton").onclick=async()=>{
       try{
@@ -1042,7 +1068,7 @@
     const badge=$("#notificationBadge"); badge.textContent=count||0; badge.classList.toggle("hidden",!count);
   }
   $("#notificationsButton").onclick=async()=>{
-    $("#notificationsDialog").showModal();
+    openDialog($("#notificationsDialog"));
     const {data}=await client.from("notifications").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}).limit(100);
     $("#notificationsList").innerHTML=(data||[]).map(n=>`<div class="list-card"><div class="grow"><b>${escapeHtml(n.title)}</b><div>${escapeHtml(n.body)}</div></div></div>`).join("")||'<div class="empty">لا توجد إشعارات.</div>';
     await client.from("notifications").update({read_at:new Date().toISOString()}).eq("user_id",state.user.id).is("read_at",null);
@@ -1050,14 +1076,14 @@
   };
   $("#closeNotifications").onclick=()=>$("#notificationsDialog").close();
 
-  $("#publishButton").onclick=()=>$("#publishDialog").showModal();
+  $("#publishButton").onclick=()=>openDialog($("#publishDialog"));
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
   function openComposer(type){
     state.composerType=type; $("#publishDialog").close();
     $("#composerTitle").textContent=type==="story"?"إنشاء قصة":type==="reel"?"إنشاء ريلز":"إنشاء منشور";
     $("#composerFile").accept=type==="reel"?"video/*":"image/*,video/*";
-    $("#composerMessage").textContent=""; $("#composerDialog").showModal();
+    $("#composerMessage").textContent=""; openDialog($("#composerDialog"));
   }
   $("#cancelComposer").onclick=()=>$("#composerDialog").close();
 
@@ -1129,7 +1155,7 @@
   $("#newMessageButton").onclick=()=>{
     $("#newConversationUsername").value="";
     $("#newConversationResult").innerHTML="";
-    $("#newConversationDialog").showModal();
+    openDialog($("#newConversationDialog"));
   };
   $("#closeNewConversation").onclick=()=>$("#newConversationDialog").close();
 
@@ -1175,7 +1201,7 @@
     $("#editAvatarFile").value="";
     $("#editCoverFile").value="";
     $("#editProfileMessage").textContent="";
-    $("#editProfileDialog").showModal();
+    openDialog($("#editProfileDialog"));
   }
   $("#closeEditProfile").onclick=()=>$("#editProfileDialog").close();
   $("#editProfileForm").onsubmit=async(e)=>{
@@ -1237,7 +1263,7 @@
     $("#notifySystem").checked=p.system!==false;
     $("#notifyPreview").checked=p.preview_message!==false;
     await loadFollowRequests();
-    $("#settingsDialog").showModal();
+    openDialog($("#settingsDialog"));
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
   $("#settingsLogoutButton").onclick=async()=>{
@@ -1255,7 +1281,7 @@
     $("#infoDialogTitle").textContent=title;
     $("#infoDialogBody").innerHTML=html;
     $("#settingsDialog").close();
-    $("#infoDialog").showModal();
+    openDialog($("#infoDialog"));
   }
   $("#closeInfoDialog").onclick=()=>$("#infoDialog").close();
 

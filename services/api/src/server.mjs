@@ -155,6 +155,22 @@ async function adminFor(userId) {
   return rows?.[0] || null;
 }
 
+const ADMIN_ROLE_PERMISSIONS = {
+  moderator: new Set(["analytics", "users", "reports"]),
+  content_moderator: new Set(["analytics", "content", "reports"]),
+  support: new Set(["analytics", "support", "users"]),
+  analyst: new Set(["analytics"]),
+};
+
+function adminHasPermission(admin, permission) {
+  if (!admin || !admin.active) return false;
+  if (!permission) return true;
+  if (admin.role === "owner" || admin.role === "secondary_admin") return true;
+  if (admin.permissions?.[permission] === true) return true;
+  if (admin.permissions?.[permission] === false) return false;
+  return ADMIN_ROLE_PERMISSIONS[admin.role]?.has(permission) || false;
+}
+
 async function requireAdmin(req, permission = null) {
   const user = await currentUser(req, true);
   const admin = await adminFor(user.id);
@@ -163,16 +179,17 @@ async function requireAdmin(req, permission = null) {
     error.statusCode = 403;
     throw error;
   }
-  if (
-    permission &&
-    admin.role !== "owner" &&
-    admin.role !== "secondary_admin" &&
-    admin.permissions?.[permission] !== true
-  ) {
+  if (!adminHasPermission(admin, permission)) {
     const error = new Error("هذه الصلاحية غير متاحة لهذا المشرف");
     error.statusCode = 403;
     throw error;
   }
+  await update(
+    "admins",
+    "user_id=eq." + encodeURIComponent(user.id),
+    { last_active_at: new Date().toISOString() },
+    { returning: false },
+  ).catch(() => {});
   return { user, admin };
 }
 

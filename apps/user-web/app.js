@@ -1037,21 +1037,24 @@
   async function loadConversations(){
     try{
       const list=await api("/v1/conversations");
-      $("#conversationList").innerHTML=(list.items||[]).map(row=>{
+      const query=($("#messagesSearchInput")?.value||"").trim().toLowerCase();
+      const items=(list.items||[]).filter(row=>{
+        if(!query)return true;
+        return String(row.title||"").toLowerCase().includes(query) ||
+          String(row.last_message||"").toLowerCase().includes(query);
+      });
+      $("#conversationList").innerHTML=items.map(row=>{
         const p=row.peer_profile||{};
-        return `<button class="conversation-item" data-conversation="${row.id}" data-title="${escapeHtml(row.title||"محادثة")}" type="button">
-          ${p.avatar_media_id
-            ? `<img class="conversation-avatar" data-media-id="${p.avatar_media_id}" alt="">`
-            : `<div class="conversation-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">${initials(row.title||"م")}</div>`}
-          <div class="conversation-main">
-            <div class="conversation-title-row">
-              <b>${escapeHtml(row.title||"محادثة")}</b>
-              <time>${row.updated_at?new Date(row.updated_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"}):""}</time>
-            </div>
-            <div class="conversation-preview">${escapeHtml(row.last_message||"ابدأ المحادثة")}</div>
-          </div>
-        </button>`;
-      }).join("")||'<div class="empty">لا توجد محادثات بعد.</div>';
+        const avatarHtml=p.avatar_media_id
+          ? '<img class="conversation-avatar" data-media-id="'+escapeHtml(p.avatar_media_id)+'" alt="">'
+          : '<div class="conversation-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">'+initials(row.title||"م")+'</div>';
+        const unread=row.unread_count?'<span class="conversation-unread">'+Number(row.unread_count||0)+'</span>':"";
+        const updated=row.updated_at?new Date(row.updated_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"}):"";
+        return '<button class="conversation-item" data-conversation="'+escapeHtml(row.id)+'" data-title="'+escapeHtml(row.title||"محادثة")+'" type="button">'+
+          avatarHtml+
+          '<div class="conversation-main"><div class="conversation-title-row"><b>'+escapeHtml(row.title||"محادثة")+unread+'</b><time>'+updated+'</time></div>'+
+          '<div class="conversation-preview">'+escapeHtml(row.last_message||"ابدأ المحادثة")+'</div></div></button>';
+      }).join("")||'<div class="empty">لا توجد محادثات مطابقة.</div>';
       await hydrateMedia($("#conversationList"));
       $("#conversationList").querySelectorAll("[data-conversation]").forEach(b=>b.onclick=()=>openChat(b.dataset.conversation,b.dataset.title));
     }catch(e){
@@ -1059,63 +1062,179 @@
     }
   }
 
+  function closeChatRealtime(){
+    clearInterval(state.chatTimer);
+    state.chatTimer=null;
+    if(state.chatChannel){
+      try{client.removeChannel(state.chatChannel)}catch(_){try{state.chatChannel.unsubscribe?.()}catch(__){}}
+      state.chatChannel=null;
+    }
+  }
+
+  function subscribeChatRealtime(){
+    closeChatRealtime();
+    if(!state.activeConversation)return;
+    const conversationId=state.activeConversation;
+    state.chatChannel=client.channel("ashur-chat-"+conversationId)
+      .on("postgres_changes",{
+        event:"*",
+        schema:"public",
+        table:"messages",
+        filter:"conversation_id=eq."+conversationId
+      },()=>loadChat({quiet:true}))
+      .on("postgres_changes",{
+        event:"*",
+        schema:"public",
+        table:"message_reads"
+      },()=>loadChat({quiet:true,markRead:false}))
+      .subscribe(status=>{
+        if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"){
+          clearInterval(state.chatTimer);
+          state.chatTimer=setInterval(()=>{
+            if($("#chatDialog").open&&state.activeConversation)loadChat({quiet:true});
+          },8000);
+        }
+      });
+  }
+
   async function openChat(id,title){
     state.activeConversation=id;
     $("#chatTitle").textContent=title||"المحادثة";
+    clearChatAttachment();
     openDialog($("#chatDialog"));
     await loadChat();
-    clearInterval(state.chatTimer);
-    state.chatTimer=setInterval(()=>{
-      if($("#chatDialog").open && state.activeConversation)loadChat({quiet:true});
-    },3000);
+    subscribeChatRealtime();
   }
 
-  async function loadChat({quiet=false}={}){
+  async function loadChat({quiet=false,markRead=true}={}){
     if(!state.activeConversation)return;
+    const conversationId=state.activeConversation;
     const {data,error}=await client.from("messages")
-      .select("id,sender_id,body,created_at")
-      .eq("conversation_id",state.activeConversation)
+      .select("id,sender_id,body,media_id,reply_to,created_at")
+      .eq("conversation_id",conversationId)
       .eq("is_deleted",false)
       .order("created_at")
-      .limit(150);
+      .limit(200);
     if(error){
-      if(!quiet)$("#chatMessages").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      if(!quiet)$("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
       return;
     }
-    const html=(data||[]).map(m=>`<div class="message-row ${m.sender_id===state.user.id?"mine":"other"}">
-      <div class="bubble">${escapeHtml(m.body)}</div>
-      <time>${new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})}</time>
-    </div>`).join("")||'<div class="empty">ابدأ المحادثة برسالة.</div>';
+    if(conversationId!==state.activeConversation)return;
+
+    const ownIds=(data||[]).filter(m=>m.sender_id===state.user.id).map(m=>m.id);
+    const otherUnread=(data||[]).filter(m=>m.sender_id!==state.user.id).map(m=>m.id);
+    let readSet=new Set();
+    if(ownIds.length){
+      const {data:reads}=await client.from("message_reads")
+        .select("message_id,user_id")
+        .in("message_id",ownIds);
+      readSet=new Set((reads||[]).filter(r=>r.user_id!==state.user.id).map(r=>r.message_id));
+    }
+
+    const byId=new Map((data||[]).map(m=>[m.id,m]));
+    const html=(data||[]).map(m=>{
+      const parent=m.reply_to?byId.get(m.reply_to):null;
+      const media=m.media_id?'<img class="chat-media" data-media-id="'+escapeHtml(m.media_id)+'" alt="مرفق">':"";
+      const body=m.body?'<div>'+escapeHtml(m.body)+'</div>':"";
+      const parentHtml=parent?'<div class="comment-parent">'+escapeHtml(parent.body||"مرفق")+'</div>':"";
+      const read=m.sender_id===state.user.id&&readSet.has(m.id)?'<span class="message-read">تمت القراءة</span>':"";
+      return '<div class="message-row '+(m.sender_id===state.user.id?"mine":"other")+'"><div class="bubble">'+parentHtml+media+body+
+        '</div><time>'+new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+read+'</div>';
+    }).join("")||'<div class="empty">ابدأ المحادثة برسالة.</div>';
+
+    const nearBottom=$("#chatMessages").scrollHeight-$("#chatMessages").scrollTop-$("#chatMessages").clientHeight<80;
     if($("#chatMessages").innerHTML!==html){
-      const nearBottom=$("#chatMessages").scrollHeight-$("#chatMessages").scrollTop-$("#chatMessages").clientHeight<80;
       $("#chatMessages").innerHTML=html;
+      await hydrateMedia($("#chatMessages"));
       if(nearBottom||!quiet)$("#chatMessages").scrollTop=$("#chatMessages").scrollHeight;
     }
+
+    if(markRead&&otherUnread.length){
+      api("/v1/social/message-read",{
+        method:"POST",
+        body:JSON.stringify({message_ids:otherUnread})
+      }).catch(()=>{});
+    }
   }
+
+  function clearChatAttachment(){
+    if(state.chatPreviewUrl){
+      URL.revokeObjectURL(state.chatPreviewUrl);
+      state.chatPreviewUrl=null;
+    }
+    if($("#chatFile"))$("#chatFile").value="";
+    if($("#chatAttachmentPreview")){
+      $("#chatAttachmentPreview").innerHTML="";
+      $("#chatAttachmentPreview").classList.add("hidden");
+    }
+  }
+
+  $("#chatFile").onchange=()=>{
+    const file=$("#chatFile").files[0];
+    if(state.chatPreviewUrl){
+      URL.revokeObjectURL(state.chatPreviewUrl);
+      state.chatPreviewUrl=null;
+    }
+    $("#chatAttachmentPreview").innerHTML="";
+    $("#chatAttachmentPreview").classList.add("hidden");
+    if(!file)return;
+    const max=Number(state.limits.chat_video_mb||50)*1024*1024;
+    if(file.size>max){
+      $("#chatAttachmentPreview").textContent="الملف أكبر من الحد المسموح.";
+      $("#chatAttachmentPreview").classList.remove("hidden");
+      $("#chatFile").value="";
+      return;
+    }
+    state.chatPreviewUrl=URL.createObjectURL(file);
+    const preview=file.type.startsWith("image/")
+      ?'<img src="'+state.chatPreviewUrl+'" alt="">'
+      :file.type.startsWith("video/")
+        ?'<video src="'+state.chatPreviewUrl+'" muted playsinline></video>'
+        :'<span>'+escapeHtml(file.name)+'</span>';
+    $("#chatAttachmentPreview").innerHTML=preview+'<div class="grow"><b>'+escapeHtml(file.name)+'</b><small>'+((file.size/1024/1024).toFixed(1))+' MB</small></div><button id="removeChatAttachment" class="small-button" type="button">إزالة</button>';
+    $("#chatAttachmentPreview").classList.remove("hidden");
+    $("#removeChatAttachment").onclick=clearChatAttachment;
+  };
 
   $("#chatForm").onsubmit=async(e)=>{
     e.preventDefault();
     const body=$("#chatInput").value.trim();
-    if(!body||!state.activeConversation)return;
+    const file=$("#chatFile").files[0];
+    if((!body&&!file)||!state.activeConversation)return;
     const submit=$("#chatForm button[type='submit']");
     submit.disabled=true;
-    const {error}=await client.from("messages").insert({
-      conversation_id:state.activeConversation,
-      sender_id:state.user.id,
-      body
-    });
-    submit.disabled=false;
-    if(!error){
+    try{
+      let mediaId=null;
+      if(file){
+        const kind=file.type.startsWith("image/")?"chat_image":
+          file.type.startsWith("video/")?"chat_video":
+          file.type.startsWith("audio/")?"chat_audio":"chat_file";
+        const media=await uploadFile(file,kind,{silent:true});
+        mediaId=media.id;
+      }
+      const {error}=await client.from("messages").insert({
+        conversation_id:state.activeConversation,
+        sender_id:state.user.id,
+        body:body||"",
+        media_id:mediaId
+      });
+      if(error)throw error;
       $("#chatInput").value="";
+      clearChatAttachment();
       await loadChat();
       loadConversations();
+    }catch(error){
+      $("#chatAttachmentPreview").innerHTML='<span class="error">'+escapeHtml(error.message)+'</span>';
+      $("#chatAttachmentPreview").classList.remove("hidden");
+    }finally{
+      submit.disabled=false;
     }
   };
 
   $("#closeChat").onclick=()=>{
-    clearInterval(state.chatTimer);
-    state.chatTimer=null;
+    closeChatRealtime();
     state.activeConversation=null;
+    clearChatAttachment();
     $("#chatDialog").close();
   };
 

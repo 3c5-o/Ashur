@@ -663,6 +663,39 @@ async function resolveReport(req, res, reportId) {
   json(res, 200, { ok: true });
 }
 
+async function addAdmin(req, res) {
+  const actor = await requireAdmin(req, "admins");
+  const body = await readJson(req);
+  const userId = String(body.user_id || "").trim();
+  const role = String(body.role || "").trim();
+  const allowed = ["secondary_admin","moderator","content_moderator","support","analyst"];
+  if (!/^[0-9a-f-]{36}$/.test(userId)) return json(res, 400, { error: "معرف المستخدم غير صالح" });
+  if (!allowed.includes(role)) return json(res, 400, { error: "الدور غير صالح" });
+
+  const profiles = await select(
+    "profiles",
+    `select=id,name,username&id=eq.${encodeURIComponent(userId)}&limit=1`,
+  );
+  if (!profiles?.[0]) return json(res, 404, { error: "الحساب غير موجود" });
+
+  const rows = await upsert("admins", {
+    user_id: userId,
+    role,
+    permissions: body.permissions || {},
+    active: true,
+  }, "user_id");
+
+  await insert("audit_logs", {
+    actor_user_id: actor.user.id,
+    action: "add_admin",
+    target_type: "admin",
+    target_id: userId,
+    details: { role },
+  }, { returning: false }).catch(() => {});
+
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
 async function adminAdmins(req, res) {
   await requireAdmin(req, "admins");
   const items = await select(
@@ -936,8 +969,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/admin/channels") {
       return adminChannels(req, res);
     }
-    if (req.method === "GET" && url.pathname === "/v1/admin/admins") {
-      return adminAdmins(req, res);
+    if (url.pathname === "/v1/admin/admins") {
+      if (req.method === "GET") return adminAdmins(req, res);
+      if (req.method === "POST") return addAdmin(req, res);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/audit") {
       return adminAudit(req, res);

@@ -13,7 +13,9 @@
     activeConversation:null,
     commentTarget:null,
     stories:new Map(),
-    profileTab:"posts"
+    profileTab:"posts",
+    features:{},
+    limits:{}
   };
 
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
@@ -126,11 +128,25 @@
   async function checkRuntimeSettings(){
     const {data,error}=await client.from("app_settings")
       .select("key,value")
-      .in("key",["maintenance","version"]);
+      .in("key",["maintenance","version","features","limits"]);
     if(error)return;
     const settings=Object.fromEntries((data||[]).map(x=>[x.key,x.value]));
     const maintenance=settings.maintenance||{};
     const version=settings.version||{};
+    state.features=settings.features||{};
+    state.limits=settings.limits||{};
+    cfg.maxUploadMb=Math.min(Number(state.limits.max_upload_mb||60),60);
+
+    const setFeature=(page,key)=>{
+      const nav=$(`.nav-item[data-page="${page}"]`);
+      if(nav)nav.classList.toggle("hidden",state.features[key]===false);
+    };
+    setFeature("reelsPage","reels");
+    setFeature("messagesPage","messages");
+    $("#publishButton").classList.toggle("hidden",state.features.uploads===false);
+    $("#registerTab").classList.toggle("hidden",state.features.registration===false);
+    $(".home-intro").classList.toggle("stories-disabled",state.features.stories===false);
+
     const current=cfg.appVersion||"1.0.0";
     const required=Boolean(version.required) ||
       (version.minimum && compareVersions(current,version.minimum)<0);
@@ -269,7 +285,10 @@
 
   async function loadHome(){
     $("#homeStatus").textContent="جارٍ تحميل أحدث المحتوى...";
-    await Promise.all([loadStories(),loadFeed()]);
+    const tasks=[loadFeed()];
+    if(state.features.stories!==false)tasks.push(loadStories());
+    else $("#stories").innerHTML="";
+    await Promise.all(tasks);
     $("#homeStatus").textContent="";
   }
 
@@ -659,7 +678,12 @@
   $("#submitComposer").onclick=async()=>{
     const file=$("#composerFile").files[0], caption=$("#composerCaption").value.trim();
     if(!file)return $("#composerMessage").textContent="اختر ملفًا أولًا";
-    if(file.size>cfg.maxUploadMb*1024*1024)return $("#composerMessage").textContent=`الحد الأقصى ${cfg.maxUploadMb} ميغابايت`;
+    const uploadLimit=state.composerType==="story"
+      ?Number(state.limits.story_mb||30)
+      :file.type.startsWith("image/")
+        ?Number(state.limits.image_mb||10)
+        :Number(state.limits.max_upload_mb||cfg.maxUploadMb||60);
+    if(file.size>uploadLimit*1024*1024)return $("#composerMessage").textContent=`الحد الأقصى ${uploadLimit} ميغابايت`;
     $("#submitComposer").disabled=true; $("#composerMessage").textContent="جارٍ الرفع...";
     try{
       const kind=state.composerType==="reel"?"reel":state.composerType==="story"?"story":file.type.startsWith("video/")?"post_video":"post_image";

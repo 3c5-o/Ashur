@@ -294,47 +294,129 @@ async function loadUsers(){
   }catch(e){$("#usersList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
+let currentContentKind="posts";
+let contentTimer;
 $$("[data-content-kind]").forEach(b=>b.onclick=()=>{
   $$("[data-content-kind]").forEach(x=>x.classList.remove("active"));
   b.classList.add("active");
-  loadContent(b.dataset.contentKind)
+  currentContentKind=b.dataset.contentKind;
+  loadContent(currentContentKind);
 });
-async function loadContent(kind){
+$("#contentSearch").oninput=()=>{clearTimeout(contentTimer);contentTimer=setTimeout(()=>loadContent(currentContentKind),250)};
+$("#contentStatus").onchange=()=>loadContent(currentContentKind);
+
+async function loadContent(kind=currentContentKind,authorId=""){
+  currentContentKind=kind;
   try{
-    const d=await api("/v1/admin/content?kind="+encodeURIComponent(kind));
+    const params=new URLSearchParams({kind});
+    const q=$("#contentSearch")?.value.trim();
+    const status=$("#contentStatus")?.value;
+    if(q)params.set("q",q);
+    if(status)params.set("status",status);
+    if(authorId)params.set("author_id",authorId);
+    const d=await api("/v1/admin/content?"+params.toString());
     const kindLabel={posts:"منشور",reels:"ريلز",stories:"قصة"}[kind]||"محتوى";
-    $("#contentList").innerHTML=(d.items||[]).map(x=>`
-      <div class="row-card">
-        <div class="grow">
-          <b>${esc(x.caption||kindLabel)}</b>
-          <div class="meta">${kindLabel} · ${new Date(x.created_at).toLocaleString("ar-IQ")} · ${esc(x.id)}</div>
-        </div>
-        <button class="small" data-delete-content="${x.id}" data-kind="${kind}">حذف</button>
-      </div>`).join("")||'<div class="panel">لا يوجد محتوى.</div>';
+    $("#contentList").innerHTML=(d.items||[]).map(x=>{
+      const author=x.author||{};
+      const media=(x.media_ids||[])[0];
+      const status=x.moderation_status||"active";
+      return '<div class="moderation-card">'+
+        (media?'<img class="moderation-media" data-media-id="'+esc(media)+'" alt="">':'<div class="moderation-media placeholder">بدون معاينة</div>')+
+        '<div class="moderation-body grow">'+
+          '<div class="moderation-head"><div><b>'+esc(x.caption||kindLabel)+'</b><div class="meta">@'+esc(author.username||"")+' · '+new Date(x.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(status)+'">'+statusLabel(status)+'</span></div>'+
+          '<div class="meta mono">'+esc(x.id)+'</div>'+
+          '<div class="admin-actions">'+
+            '<button class="small" data-open-author="'+esc(x.author_id)+'" type="button">الحساب</button>'+
+            '<button class="small" data-moderate="'+esc(x.id)+'" data-kind="'+kind+'" data-status="'+esc(status)+'" type="button">'+(status==="hidden"?"استعادة":"إخفاء")+'</button>'+
+            (kind!=="stories"?'<button class="small" data-comments-toggle="'+esc(x.id)+'" data-kind="'+kind+'" data-enabled="'+String(x.comments_enabled!==false)+'" type="button">'+(x.comments_enabled===false?"فتح التعليقات":"إغلاق التعليقات")+'</button>':"")+
+            '<button class="small danger" data-delete-content="'+esc(x.id)+'" data-kind="'+kind+'" type="button">حذف نهائي</button>'+
+          '</div>'+
+        '</div></div>';
+    }).join("")||'<div class="panel">لا يوجد محتوى مطابق.</div>';
+    await hydrateAdminMedia($("#contentList"));
+    $("#contentList").querySelectorAll("[data-open-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.openAuthor)});
+    $("#contentList").querySelectorAll("[data-moderate]").forEach(b=>b.onclick=async()=>{
+      const next=b.dataset.status==="hidden"?"active":"hidden";
+      const reason=next==="hidden"?(prompt("سبب إخفاء المحتوى")||""):"";
+      await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.moderate+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason})});
+      loadContent(currentContentKind);
+    });
+    $("#contentList").querySelectorAll("[data-comments-toggle]").forEach(b=>b.onclick=async()=>{
+      await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.commentsToggle+"/moderate",{
+        method:"POST",body:JSON.stringify({status:"active",comments_enabled:b.dataset.enabled!=="true"})
+      });
+      loadContent(currentContentKind);
+    });
     $("#contentList").querySelectorAll("[data-delete-content]").forEach(b=>b.onclick=async()=>{
-      if(!confirm("تأكيد حذف المحتوى؟"))return;
+      if(!confirm("هذا حذف نهائي للمحتوى. تأكيد؟"))return;
       await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.deleteContent,{method:"DELETE"});
-      loadContent(kind)
-    })
-  }catch(e){$("#contentList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+      loadContent(currentContentKind);
+    });
+  }catch(e){$("#contentList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
+let commentTimer;
+$("#commentSearch").oninput=()=>{clearTimeout(commentTimer);commentTimer=setTimeout(loadCommentsAdmin,250)};
+$("#commentStatus").onchange=loadCommentsAdmin;
+async function loadCommentsAdmin(){
+  try{
+    const params=new URLSearchParams();
+    const q=$("#commentSearch").value.trim();
+    const status=$("#commentStatus").value;
+    if(q)params.set("q",q);
+    if(status)params.set("status",status);
+    const d=await api("/v1/admin/comments?"+params.toString());
+    $("#commentsList").innerHTML=(d.items||[]).map(row=>{
+      const a=row.author||{};
+      const status=row.moderation_status||"active";
+      return '<div class="row-card">'+
+        '<div class="grow"><b>'+esc(row.body||"")+'</b><div class="meta">@'+esc(a.username||"")+' · '+new Date(row.created_at).toLocaleString("ar-IQ")+'</div><div class="meta mono">'+esc(row.id)+'</div></div>'+
+        '<span class="pill '+pillClass(status)+'">'+statusLabel(status)+'</span>'+
+        '<button class="small" data-comment-author="'+esc(row.author_id)+'" type="button">الحساب</button>'+
+        '<button class="small" data-moderate-comment="'+esc(row.id)+'" data-status="'+esc(status)+'" type="button">'+(status==="hidden"?"استعادة":"إخفاء")+'</button>'+
+      '</div>';
+    }).join("")||'<div class="panel">لا توجد تعليقات.</div>';
+    $("#commentsList").querySelectorAll("[data-comment-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.commentAuthor)});
+    $("#commentsList").querySelectorAll("[data-moderate-comment]").forEach(b=>b.onclick=async()=>{
+      const next=b.dataset.status==="hidden"?"active":"hidden";
+      await api("/v1/admin/content/comments/"+b.dataset.moderateComment+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason:next==="hidden"?(prompt("سبب الإخفاء")||""):""})});
+      loadCommentsAdmin();
+    });
+  }catch(e){$("#commentsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
+
+$("#reportStatus").onchange=loadReports;
 async function loadReports(){
   try{
     const d=await api("/v1/admin/reports");
-    $("#reportsList").innerHTML=(d.items||[]).map(r=>`
-      <div class="row-card">
-        <div class="grow">
-          <b>${esc(r.reason)}</b>
-          <div class="meta">${esc(r.target_type)} · ${esc(r.status)} · ${new Date(r.created_at).toLocaleString("ar-IQ")}</div>
-        </div>
-        ${r.status==="resolved"?'<span class="pill ok">تم الحل</span>':`<button class="small" data-resolve="${r.id}">حل البلاغ</button>`}
-      </div>`).join("")||'<div class="panel">لا توجد بلاغات.</div>';
-    $("#reportsList").querySelectorAll("[data-resolve]").forEach(b=>b.onclick=async()=>{
-      await api("/v1/admin/reports/"+b.dataset.resolve+"/resolve",{method:"POST"});
-      loadReports()
-    })
-  }catch(e){$("#reportsList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+    const wanted=$("#reportStatus")?.value||"";
+    const rows=(d.items||[]).filter(r=>!wanted||r.status===wanted);
+    $("#reportsList").innerHTML=rows.map(r=>{
+      const reporter=r.reporter||{};
+      return '<div class="report-card">'+
+        '<div class="grow"><div class="moderation-head"><div><b>'+esc(r.reason||"بلاغ")+'</b><div class="meta">بواسطة @'+esc(reporter.username||"")+' · '+new Date(r.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(r.status)+'">'+statusLabel(r.status)+'</span></div>'+
+        (r.details?'<p>'+esc(r.details)+'</p>':"")+
+        '<div class="meta">الهدف: '+esc(r.target_type)+' · <span class="mono">'+esc(r.target_id)+'</span></div>'+
+        (r.admin_note?'<div class="admin-note">ملاحظة الإدارة: '+esc(r.admin_note)+'</div>':"")+
+        '<div class="admin-actions">'+
+          (["open","review"].includes(r.status)?'<button class="small" data-report-review="'+esc(r.id)+'" type="button">قيد المراجعة</button>':"")+
+          (["post","reel","story","comment"].includes(r.target_type)?'<button class="small danger" data-report-hide="'+esc(r.id)+'" type="button">إخفاء المحتوى وحل البلاغ</button>':"")+
+          '<button class="small" data-report-resolve="'+esc(r.id)+'" type="button">حل بدون حذف</button>'+
+          '<button class="small" data-report-reject="'+esc(r.id)+'" type="button">رفض البلاغ</button>'+
+        '</div>'+
+      '</div>';
+    }).join("")||'<div class="panel">لا توجد بلاغات مطابقة.</div>';
+
+    const act=async(id,status,action="")=>{
+      const note=prompt("ملاحظة داخلية للمشرف (اختياري)","")||"";
+      await api("/v1/admin/reports/"+id+"/action",{method:"POST",body:JSON.stringify({status,action,admin_note:note})});
+      loadReports();
+    };
+    $("#reportsList").querySelectorAll("[data-report-review]").forEach(b=>b.onclick=()=>act(b.dataset.reportReview,"review"));
+    $("#reportsList").querySelectorAll("[data-report-hide]").forEach(b=>b.onclick=()=>act(b.dataset.reportHide,"resolved","hide_content"));
+    $("#reportsList").querySelectorAll("[data-report-resolve]").forEach(b=>b.onclick=()=>act(b.dataset.reportResolve,"resolved","none"));
+    $("#reportsList").querySelectorAll("[data-report-reject]").forEach(b=>b.onclick=()=>act(b.dataset.reportReject,"rejected","rejected"));
+  }catch(e){$("#reportsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
 async function loadStorage(){

@@ -143,8 +143,8 @@
     if(!loggedIn){
       closeTransientDialogs();
       state.activePage="homePage";
-      $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
-      $(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
 

@@ -422,31 +422,129 @@ async function loadReports(){
 async function loadStorage(){
   try{
     const d=await api("/v1/admin/channels");
-    $("#channelsList").innerHTML=(d.items||[]).map(c=>`
-      <div class="channel-card">
-        <div class="grow">
-          <b>${esc(c.title||c.channel_key)}</b>
-          <div class="meta">المعرف: ${esc(c.channel_id)} · آخر اختبار: ${c.last_test_at?new Date(c.last_test_at).toLocaleString("ar-IQ"):"لم يُختبر"}</div>
-        </div>
-        <span class="pill ${c.status==="connected"?"ok":"bad"}">${c.status==="connected"?"مربوطة":"تحتاج فحص"}</span>
-      </div>`).join("")||'<div class="panel">لم يتم ربط قنوات التخزين بعد.</div>'
-  }catch(e){$("#channelsList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+    $("#channelsList").innerHTML=(d.items||[]).map(row=>
+      '<div class="channel-card">'+
+        '<div class="grow"><b>'+esc(row.title||row.channel_key)+'</b>'+
+        '<div class="meta">المعرف: '+esc(row.channel_id)+' · آخر اختبار: '+(row.last_test_at?new Date(row.last_test_at).toLocaleString("ar-IQ"):"لم يُختبر")+'</div>'+
+        '<div class="meta">آخر رفع: '+(row.last_upload_at?new Date(row.last_upload_at).toLocaleString("ar-IQ"):"لا يوجد")+'</div></div>'+
+        '<span class="pill '+(row.status==="connected"?"ok":"bad")+'">'+(row.status==="connected"?"مربوطة":"تحتاج فحص")+'</span>'+
+        '<button class="small" data-test-channel="'+esc(row.channel_key)+'" type="button">اختبار</button>'+
+      '</div>'
+    ).join("")||'<div class="panel">لم يتم ربط قنوات التخزين بعد.</div>';
+    $("#channelsList").querySelectorAll("[data-test-channel]").forEach(b=>b.onclick=async()=>{
+      b.disabled=true;b.textContent="جارٍ الفحص...";
+      try{
+        await api("/v1/admin/channels/"+encodeURIComponent(b.dataset.testChannel)+"/test",{method:"POST"});
+        await loadStorage();
+      }catch(error){alert(error.message);b.disabled=false;b.textContent="إعادة الاختبار"}
+    });
+  }catch(e){$("#channelsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
+
+$("#uploadStatus").onchange=loadUploads;
+async function loadUploads(){
+  try{
+    const status=$("#uploadStatus")?.value||"";
+    const d=await api("/v1/admin/uploads"+(status?"?status="+encodeURIComponent(status):""));
+    $("#uploadsList").innerHTML=(d.items||[]).map(row=>{
+      const total=Number(row.size_bytes||0),received=Number(row.received_bytes||0);
+      const pct=total?Math.min(100,Math.round(received/total*100)):(row.status==="completed"?100:0);
+      return '<div class="upload-admin-card">'+
+        '<div class="grow"><div class="moderation-head"><div><b>'+esc(row.original_name||"ملف")+'</b><div class="meta">'+esc(row.kind)+' · '+formatBytes(total)+'</div></div><span class="pill '+pillClass(row.status)+'">'+statusLabel(row.status)+'</span></div>'+
+        '<div class="admin-progress"><i style="width:'+pct+'%"></i></div><div class="meta">'+pct+'% · '+new Date(row.created_at).toLocaleString("ar-IQ")+'</div>'+
+        (row.error?'<div class="error-text">'+esc(row.error)+'</div>':"")+
+        (["queued","receiving","storing"].includes(row.status)?'<button class="small danger" data-cancel-upload="'+esc(row.id)+'" type="button">إلغاء العملية</button>':"")+
+        '</div></div>';
+    }).join("")||'<div class="panel">لا توجد عمليات رفع.</div>';
+    $("#uploadsList").querySelectorAll("[data-cancel-upload]").forEach(b=>b.onclick=async()=>{
+      if(!confirm("إلغاء عملية الرفع؟"))return;
+      await api("/v1/admin/uploads/"+b.dataset.cancelUpload+"/cancel",{method:"POST"});
+      loadUploads();
+    });
+  }catch(e){$("#uploadsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
+
+$("#errorStatus").onchange=loadErrors;
+async function loadErrors(){
+  try{
+    const status=$("#errorStatus")?.value||"";
+    const d=await api("/v1/admin/errors"+(status?"?status="+encodeURIComponent(status):""));
+    $("#errorsList").innerHTML=(d.items||[]).map(row=>
+      '<div class="report-card"><div class="grow">'+
+        '<div class="moderation-head"><div><b>'+esc(row.service||"system")+'</b><div class="meta">'+new Date(row.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(row.status)+'">'+statusLabel(row.status)+'</span></div>'+
+        '<p>'+esc(row.message||"")+'</p>'+
+        (row.code?'<div class="meta">الكود: '+esc(row.code)+'</div>':"")+
+        (row.status!=="resolved"?'<button class="small" data-resolve-error="'+esc(row.id)+'" type="button">تمت المعالجة</button>':"")+
+      '</div></div>'
+    ).join("")||'<div class="panel">لا توجد أخطاء.</div>';
+    $("#errorsList").querySelectorAll("[data-resolve-error]").forEach(b=>b.onclick=async()=>{
+      await api("/v1/admin/errors/"+b.dataset.resolveError+"/resolve",{method:"POST"});
+      loadErrors();
+    });
+  }catch(e){$("#errorsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
+
+$("#supportStatus").onchange=loadSupport;
+async function loadSupport(){
+  try{
+    const status=$("#supportStatus")?.value||"";
+    const d=await api("/v1/admin/support"+(status?"?status="+encodeURIComponent(status):""));
+    $("#supportList").innerHTML=(d.items||[]).map(t=>
+      '<div class="report-card"><div class="grow">'+
+        '<div class="moderation-head"><div><b>'+esc(t.subject||"تذكرة دعم")+'</b><div class="meta">'+esc(t.category||"general")+' · '+new Date(t.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(t.status)+'">'+statusLabel(t.status)+'</span></div>'+
+        '<p>'+esc(t.body||"")+'</p>'+
+        '<div class="meta">المستخدم: <span class="mono">'+esc(t.user_id)+'</span> · الإصدار: '+esc(t.app_version||"—")+'</div>'+
+        (t.admin_reply?'<div class="admin-note"><b>رد الإدارة:</b> '+esc(t.admin_reply)+'</div>':"")+
+        '<div class="admin-actions"><button class="small" data-support-user="'+esc(t.user_id)+'" type="button">الحساب</button>'+
+        '<button class="small" data-reply-ticket="'+esc(t.id)+'" type="button">رد / تحديث الحالة</button></div>'+
+      '</div></div>'
+    ).join("")||'<div class="panel">لا توجد تذاكر دعم.</div>';
+    $("#supportList").querySelectorAll("[data-support-user]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.supportUser)});
+    $("#supportList").querySelectorAll("[data-reply-ticket]").forEach(b=>b.onclick=async()=>{
+      const reply=prompt("رد الإدارة. يمكن تركه فارغًا لتغيير الحالة فقط.","");
+      if(reply===null)return;
+      const status=prompt("الحالة: open أو in_progress أو answered أو closed",reply.trim()?"answered":"in_progress");
+      if(!status)return;
+      try{
+        await api("/v1/admin/support/"+b.dataset.replyTicket+"/reply",{method:"POST",body:JSON.stringify({reply,status})});
+        loadSupport();
+      }catch(error){alert(error.message)}
+    });
+  }catch(e){$("#supportList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
 $("#notificationAudience").onchange=()=>$("#targetUserRow").classList.toggle("hidden",$("#notificationAudience").value!=="user");
 $("#notificationForm").onsubmit=async e=>{
   e.preventDefault();
-  if(!confirm("تأكيد إرسال الإشعار؟"))return;
+  const scheduled=$("#notificationScheduledAt").value;
+  const when=scheduled?new Date(scheduled).toISOString():null;
+  const isScheduled=when&&new Date(when)>new Date(Date.now()+15000);
+  if(!confirm(isScheduled?"تأكيد جدولة الإشعار؟":"تأكيد إرسال الإشعار؟"))return;
+  $("#notificationMessage").textContent=isScheduled?"جارٍ الجدولة...":"جارٍ الإرسال...";
   try{
+    const entityType=$("#notificationEntityType").value;
+    const entityId=$("#notificationEntityId").value.trim();
     await api("/v1/admin/notifications/send",{method:"POST",body:JSON.stringify({
-      title:$("#notificationTitle").value,
-      body:$("#notificationBody").value,
+      title:$("#notificationTitle").value.trim(),
+      body:$("#notificationBody").value.trim(),
       audience:$("#notificationAudience").value,
-      user_id:$("#notificationUser").value.trim()||null
+      user_id:$("#notificationUser").value.trim()||null,
+      scheduled_at:when,
+      deep_link:entityType?{entity_type:entityType,entity_id:entityId||null}:{}
     })});
-    $("#notificationMessage").textContent="تم إرسال الطلب بنجاح"
+    $("#notificationMessage").textContent=isScheduled?"تمت جدولة الإشعار.":"تم إرسال الإشعار.";
+    await loadNotificationHistory();
   }catch(err){$("#notificationMessage").textContent=err.message}
 };
+
+async function loadNotificationHistory(){
+  try{
+    const d=await api("/v1/admin/notifications/history");
+    $("#notificationHistory").innerHTML=(d.items||[]).map(n=>
+      '<div class="row-card"><div class="grow"><b>'+esc(n.title||"إشعار")+'</b><div class="meta">'+esc(n.audience||"all")+' · '+new Date(n.created_at).toLocaleString("ar-IQ")+'</div><p>'+esc(n.body||"")+'</p></div><span class="pill '+pillClass(n.status)+'">'+statusLabel(n.status)+'</span></div>'
+    ).join("")||'<div class="meta">لا توجد إشعارات مرسلة بعد.</div>';
+  }catch(e){$("#notificationHistory").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
 
 async function loadAdmins(){
   try{

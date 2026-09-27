@@ -156,6 +156,60 @@
     </form>
   </dialog>
 
+  <dialog id="commentsDialog" class="panel-dialog chat-dialog">
+    <div class="dialog-head"><h3>التعليقات</h3><button id="closeComments">إغلاق</button></div>
+    <div id="commentsList" class="chat-messages"></div>
+    <form id="commentForm" class="chat-form">
+      <input id="commentInput" maxlength="2000" placeholder="اكتب تعليقًا...">
+      <button class="primary" type="submit">إرسال</button>
+    </form>
+  </dialog>
+
+  <dialog id="newConversationDialog" class="panel-dialog">
+    <div class="dialog-head"><h3>محادثة جديدة</h3><button id="closeNewConversation">إغلاق</button></div>
+    <div class="dialog-body">
+      <label>اسم المستخدم<input id="newConversationUsername" placeholder="اسم المستخدم"></label>
+      <button id="findConversationUser" class="primary" type="button">بحث</button>
+      <div id="newConversationResult" class="list"></div>
+    </div>
+  </dialog>
+
+  <dialog id="editProfileDialog" class="panel-dialog">
+    <div class="dialog-head"><h3>تعديل الحساب</h3><button id="closeEditProfile">إغلاق</button></div>
+    <form id="editProfileForm" class="dialog-body form">
+      <label>الاسم<input id="editName" maxlength="80" required></label>
+      <label>اسم المستخدم<input id="editUsername" maxlength="24" required autocapitalize="none"></label>
+      <label>نبذة<textarea id="editBio" maxlength="300"></textarea></label>
+      <label class="check-line"><input id="editPrivate" type="checkbox"> حساب خاص</label>
+      <label class="file-drop">
+        <input id="editAvatarFile" type="file" accept="image/*">
+        <span>تغيير صورة الحساب</span>
+      </label>
+      <button class="primary" type="submit">حفظ التعديلات</button>
+      <p id="editProfileMessage" class="message"></p>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="panel-dialog">
+    <div class="dialog-head"><h3>الإعدادات</h3><button id="closeSettings">إغلاق</button></div>
+    <form id="notificationSettingsForm" class="dialog-body form">
+      <h4>الإشعارات</h4>
+      <label class="check-line"><input id="notifyMessages" type="checkbox"> الرسائل</label>
+      <label class="check-line"><input id="notifyGroups" type="checkbox"> المجموعات</label>
+      <label class="check-line"><input id="notifyLikes" type="checkbox"> الإعجابات</label>
+      <label class="check-line"><input id="notifyComments" type="checkbox"> التعليقات</label>
+      <label class="check-line"><input id="notifyFollows" type="checkbox"> المتابعات</label>
+      <label class="check-line"><input id="notifyStories" type="checkbox"> القصص</label>
+      <label class="check-line"><input id="notifySystem" type="checkbox"> إشعارات النظام</label>
+      <label class="check-line"><input id="notifyPreview" type="checkbox"> معاينة نص الرسالة</label>
+      <button class="primary" type="submit">حفظ الإعدادات</button>
+    </form>
+    <div class="dialog-body">
+      <h4>طلبات المتابعة</h4>
+      <div id="followRequestsList" class="list compact"></div>
+    </div>
+  </dialog>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"></script>
   <script src="./config.js"></script>
   <script src="./app.js"></script>

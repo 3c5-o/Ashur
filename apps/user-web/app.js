@@ -18,6 +18,7 @@
     chatTimer:null,
     reelObserver:null,
     activePage:"homePage",
+    previewUrl:null,
     features:{},
     limits:{}
   };
@@ -1173,13 +1174,57 @@
   $("#publishButton").onclick=()=>openDialog($("#publishDialog"));
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
+  function clearComposerPreview(){
+    if(state.previewUrl){
+      URL.revokeObjectURL(state.previewUrl);
+      state.previewUrl=null;
+    }
+    $("#composerPreview").innerHTML="";
+    $("#composerPreview").classList.add("hidden");
+    $("#composerFileMeta").textContent="";
+    $("#composerFileMeta").classList.add("hidden");
+  }
+
   function openComposer(type){
-    state.composerType=type; $("#publishDialog").close();
+    state.composerType=type;
+    $("#publishDialog").close();
     $("#composerTitle").textContent=type==="story"?"إنشاء قصة":type==="reel"?"إنشاء ريلز":"إنشاء منشور";
     $("#composerFile").accept=type==="reel"?"video/*":"image/*,video/*";
-    $("#composerMessage").textContent=""; openDialog($("#composerDialog"));
+    $("#composerFile").value="";
+    $("#composerCaption").value="";
+    $("#composerMessage").textContent="";
+    clearComposerPreview();
+    openDialog($("#composerDialog"));
   }
-  $("#cancelComposer").onclick=()=>$("#composerDialog").close();
+
+  $("#composerFile").onchange=()=>{
+    clearComposerPreview();
+    const file=$("#composerFile").files[0];
+    if(!file)return;
+    if(state.composerType==="reel" && !file.type.startsWith("video/")){
+      $("#composerFile").value="";
+      $("#composerMessage").textContent="الريلز يقبل فيديو فقط";
+      return;
+    }
+    if(!file.type.startsWith("image/") && !file.type.startsWith("video/")){
+      $("#composerFile").value="";
+      $("#composerMessage").textContent="نوع الملف غير مدعوم";
+      return;
+    }
+    state.previewUrl=URL.createObjectURL(file);
+    $("#composerPreview").innerHTML=file.type.startsWith("video/")
+      ? `<video src="${state.previewUrl}" controls playsinline preload="metadata"></video>`
+      : `<img src="${state.previewUrl}" alt="معاينة">`;
+    $("#composerPreview").classList.remove("hidden");
+    $("#composerFileMeta").textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)} MB`;
+    $("#composerFileMeta").classList.remove("hidden");
+    $("#composerMessage").textContent="";
+  };
+
+  $("#cancelComposer").onclick=()=>{
+    clearComposerPreview();
+    $("#composerDialog").close();
+  };
 
   $("#submitComposer").onclick=async()=>{
     const file=$("#composerFile").files[0], caption=$("#composerCaption").value.trim();
@@ -1202,7 +1247,11 @@
         const {data:post,error}=await client.from("posts").insert({author_id:state.user.id,caption}).select("id").single(); if(error)throw error;
         const {error:mediaErr}=await client.from("post_media").insert({post_id:post.id,media_id:media.id,sort_order:0}); if(mediaErr)throw mediaErr;
       }
-      $("#composerDialog").close(); $("#composerFile").value=""; $("#composerCaption").value=""; await loadHome();
+      clearComposerPreview();
+      $("#composerDialog").close();
+      $("#composerFile").value="";
+      $("#composerCaption").value="";
+      await loadHome();
     }catch(e){$("#composerMessage").textContent=e.message}
     finally{$("#submitComposer").disabled=false}
   };
@@ -1211,10 +1260,12 @@
     const token=await accessToken();
     if(!token)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
     const progress=$("#uploadProgress");
-    const bar=progress?.querySelector("div");
+    const bar=progress?.querySelector(".progress>div");
+    const progressText=$("#uploadProgressText");
     if(progress){
       progress.classList.remove("hidden");
       if(bar)bar.style.width="0%";
+      if(progressText)progressText.textContent="0%";
     }
 
     try{
@@ -1227,7 +1278,9 @@
 
         xhr.upload.onprogress=(event)=>{
           if(event.lengthComputable && bar){
-            bar.style.width=Math.min(100,Math.round((event.loaded/event.total)*100))+"%";
+            const percent=Math.min(100,Math.round((event.loaded/event.total)*100));
+            bar.style.width=percent+"%";
+            if(progressText)progressText.textContent=percent+"%";
           }
         };
         xhr.onerror=()=>reject(new Error("تعذر الاتصال بخادم الرفع"));
@@ -1242,7 +1295,8 @@
       });
     }finally{
       if(bar)bar.style.width="100%";
-      setTimeout(()=>progress?.classList.add("hidden"),350);
+      if(progressText)progressText.textContent="100%";
+      setTimeout(()=>progress?.classList.add("hidden"),450);
     }
   }
 

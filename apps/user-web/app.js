@@ -14,6 +14,8 @@
     commentTarget:null,
     stories:new Map(),
     profileTab:"posts",
+    searchType:"all",
+    chatTimer:null,
     features:{},
     limits:{}
   };
@@ -355,18 +357,53 @@
     return Object.fromEntries((data||[]).map(x=>[x.id,x]));
   }
 
+  async function followStatusMap(ids){
+    const targets=[...new Set((ids||[]).filter(id=>id && id!==state.user?.id))];
+    if(!targets.length)return {};
+    const {data}=await client.from("follows")
+      .select("following_id,status")
+      .eq("follower_id",state.user.id)
+      .in("following_id",targets);
+    return Object.fromEntries((data||[]).map(row=>[row.following_id,row.status]));
+  }
+
+  function followLabel(status){
+    return status==="accepted"?"تتابعه":status==="pending"?"تم إرسال الطلب":"متابعة";
+  }
+
   async function loadFeed(){
-    const {data,error}=await client.from("posts").select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)").order("created_at",{ascending:false}).limit(30);
-    if(error){$("#feed").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;return}
-    const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
-    if(!data?.length){$("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';return}
+    const {data,error}=await client.from("posts")
+      .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
+      .order("created_at",{ascending:false})
+      .limit(30);
+    if(error){
+      $("#feed").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      return;
+    }
+    if(!data?.length){
+      $("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';
+      return;
+    }
+
+    const postIds=data.map(x=>x.id);
+    const [profiles,{data:liked},{data:saved}] = await Promise.all([
+      profilesMap([...new Set(data.map(x=>x.author_id))]),
+      client.from("post_likes").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
+      client.from("saved_posts").select("post_id").eq("user_id",state.user.id).in("post_id",postIds)
+    ]);
+    const likedSet=new Set((liked||[]).map(x=>x.post_id));
+    const savedSet=new Set((saved||[]).map(x=>x.post_id));
+
     $("#feed").innerHTML=data.map(post=>{
-      const p=profiles[post.author_id]||{}, media=(post.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
+      const p=profiles[post.author_id]||{};
+      const media=(post.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
       const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
-      return `<article class="post">
+      const likedNow=likedSet.has(post.id);
+      const savedNow=savedSet.has(post.id);
+      return `<article class="post" data-post-id="${post.id}">
         <div class="post-head">
           ${avatar(p)}
-          <button class="post-user" data-open-profile="${post.author_id}">
+          <button class="post-user" data-open-profile="${post.author_id}" type="button">
             <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
             <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
           </button>
@@ -374,15 +411,18 @@
         ${media?`<img class="post-media" loading="lazy" data-media-id="${media}" alt="">`:""}
         <div class="post-body">
           <div class="post-actions">
-            <button class="action icon-action" data-like-post="${post.id}">${icon("like")}<span>إعجاب</span></button>
-            <button class="action icon-action" data-comment-post="${post.id}">${icon("comment")}<span>تعليق</span></button>
-            <button class="action icon-action" data-share-post="${post.id}">${icon("share")}<span>مشاركة</span></button>
-            <button class="action icon-action" data-save-post="${post.id}">${icon("save")}<span>حفظ</span></button>
+            <button class="action icon-action ${likedNow?"active":""}" data-like-post="${post.id}" type="button">${icon("like")}<span>${likedNow?"معجب":"إعجاب"}</span></button>
+            ${post.comments_enabled===false
+              ? `<button class="action icon-action" type="button" disabled>${icon("comment")}<span>التعليقات مغلقة</span></button>`
+              : `<button class="action icon-action" data-comment-post="${post.id}" type="button">${icon("comment")}<span>تعليق</span></button>`}
+            <button class="action icon-action" data-share-post="${post.id}" type="button">${icon("share")}<span>مشاركة</span></button>
+            <button class="action icon-action ${savedNow?"active":""}" data-save-post="${post.id}" type="button">${icon("save")}<span>${savedNow?"محفوظ":"حفظ"}</span></button>
           </div>
           ${post.caption?`<p class="caption">${escapeHtml(post.caption)}</p>`:""}
         </div>
-      </article>`
+      </article>`;
     }).join("");
+
     await hydrateMedia($("#feed"));
     $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
     $("#feed").querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
@@ -429,73 +469,185 @@
     }catch(_){}
   }
 
-  async function loadExplore(){
-    if($("#searchInput").value.trim())return runSearch();
-    const {data,error}=await client.from("reels")
-      .select("id,media_id,caption,author_id,created_at")
-      .eq("explore_enabled",true)
-      .order("created_at",{ascending:false})
-      .limit(24);
-    if(error){
-      $("#searchResults").innerHTML='<div class="empty error">تعذر تحميل صفحة الاستكشاف.</div>';
-      return;
-    }
-    $("#searchResults").classList.add("explore-media-grid");
-    $("#searchResults").innerHTML=(data||[]).map(r=>`
-      <button class="explore-tile" data-open-reel="${r.id}" type="button">
-        <video muted playsinline preload="metadata" data-media-id="${r.media_id}"></video>
-        <span class="explore-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z"/></svg></span>
-      </button>`).join("")||'<div class="empty">سيظهر المحتوى المقترح هنا.</div>';
-    await hydrateMedia($("#searchResults"));
-    $("#searchResults").querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=()=>{
-      navigateTo("reelsPage");
-      setTimeout(()=>{
-        const target=$(`.reel[data-reel-id="${b.dataset.openReel}"]`);
-        target?.scrollIntoView({block:"start"});
-      },300);
-    });
+  function setSearchType(type){
+    state.searchType=["all","accounts","posts","reels"].includes(type)?type:"all";
+    $$(".chip[data-search-type]").forEach(btn=>btn.classList.toggle("active",btn.dataset.searchType===state.searchType));
+    runSearch();
   }
+  $$(".chip[data-search-type]").forEach(btn=>btn.onclick=()=>setSearchType(btn.dataset.searchType));
 
-  let searchTimer;
-  $("#searchInput").oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(runSearch,300)};
-  async function runSearch(){
-    $("#searchResults").classList.remove("explore-media-grid");
-    const q=$("#searchInput").value.trim();
-    if(!q)return loadExplore();
-    const {data,error}=await client.from("profiles").select("id,name,username,avatar_media_id,is_verified,is_private").or(`name.ilike.%${q.replace(/[,%]/g,"")}%,username.ilike.%${q.replace(/[,%]/g,"")}%`).limit(30);
-    if(error){$("#searchResults").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;return}
-    $("#searchResults").innerHTML=(data||[]).map(p=>`<div class="list-card">
+  async function renderAccountResults(query=""){
+    let request=client.from("profiles")
+      .select("id,name,username,avatar_media_id,is_verified,is_private,created_at")
+      .neq("id",state.user.id)
+      .order("created_at",{ascending:false})
+      .limit(30);
+    if(query){
+      const safe=query.replace(/[,%()]/g,"");
+      request=request.or(`name.ilike.%${safe}%,username.ilike.%${safe}%`);
+    }
+    const {data,error}=await request;
+    if(error)throw error;
+    const statuses=await followStatusMap((data||[]).map(x=>x.id));
+    return (data||[]).map(p=>`<div class="list-card">
       ${avatar(p)}
-      <button class="grow profile-result" data-open-profile="${p.id}">
+      <button class="grow profile-result" data-open-profile="${p.id}" type="button">
         <b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b>
         <div>@${escapeHtml(p.username||"")}${p.is_private?" · حساب خاص":""}</div>
       </button>
-      ${p.id===state.user.id?"":`<button class="small-button" data-follow="${p.id}">متابعة</button>`}
-    </div>`).join("")||'<div class="empty">لا توجد نتائج.</div>';
-    await hydrateMedia($("#searchResults"));
-    $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=e=>{e.stopPropagation();followUser(b.dataset.follow,b)});
-    $("#searchResults").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+      <button class="small-button ${statuses[p.id]?"active":""}" data-follow="${p.id}" type="button">${followLabel(statuses[p.id])}</button>
+    </div>`).join("");
+  }
+
+  async function renderPostResults(query=""){
+    let request=client.from("posts")
+      .select("id,author_id,caption,created_at,post_media(media_id,sort_order)")
+      .order("created_at",{ascending:false})
+      .limit(30);
+    if(query)request=request.ilike("caption",`%${query.replace(/[,%()]/g,"")}%`);
+    const {data,error}=await request;
+    if(error)throw error;
+    const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
+    return (data||[]).map(row=>{
+      const p=profiles[row.author_id]||{};
+      const media=(row.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
+      return `<article class="search-post-card">
+        <button class="search-post-owner" data-open-profile="${row.author_id}" type="button">${avatar(p)}<span><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><small>@${escapeHtml(p.username||"")}</small></span></button>
+        ${media?`<img class="search-post-media" data-media-id="${media}" alt="">`:""}
+        ${row.caption?`<p>${escapeHtml(row.caption)}</p>`:""}
+      </article>`;
+    }).join("");
+  }
+
+  async function renderReelResults(query=""){
+    let request=client.from("reels")
+      .select("id,media_id,caption,author_id,created_at")
+      .eq("explore_enabled",true)
+      .order("created_at",{ascending:false})
+      .limit(30);
+    if(query)request=request.ilike("caption",`%${query.replace(/[,%()]/g,"")}%`);
+    const {data,error}=await request;
+    if(error)throw error;
+    return (data||[]).map(r=>`
+      <button class="explore-tile" data-open-reel="${r.id}" type="button">
+        <video muted playsinline preload="metadata" data-media-id="${r.media_id}"></video>
+        <span class="explore-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z"/></svg></span>
+      </button>`).join("");
+  }
+
+  async function loadExplore(){
+    return runSearch();
+  }
+
+  let searchTimer;
+  $("#searchInput").oninput=()=>{
+    clearTimeout(searchTimer);
+    searchTimer=setTimeout(runSearch,250);
+  };
+
+  async function runSearch(){
+    const q=$("#searchInput").value.trim();
+    $("#searchResults").innerHTML='<div class="empty">جارٍ التحميل...</div>';
+    $("#searchResults").classList.remove("explore-media-grid");
+    try{
+      let html="";
+      if(state.searchType==="accounts"){
+        html=await renderAccountResults(q);
+      }else if(state.searchType==="posts"){
+        html=await renderPostResults(q);
+      }else if(state.searchType==="reels"){
+        $("#searchResults").classList.add("explore-media-grid");
+        html=await renderReelResults(q);
+      }else if(q){
+        const [accounts,posts,reels]=await Promise.all([
+          renderAccountResults(q),
+          renderPostResults(q),
+          renderReelResults(q)
+        ]);
+        html=`${accounts?`<div class="search-group-title">الحسابات</div>${accounts}`:""}${posts?`<div class="search-group-title">المنشورات</div>${posts}`:""}${reels?`<div class="search-group-title">الريلز</div><div class="explore-media-grid inline-grid">${reels}</div>`:""}`;
+      }else{
+        $("#searchResults").classList.add("explore-media-grid");
+        html=await renderReelResults("");
+      }
+
+      $("#searchResults").innerHTML=html||'<div class="empty">لا توجد نتائج.</div>';
+      await hydrateMedia($("#searchResults"));
+
+      $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=e=>{
+        e.stopPropagation();
+        followUser(b.dataset.follow,b);
+      });
+      $("#searchResults").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+      $("#searchResults").querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=async()=>{
+        navigateTo("reelsPage");
+        await loadReels();
+        requestAnimationFrame(()=>{
+          const target=$(`.reel[data-reel-id="${b.dataset.openReel}"]`);
+          target?.scrollIntoView({block:"start"});
+        });
+      });
+    }catch(error){
+      $("#searchResults").classList.remove("explore-media-grid");
+      $("#searchResults").innerHTML=`<div class="empty error">${escapeHtml(error.message||"تعذر تحميل البحث")}</div>`;
+    }
   }
 
   async function followUser(uid,btn){
-    const {data:p}=await client.from("profiles").select("is_private").eq("id",uid).single();
+    if(!uid||uid===state.user.id)return;
+    const {data:existing,error:existingError}=await client.from("follows")
+      .select("status")
+      .eq("follower_id",state.user.id)
+      .eq("following_id",uid)
+      .maybeSingle();
+    if(existingError)return;
+
+    if(existing){
+      const {error}=await client.from("follows")
+        .delete()
+        .eq("follower_id",state.user.id)
+        .eq("following_id",uid);
+      if(!error && btn){
+        btn.textContent="متابعة";
+        btn.classList.remove("active");
+      }
+      return;
+    }
+
+    const {data:p,error:profileError}=await client.from("profiles").select("is_private").eq("id",uid).single();
+    if(profileError)return;
     const status=p?.is_private?"pending":"accepted";
-    const {error}=await client.from("follows").upsert({follower_id:state.user.id,following_id:uid,status});
-    if(!error) btn.textContent=status==="pending"?"تم إرسال الطلب":"تتابعه";
+    const {error}=await client.from("follows").insert({follower_id:state.user.id,following_id:uid,status});
+    if(!error && btn){
+      btn.textContent=followLabel(status);
+      btn.classList.add("active");
+    }
   }
 
   async function loadReels(){
     const {data,error}=await client.from("reels")
-      .select("id,author_id,media_id,caption,created_at")
+      .select("id,author_id,media_id,caption,created_at,comments_enabled")
       .order("created_at",{ascending:false})
       .limit(30);
     if(error){
       $("#reelsFeed").innerHTML='<div class="empty error">تعذر تحميل الريلز.</div>';
       return;
     }
-    const ps=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
-    $("#reelsFeed").innerHTML=(data||[]).map(r=>{
+    if(!data?.length){
+      $("#reelsFeed").innerHTML='<div class="empty">لا توجد ريلز بعد.</div>';
+      return;
+    }
+
+    const reelIds=data.map(x=>x.id);
+    const [ps,statuses,{data:liked}] = await Promise.all([
+      profilesMap([...new Set(data.map(x=>x.author_id))]),
+      followStatusMap(data.map(x=>x.author_id)),
+      client.from("reel_likes").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds)
+    ]);
+    const likedSet=new Set((liked||[]).map(x=>x.reel_id));
+
+    $("#reelsFeed").innerHTML=data.map(r=>{
       const p=ps[r.author_id]||{};
+      const likedNow=likedSet.has(r.id);
       return `<article class="reel" data-reel-id="${r.id}">
         <video playsinline muted loop preload="metadata" data-media-id="${r.media_id}"></video>
         <div class="reel-shade"></div>
@@ -511,24 +663,24 @@
             <button class="reel-user" data-open-profile="${r.author_id}" type="button">
               ${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}
             </button>
-            ${r.author_id!==state.user.id?`<button class="reel-follow" data-follow-reel="${r.author_id}" type="button">متابعة</button>`:""}
+            ${r.author_id!==state.user.id?`<button class="reel-follow ${statuses[r.author_id]?"active":""}" data-follow-reel="${r.author_id}" type="button">${followLabel(statuses[r.author_id])}</button>`:""}
           </div>
           <p>${escapeHtml(r.caption||"")}</p>
         </div>
         <div class="reel-actions">
-          <button class="reel-action" data-like-reel="${r.id}" type="button">
-            <span class="reel-action-icon">${icon("like")}</span><span>إعجاب</span>
+          <button class="reel-action ${likedNow?"active":""}" data-like-reel="${r.id}" type="button">
+            <span class="reel-action-icon">${icon("like")}</span><span>${likedNow?"معجب":"إعجاب"}</span>
           </button>
-          <button class="reel-action" data-comment-reel="${r.id}" type="button">
-            <span class="reel-action-icon">${icon("comment")}</span><span>تعليق</span>
-          </button>
+          ${r.comments_enabled===false
+            ? `<button class="reel-action" type="button" disabled><span class="reel-action-icon">${icon("comment")}</span><span>مغلقة</span></button>`
+            : `<button class="reel-action" data-comment-reel="${r.id}" type="button"><span class="reel-action-icon">${icon("comment")}</span><span>تعليق</span></button>`}
           <button class="reel-action" data-share-reel="${r.id}" type="button">
             <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
           </button>
         </div>
         <div class="reel-progress"><span></span></div>
-      </article>`
-    }).join("")||'<div class="empty">لا توجد ريلز بعد.</div>';
+      </article>`;
+    }).join("");
 
     await hydrateMedia($("#reelsFeed"));
     initReelPlayers();
@@ -624,7 +776,7 @@
             </div>
             <div class="conversation-preview">${escapeHtml(row.last_message||"ابدأ المحادثة")}</div>
           </div>
-        </button>`
+        </button>`;
       }).join("")||'<div class="empty">لا توجد محادثات بعد.</div>';
       await hydrateMedia($("#conversationList"));
       $("#conversationList").querySelectorAll("[data-conversation]").forEach(b=>b.onclick=()=>openChat(b.dataset.conversation,b.dataset.title));
@@ -634,20 +786,64 @@
   }
 
   async function openChat(id,title){
-    state.activeConversation=id; $("#chatTitle").textContent=title||"المحادثة"; $("#chatDialog").showModal(); await loadChat();
+    state.activeConversation=id;
+    $("#chatTitle").textContent=title||"المحادثة";
+    $("#chatDialog").showModal();
+    await loadChat();
+    clearInterval(state.chatTimer);
+    state.chatTimer=setInterval(()=>{
+      if($("#chatDialog").open && state.activeConversation)loadChat({quiet:true});
+    },3000);
   }
-  async function loadChat(){
+
+  async function loadChat({quiet=false}={}){
     if(!state.activeConversation)return;
-    const {data}=await client.from("messages").select("id,sender_id,body,created_at").eq("conversation_id",state.activeConversation).order("created_at").limit(100);
-    $("#chatMessages").innerHTML=(data||[]).map(m=>`<div class="bubble ${m.sender_id===state.user.id?"mine":"other"}">${escapeHtml(m.body)}</div>`).join("");
-    $("#chatMessages").scrollTop=$("#chatMessages").scrollHeight;
+    const {data,error}=await client.from("messages")
+      .select("id,sender_id,body,created_at")
+      .eq("conversation_id",state.activeConversation)
+      .eq("is_deleted",false)
+      .order("created_at")
+      .limit(150);
+    if(error){
+      if(!quiet)$("#chatMessages").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      return;
+    }
+    const html=(data||[]).map(m=>`<div class="message-row ${m.sender_id===state.user.id?"mine":"other"}">
+      <div class="bubble">${escapeHtml(m.body)}</div>
+      <time>${new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})}</time>
+    </div>`).join("")||'<div class="empty">ابدأ المحادثة برسالة.</div>';
+    if($("#chatMessages").innerHTML!==html){
+      const nearBottom=$("#chatMessages").scrollHeight-$("#chatMessages").scrollTop-$("#chatMessages").clientHeight<80;
+      $("#chatMessages").innerHTML=html;
+      if(nearBottom||!quiet)$("#chatMessages").scrollTop=$("#chatMessages").scrollHeight;
+    }
   }
+
   $("#chatForm").onsubmit=async(e)=>{
-    e.preventDefault(); const body=$("#chatInput").value.trim(); if(!body||!state.activeConversation)return;
-    const {error}=await client.from("messages").insert({conversation_id:state.activeConversation,sender_id:state.user.id,body});
-    if(!error){$("#chatInput").value="";await loadChat()}
+    e.preventDefault();
+    const body=$("#chatInput").value.trim();
+    if(!body||!state.activeConversation)return;
+    const submit=$("#chatForm button[type='submit']");
+    submit.disabled=true;
+    const {error}=await client.from("messages").insert({
+      conversation_id:state.activeConversation,
+      sender_id:state.user.id,
+      body
+    });
+    submit.disabled=false;
+    if(!error){
+      $("#chatInput").value="";
+      await loadChat();
+      loadConversations();
+    }
   };
-  $("#closeChat").onclick=()=>$("#chatDialog").close();
+
+  $("#closeChat").onclick=()=>{
+    clearInterval(state.chatTimer);
+    state.chatTimer=null;
+    state.activeConversation=null;
+    $("#chatDialog").close();
+  };
 
   async function openComments(type,id){
     state.commentTarget={type,id};
@@ -812,12 +1008,12 @@
 
   async function loadNotificationsBadge(){
     if(!state.user)return;
-    const {count}=await client.from("notifications").select("*",{count:"exact",head:true}).is("read_at",null);
+    const {count}=await client.from("notifications").select("*",{count:"exact",head:true).eq("user_id",state.user.id).is("read_at",null);
     const badge=$("#notificationBadge"); badge.textContent=count||0; badge.classList.toggle("hidden",!count);
   }
   $("#notificationsButton").onclick=async()=>{
     $("#notificationsDialog").showModal();
-    const {data}=await client.from("notifications").select("*").order("created_at",{ascending:false}).limit(100);
+    const {data}=await client.from("notifications").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}).limit(100);
     $("#notificationsList").innerHTML=(data||[]).map(n=>`<div class="list-card"><div class="grow"><b>${escapeHtml(n.title)}</b><div>${escapeHtml(n.body)}</div></div></div>`).join("")||'<div class="empty">لا توجد إشعارات.</div>';
     await client.from("notifications").update({read_at:new Date().toISOString()}).eq("user_id",state.user.id).is("read_at",null);
     loadNotificationsBadge();
@@ -863,14 +1059,41 @@
 
   async function uploadFile(file,kind){
     const token=await accessToken();
-    const res=await fetch(apiUrl("/v1/storage/upload?kind="+encodeURIComponent(kind)),{
-      method:"POST",
-      headers:{"Authorization":"Bearer "+token,"Content-Type":file.type||"application/octet-stream","X-File-Name":encodeURIComponent(file.name),"Content-Length":String(file.size)},
-      body:file
-    });
-    const body=await res.json().catch(()=>({}));
-    if(!res.ok)throw new Error(body.error||"فشل رفع الملف");
-    return body;
+    if(!token)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
+    const progress=$("#uploadProgress");
+    const bar=progress?.querySelector("div");
+    if(progress){
+      progress.classList.remove("hidden");
+      if(bar)bar.style.width="0%";
+    }
+
+    try{
+      return await new Promise((resolve,reject)=>{
+        const xhr=new XMLHttpRequest();
+        xhr.open("POST",apiUrl("/v1/storage/upload?kind="+encodeURIComponent(kind)));
+        xhr.setRequestHeader("Authorization","Bearer "+token);
+        xhr.setRequestHeader("Content-Type",file.type||"application/octet-stream");
+        xhr.setRequestHeader("X-File-Name",encodeURIComponent(file.name||"file"));
+
+        xhr.upload.onprogress=(event)=>{
+          if(event.lengthComputable && bar){
+            bar.style.width=Math.min(100,Math.round((event.loaded/event.total)*100))+"%";
+          }
+        };
+        xhr.onerror=()=>reject(new Error("تعذر الاتصال بخادم الرفع"));
+        xhr.onabort=()=>reject(new Error("تم إلغاء الرفع"));
+        xhr.onload=()=>{
+          let body={};
+          try{body=JSON.parse(xhr.responseText||"{}")}catch{}
+          if(xhr.status>=200&&xhr.status<300)resolve(body);
+          else reject(new Error(body.error||"فشل رفع الملف"));
+        };
+        xhr.send(file);
+      });
+    }finally{
+      if(bar)bar.style.width="100%";
+      setTimeout(()=>progress?.classList.add("hidden"),350);
+    }
   }
 
   $("#newMessageButton").onclick=()=>{
@@ -973,7 +1196,7 @@
 
   async function openSettings(){
     const {data}=await client.from("notification_preferences")
-      .select("*").eq("user_id",state.user.id).single();
+      .select("*").eq("user_id",state.user.id).maybeSingle();
     const p=data||{};
     $("#notifyMessages").checked=p.messages!==false;
     $("#notifyGroups").checked=p.groups!==false;
@@ -994,7 +1217,8 @@
 
   $("#notificationSettingsForm").onsubmit=async(e)=>{
     e.preventDefault();
-    const {error}=await client.from("notification_preferences").update({
+    const {error}=await client.from("notification_preferences").upsert({
+      user_id:state.user.id,
       messages:$("#notifyMessages").checked,
       groups:$("#notifyGroups").checked,
       likes:$("#notifyLikes").checked,
@@ -1004,7 +1228,7 @@
       system:$("#notifySystem").checked,
       preview_message:$("#notifyPreview").checked,
       updated_at:new Date().toISOString()
-    }).eq("user_id",state.user.id);
+    },{onConflict:"user_id"});
     if(!error) $("#settingsDialog").close();
   };
 
@@ -1033,6 +1257,28 @@
       loadFollowRequests();
     });
   }
+
+
+  window.ASHUR_HANDLE_BACK=()=>{
+    const openDialogs=[...document.querySelectorAll("dialog[open]")];
+    if(openDialogs.length){
+      const dialog=openDialogs[openDialogs.length-1];
+      if(dialog.id==="systemDialog" && dialog.dataset.blocking==="1")return true;
+      if(dialog.id==="chatDialog"){
+        clearInterval(state.chatTimer);
+        state.chatTimer=null;
+        state.activeConversation=null;
+      }
+      dialog.close();
+      return true;
+    }
+    const active=$(".page.active");
+    if(active && active.id!=="homePage"){
+      navigateTo("homePage");
+      return true;
+    }
+    return false;
+  };
 
   boot().catch(e=>{
     console.error("ASHUR_BOOT_ERROR",e);

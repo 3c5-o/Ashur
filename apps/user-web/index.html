@@ -330,7 +330,7 @@
       const loadApp = () => {
         if (!window.supabase?.createClient) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=1.0.1-fix1";
+        script.src = "./app.js?v=1.1.0";
         script.onload = () => { finished = true; };
         script.onerror = fail;
         document.body.appendChild(script);

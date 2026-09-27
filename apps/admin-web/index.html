@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0e0c0b">
+<meta name="theme-color" content="#050706">
+<meta name="color-scheme" content="dark">
 <title>إدارة آشور</title>
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
 <div id="loginView" class="login-view">
   <form id="loginForm" class="login-card">
-    <div class="seal">𒀸</div>
-    <h1>إدارة آشور</h1>
-    <p>لوحة الإدارة الرسمية</p>
-    <label>البريد الإلكتروني<input id="email" type="email" required></label>
-    <label>كلمة المرور<input id="password" type="password" required></label>
+    <div class="admin-login-brand">
+      <div class="admin-login-logo"><img src="./assets/logo.svg" alt="آشور"></div>
+      <div><span>لوحة الإدارة</span><h1>آشور</h1><p>إدارة المنصة من مكان واحد</p></div>
+    </div>
+    <label><span>البريد الإلكتروني</span><input id="email" type="email" required placeholder="البريد الإلكتروني"></label>
+    <label><span>كلمة المرور</span><input id="password" type="password" required placeholder="كلمة المرور"></label>
     <button class="primary">دخول الإدارة</button>
     <div id="loginMessage" class="message"></div>
   </form>
@@ -22,42 +24,54 @@
 
 <div id="adminApp" class="admin-app hidden">
   <header class="header">
-    <button id="menuButton" class="icon">≡</button>
-    <div class="brand"><span>𒀸</span> إدارة آشور</div>
-    <button id="refreshButton" class="icon">↻</button>
+    <button id="menuButton" class="icon-button" aria-label="القائمة">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <div class="header-title"><span id="headerSectionName">الرئيسية</span><small>إدارة آشور</small></div>
+    <button id="refreshButton" class="icon-button" aria-label="تحديث">
+      <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></svg>
+    </button>
   </header>
 
   <aside id="sidebar" class="sidebar">
-    <button class="nav active" data-page="dashboard">الرئيسية</button>
-    <button class="nav" data-page="users">المستخدمون</button>
-    <button class="nav" data-page="content">المحتوى</button>
-    <button class="nav" data-page="reports">البلاغات</button>
-    <button class="nav" data-page="storage">التخزين</button>
-    <button class="nav" data-page="notifications">الإشعارات</button>
-    <button class="nav" data-page="appSettings">إعدادات التطبيق</button>
-    <button class="nav" data-page="siteSettings">إدارة الموقع الرسمي</button>
-    <button class="nav" data-page="health">حالة النظام</button>
-    <button id="logoutButton" class="nav danger">تسجيل الخروج</button>
+    <div class="sidebar-brand"><img src="./assets/logo.svg" alt=""><div><b>آشور</b><span>الإدارة</span></div></div>
+    <div class="sidebar-group-label">الإدارة</div>
+    <button class="nav active" data-page="dashboard"><span class="nav-dot"></span>الرئيسية</button>
+    <button class="nav" data-page="users"><span class="nav-dot"></span>المستخدمون</button>
+    <button class="nav" data-page="content"><span class="nav-dot"></span>المحتوى</button>
+    <button class="nav" data-page="reports"><span class="nav-dot"></span>البلاغات</button>
+    <div class="sidebar-group-label">النظام</div>
+    <button class="nav" data-page="storage"><span class="nav-dot"></span>التخزين</button>
+    <button class="nav" data-page="notifications"><span class="nav-dot"></span>الإشعارات</button>
+    <button class="nav" data-page="admins"><span class="nav-dot"></span>المشرفون</button>
+    <button class="nav" data-page="audit"><span class="nav-dot"></span>سجل الإدارة</button>
+    <button class="nav" data-page="appSettings"><span class="nav-dot"></span>إعدادات التطبيق</button>
+    <button class="nav" data-page="siteSettings"><span class="nav-dot"></span>الموقع الرسمي</button>
+    <button class="nav" data-page="health"><span class="nav-dot"></span>حالة النظام</button>
+    <button id="logoutButton" class="nav danger"><span class="nav-dot"></span>تسجيل الخروج</button>
   </aside>
 
   <main class="content">
     <section id="dashboard" class="page active">
-      <div class="page-title"><div><h2>الرئيسية</h2><p>ملخص منصة آشور</p></div></div>
+      <div class="hero-panel">
+        <div><span class="eyebrow">نظرة عامة</span><h2>مرحبًا في إدارة آشور</h2><p>متابعة النشاط والمحتوى وحالة المنصة من لوحة واحدة.</p></div>
+        <img src="./assets/logo.svg" alt="">
+      </div>
       <div id="stats" class="stats"></div>
       <div class="grid2">
-        <article class="panel"><h3>آخر البلاغات</h3><div id="recentReports"></div></article>
-        <article class="panel"><h3>حالة الخدمات</h3><div id="serviceStatus"></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="eyebrow">المراجعة</span><h3>آخر البلاغات</h3></div></div><div id="recentReports"></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="eyebrow">الحالة</span><h3>الخدمات</h3></div></div><div id="serviceStatus"></div></article>
       </div>
     </section>
 
     <section id="users" class="page">
-      <div class="page-title"><div><h2>المستخدمون</h2><p>البحث وإدارة الحسابات</p></div></div>
-      <input id="userSearch" class="search" placeholder="ابحث بالاسم أو اسم المستخدم أو المعرف">
+      <div class="page-title"><div><span class="eyebrow">الحسابات</span><h2>المستخدمون</h2><p>البحث وإدارة حالة الحسابات.</p></div></div>
+      <div class="toolbar"><div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="userSearch" class="search" placeholder="ابحث بالاسم أو اسم المستخدم أو المعرف"></div></div>
       <div id="usersList" class="table-list"></div>
     </section>
 
     <section id="content" class="page">
-      <div class="page-title"><div><h2>المحتوى</h2><p>المنشورات والريلز والقصص</p></div></div>
+      <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>المحتوى</h2><p>إدارة المنشورات والريلز والقصص.</p></div></div>
       <div class="tabs">
         <button class="tab active" data-content-kind="posts">المنشورات</button>
         <button class="tab" data-content-kind="reels">الريلز</button>
@@ -67,62 +81,93 @@
     </section>
 
     <section id="reports" class="page">
-      <div class="page-title"><div><h2>البلاغات</h2><p>مراجعة واتخاذ القرار</p></div></div>
+      <div class="page-title"><div><span class="eyebrow">الأمان</span><h2>البلاغات</h2><p>مراجعة البلاغات واتخاذ القرار.</p></div></div>
       <div id="reportsList" class="table-list"></div>
     </section>
 
     <section id="storage" class="page">
-      <div class="page-title"><div><h2>التخزين</h2><p>القنوات مرتبطة من بوت التخزين</p></div></div>
+      <div class="page-title"><div><span class="eyebrow">الوسائط</span><h2>التخزين</h2><p>حالة القنوات المربوطة من بوت التخزين.</p></div></div>
+      <div class="info-banner"><span></span><p>ربط القنوات وتغييرها يتم من داخل بوت تخزين آشور، بينما هذه الصفحة للمتابعة والفحص.</p></div>
       <div id="channelsList" class="cards"></div>
     </section>
 
     <section id="notifications" class="page">
-      <div class="page-title"><div><h2>الإشعارات</h2><p>إرسال إشعارات للمستخدمين</p></div></div>
+      <div class="page-title"><div><span class="eyebrow">التواصل</span><h2>الإشعارات</h2><p>إرسال تنبيهات رسمية لمستخدمي آشور.</p></div></div>
       <form id="notificationForm" class="panel form">
-        <label>العنوان<input id="notificationTitle" maxlength="80" required></label>
-        <label>النص<textarea id="notificationBody" maxlength="500" required></textarea></label>
-        <label>المستلم
-          <select id="notificationAudience">
-            <option value="all">جميع المستخدمين</option>
-            <option value="user">مستخدم محدد</option>
-          </select>
+        <label><span>العنوان</span><input id="notificationTitle" maxlength="80" required></label>
+        <label><span>النص</span><textarea id="notificationBody" maxlength="500" required></textarea></label>
+        <label><span>المستلم</span>
+          <select id="notificationAudience"><option value="all">جميع المستخدمين</option><option value="user">مستخدم محدد</option></select>
         </label>
-        <label id="targetUserRow" class="hidden">معرف المستخدم<input id="notificationUser"></label>
-        <button class="primary">إرسال</button>
+        <label id="targetUserRow" class="hidden"><span>معرف المستخدم</span><input id="notificationUser"></label>
+        <button class="primary">إرسال الإشعار</button>
         <p id="notificationMessage" class="message"></p>
       </form>
     </section>
 
+    <section id="admins" class="page">
+      <div class="page-title"><div><span class="eyebrow">الصلاحيات</span><h2>المشرفون</h2><p>الحسابات الإدارية والأدوار والصلاحيات.</p></div></div>
+      <div class="panel admin-summary"><div><b>المالك</b><span>كامل الصلاحيات</span></div><button class="small" type="button">إضافة مشرف</button></div>
+      <div id="adminsList" class="table-list"></div>
+    </section>
+
+    <section id="audit" class="page">
+      <div class="page-title"><div><span class="eyebrow">التتبع</span><h2>سجل الإدارة</h2><p>كل العمليات الحساسة في سجل واحد.</p></div></div>
+      <div id="auditList" class="timeline"></div>
+    </section>
+
     <section id="appSettings" class="page">
-      <div class="page-title"><div><h2>إعدادات التطبيق</h2><p>الحدود والمزايا والتحديث والصيانة</p></div></div>
-      <form id="appSettingsForm" class="panel form">
-        <h3>التحديث</h3>
-        <label>آخر إصدار<input id="latestVersion"></label>
-        <label>أقل إصدار مسموح<input id="minimumVersion"></label>
-        <label>رابط التحميل<input id="appDownloadUrl"></label>
-        <label class="check"><input id="requiredUpdate" type="checkbox"> تحديث إجباري</label>
-        <h3>الصيانة</h3>
-        <label class="check"><input id="maintenanceEnabled" type="checkbox"> تفعيل وضع الصيانة</label>
-        <label>رسالة الصيانة<textarea id="maintenanceMessage"></textarea></label>
-        <button class="primary">حفظ إعدادات التطبيق</button>
+      <div class="page-title"><div><span class="eyebrow">التحكم</span><h2>إعدادات التطبيق</h2><p>التحديث والصيانة والمزايا وحدود الرفع.</p></div></div>
+      <form id="appSettingsForm" class="settings-grid">
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الإصدار</span><h3>التحديثات</h3></div></div>
+          <label><span>آخر إصدار</span><input id="latestVersion"></label>
+          <label><span>أقل إصدار مسموح</span><input id="minimumVersion"></label>
+          <label><span>رابط التحميل</span><input id="appDownloadUrl"></label>
+          <label class="switch"><span><b>تحديث إجباري</b><small>منع استخدام الإصدارات القديمة</small></span><input id="requiredUpdate" type="checkbox"></label>
+        </article>
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الحالة</span><h3>الصيانة</h3></div></div>
+          <label class="switch"><span><b>وضع الصيانة</b><small>إيقاف نسخة المستخدم مؤقتًا</small></span><input id="maintenanceEnabled" type="checkbox"></label>
+          <label><span>رسالة الصيانة</span><textarea id="maintenanceMessage"></textarea></label>
+        </article>
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">المزايا</span><h3>تشغيل الأقسام</h3></div></div>
+          <label class="switch"><span><b>القصص</b></span><input id="featureStories" type="checkbox"></label>
+          <label class="switch"><span><b>الريلز</b></span><input id="featureReels" type="checkbox"></label>
+          <label class="switch"><span><b>الرسائل</b></span><input id="featureMessages" type="checkbox"></label>
+          <label class="switch"><span><b>المجموعات</b></span><input id="featureGroups" type="checkbox"></label>
+          <label class="switch"><span><b>التسجيل</b></span><input id="featureRegistration" type="checkbox"></label>
+          <label class="switch"><span><b>التعليقات</b></span><input id="featureComments" type="checkbox"></label>
+          <label class="switch"><span><b>الاكتشاف</b></span><input id="featureExplore" type="checkbox"></label>
+          <label class="switch"><span><b>رفع الملفات</b></span><input id="featureUploads" type="checkbox"></label>
+        </article>
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الحدود</span><h3>أحجام الرفع</h3></div></div>
+          <label><span>الحد العام بالميغابايت</span><input id="limitGeneral" type="number" min="1" max="60"></label>
+          <label><span>القصة بالميغابايت</span><input id="limitStory" type="number" min="1" max="60"></label>
+          <label><span>الصورة بالميغابايت</span><input id="limitImage" type="number" min="1" max="60"></label>
+          <label><span>فيديو المحادثة بالميغابايت</span><input id="limitChatVideo" type="number" min="1" max="60"></label>
+          <label><span>الصوت بالميغابايت</span><input id="limitAudio" type="number" min="1" max="60"></label>
+        </article>
+        <button class="primary save-settings" type="submit">حفظ إعدادات التطبيق</button>
       </form>
     </section>
 
     <section id="siteSettings" class="page">
-      <div class="page-title"><div><h2>إدارة الموقع الرسمي</h2><p>صفحة التحميل والتعريف</p></div></div>
+      <div class="page-title"><div><span class="eyebrow">الموقع</span><h2>إدارة الموقع الرسمي</h2><p>الصفحة التعريفية وروابط التحميل.</p></div></div>
       <form id="siteSettingsForm" class="panel form">
-        <label>عنوان الصفحة<input id="siteTitle"></label>
-        <label>الوصف<input id="siteSubtitle"></label>
-        <label>رابط تحميل أندرويد<input id="siteAndroidUrl"></label>
-        <label>رابط استخدام نسخة الويب<input id="siteWebUrl"></label>
-        <label>رقم الإصدار<input id="siteVersion"></label>
-        <label>حجم التطبيق<input id="siteSize"></label>
+        <label><span>عنوان الصفحة</span><input id="siteTitle"></label>
+        <label><span>الوصف</span><input id="siteSubtitle"></label>
+        <label><span>رابط تحميل أندرويد</span><input id="siteAndroidUrl"></label>
+        <label><span>رابط استخدام نسخة الويب</span><input id="siteWebUrl"></label>
+        <div class="grid2 fields"><label><span>رقم الإصدار</span><input id="siteVersion"></label><label><span>حجم التطبيق</span><input id="siteSize"></label></div>
         <button class="primary">حفظ إعدادات الموقع</button>
       </form>
     </section>
 
     <section id="health" class="page">
-      <div class="page-title"><div><h2>حالة النظام</h2><p>فحص الخدمات والربط</p></div></div>
+      <div class="page-title"><div><span class="eyebrow">المراقبة</span><h2>حالة النظام</h2><p>فحص الخدمات والربط في الوقت الحالي.</p></div></div>
       <div id="healthCards" class="cards"></div>
     </section>
   </main>

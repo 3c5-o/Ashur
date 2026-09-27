@@ -533,21 +533,103 @@
       client.from("follows").select("*",{count:"exact",head:true}).eq("following_id",state.user.id).eq("status","accepted"),
       client.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",state.user.id).eq("status","accepted")
     ]);
-    $("#profileCard").innerHTML=`<div class="profile-top">${avatar(state.profile)}<div><h2>${escapeHtml(state.profile.name||"مستخدم")}</h2><div>@${escapeHtml(state.profile.username||"")}</div><p>${escapeHtml(state.profile.bio||"")}</p></div></div>
-    <div class="profile-stats"><div><b>${posts||0}</b><span>منشور</span></div><div><b>${followers||0}</b><span>متابع</span></div><div><b>${following||0}</b><span>يتابع</span></div></div>
-    <div class="profile-buttons">
-      <button id="editProfileButton" class="small-button">تعديل الحساب</button>
-      <button id="settingsButton" class="small-button">الإعدادات</button>
-      <button id="logoutButton" class="small-button">تسجيل الخروج</button>
-    </div>`;
+    const p=state.profile||{};
+    const link=safeLink(p.profile_link||"");
+    $("#profileCard").innerHTML=`
+      <div class="profile-cover">
+        ${p.cover_media_id?`<img class="cover-image" data-media-id="${p.cover_media_id}" alt="">`:""}
+        <button id="profileSettingsFab" class="profile-settings-fab" aria-label="الإعدادات">${icon("settings")}</button>
+      </div>
+      <div class="profile-main">
+        <div class="profile-avatar-wrap">${avatar(p)}</div>
+        <div class="profile-info">
+          <div class="profile-name-row"><h2>${escapeHtml(p.name||"مستخدم")}</h2>${p.is_verified?'<span class="verified-badge">✓</span>':""}</div>
+          <div class="profile-username">@${escapeHtml(p.username||"")}</div>
+          ${p.bio?`<p class="profile-bio">${escapeHtml(p.bio)}</p>`:""}
+          ${link?`<a class="profile-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${icon("link")}<span>${escapeHtml(p.profile_link)}</span></a>`:""}
+          <div class="profile-stats">
+            <div><b>${posts||0}</b><span>منشور</span></div>
+            <div><b>${followers||0}</b><span>متابع</span></div>
+            <div><b>${following||0}</b><span>يتابع</span></div>
+          </div>
+          <div class="profile-buttons">
+            <button id="editProfileButton" class="small-button">${icon("edit")} تعديل الحساب</button>
+            <button id="settingsButton" class="small-button">${icon("settings")} الإعدادات</button>
+            <button id="logoutButton" class="small-button">${icon("logout")} تسجيل الخروج</button>
+          </div>
+        </div>
+      </div>`;
     $("#logoutButton").onclick=()=>client.auth.signOut();
     $("#editProfileButton").onclick=openEditProfile;
     $("#settingsButton").onclick=openSettings;
-    const {data}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
-    $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(p.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
+    $("#profileSettingsFab").onclick=openSettings;
     await hydrateMedia($("#profileCard"));
+    await loadProfileContent(state.profileTab);
+  }
+
+  async function loadProfileContent(kind="posts"){
+    state.profileTab=kind;
+    $(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
+    if(kind==="reels"){
+      const {data}=await client.from("reels").select("id,caption,media_id,created_at").eq("author_id",state.user.id).order("created_at",{ascending:false});
+      $("#profileContent").innerHTML=(data||[]).map(r=>`<article class="post"><video class="post-media" controls playsinline preload="metadata" data-media-id="${r.media_id}"></video><div class="post-body">${escapeHtml(r.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر ريلز بعد.</div>';
+    }else{
+      const {data}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
+      $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(p.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
+    }
     await hydrateMedia($("#profileContent"));
   }
+
+  $(".profile-tabs button").forEach((b,i)=>b.onclick=()=>loadProfileContent(i===0?"posts":"reels"));
+
+  async function openPublicProfile(uid){
+    if(uid===state.user.id){
+      $("#publicProfileDialog").close();
+      navigateTo("profilePage");
+      return;
+    }
+    const {data:p,error}=await client.from("profiles").select("id,name,username,bio,avatar_media_id,cover_media_id,profile_link,is_verified,is_private").eq("id",uid).single();
+    if(error||!p)return;
+    const [{count:posts},{count:followers},{count:following},{data:followRow}] = await Promise.all([
+      client.from("posts").select("*",{count:"exact",head:true}).eq("author_id",uid),
+      client.from("follows").select("*",{count:"exact",head:true}).eq("following_id",uid).eq("status","accepted"),
+      client.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",uid).eq("status","accepted"),
+      client.from("follows").select("status").eq("follower_id",state.user.id).eq("following_id",uid).maybeSingle()
+    ]);
+    const link=safeLink(p.profile_link||"");
+    const followLabel=followRow?.status==="accepted"?"تتابعه":followRow?.status==="pending"?"تم إرسال الطلب":"متابعة";
+    $("#publicProfileCard").innerHTML=`
+      <div class="profile-cover">${p.cover_media_id?`<img class="cover-image" data-media-id="${p.cover_media_id}" alt="">`:""}</div>
+      <div class="profile-main">
+        <div class="profile-avatar-wrap">${avatar(p)}</div>
+        <div class="profile-info">
+          <div class="profile-name-row"><h2>${escapeHtml(p.name||"مستخدم")}</h2>${p.is_verified?'<span class="verified-badge">✓</span>':""}</div>
+          <div class="profile-username">@${escapeHtml(p.username||"")}</div>
+          ${p.bio?`<p class="profile-bio">${escapeHtml(p.bio)}</p>`:""}
+          ${link?`<a class="profile-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${icon("link")}<span>${escapeHtml(p.profile_link)}</span></a>`:""}
+          <div class="profile-stats"><div><b>${posts||0}</b><span>منشور</span></div><div><b>${followers||0}</b><span>متابع</span></div><div><b>${following||0}</b><span>يتابع</span></div></div>
+          <div class="profile-actions-public">
+            <button id="publicFollowButton" class="primary">${followLabel}</button>
+            <button id="publicMessageButton" class="small-button">${icon("message")} مراسلة</button>
+          </div>
+        </div>
+      </div>`;
+    await hydrateMedia($("#publicProfileCard"));
+    $("#publicProfileDialog").showModal();
+    $("#publicFollowButton").onclick=()=>followUser(uid,$("#publicFollowButton"));
+    $("#publicMessageButton").onclick=async()=>{
+      try{
+        const conversation=await api("/v1/conversations",{method:"POST",body:JSON.stringify({kind:"direct",target_user_id:uid})});
+        $("#publicProfileDialog").close();
+        navigateTo("messagesPage");
+        await openChat(conversation.id,p.name||p.username||"محادثة");
+      }catch(_){}
+    };
+    const {data:content}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",uid).order("created_at",{ascending:false}).limit(30);
+    $("#publicProfileContent").innerHTML=(content||[]).map(row=>`<article class="post">${row.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${row.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(row.caption||"")}</div></article>`).join("")||(p.is_private?'<div class="empty">هذا الحساب خاص.</div>':'<div class="empty">لا توجد منشورات بعد.</div>');
+    await hydrateMedia($("#publicProfileContent"));
+  }
+  $("#closePublicProfile").onclick=()=>$("#publicProfileDialog").close();
 
   async function loadNotificationsBadge(){
     if(!state.user)return;
@@ -651,8 +733,10 @@
     $("#editName").value=state.profile?.name||"";
     $("#editUsername").value=state.profile?.username||"";
     $("#editBio").value=state.profile?.bio||"";
+    $("#editProfileLink").value=state.profile?.profile_link||"";
     $("#editPrivate").checked=!!state.profile?.is_private;
     $("#editAvatarFile").value="";
+    $("#editCoverFile").value="";
     $("#editProfileMessage").textContent="";
     $("#editProfileDialog").showModal();
   }
@@ -662,6 +746,7 @@
     const name=$("#editName").value.trim();
     const username=$("#editUsername").value.trim().toLowerCase();
     const bio=$("#editBio").value.trim();
+    const profileLink=$("#editProfileLink").value.trim();
     if(!name)return;
     if(!/^[a-z0-9_]{3,24}$/.test(username)){
       $("#editProfileMessage").textContent="اسم المستخدم غير صالح";
@@ -670,18 +755,27 @@
     $("#editProfileMessage").textContent="جارٍ الحفظ...";
     try{
       let avatarMediaId=state.profile?.avatar_media_id||null;
+      let coverMediaId=state.profile?.cover_media_id||null;
       const file=$("#editAvatarFile").files[0];
+      const coverFile=$("#editCoverFile").files[0];
       if(file){
         if(file.size>10*1024*1024)throw new Error("صورة الحساب يجب ألا تتجاوز 10 ميغابايت");
         const media=await uploadFile(file,"profile");
         avatarMediaId=media.id;
       }
+      if(coverFile){
+        if(coverFile.size>10*1024*1024)throw new Error("صورة الغلاف يجب ألا تتجاوز 10 ميغابايت");
+        const media=await uploadFile(coverFile,"profile_cover");
+        coverMediaId=media.id;
+      }
       const {error}=await client.from("profiles").update({
         name,
         username,
         bio,
+        profile_link:profileLink,
         is_private:$("#editPrivate").checked,
         avatar_media_id:avatarMediaId,
+        cover_media_id:coverMediaId,
         updated_at:new Date().toISOString()
       }).eq("id",state.user.id);
       if(error)throw error;
@@ -709,6 +803,10 @@
     $("#settingsDialog").showModal();
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
+  $("#settingsEditProfile").onclick=()=>{
+    $("#settingsDialog").close();
+    openEditProfile();
+  };
 
   $("#notificationSettingsForm").onsubmit=async(e)=>{
     e.preventDefault();

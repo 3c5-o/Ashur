@@ -475,6 +475,7 @@ textarea{padding-top:12px;min-height:110px;resize:vertical}
 .profile-feed{padding:8px}
 
 /* Dialogs / sheets */
+dialog:not([open]){display:none!important}
 dialog{
   color:var(--text);
   border:1px solid var(--line);
@@ -535,7 +536,7 @@ dialog::backdrop{background:rgba(0,0,0,.72)}
 .progress>div{height:100%;width:0;background:var(--brand);transition:width .15s linear}
 
 /* Chat / comments */
-.chat-dialog{display:flex;flex-direction:column}
+dialog[open].chat-dialog{display:flex;flex-direction:column}
 .chat-messages{flex:1;overflow-y:auto;padding:12px 10px;display:flex;flex-direction:column;gap:7px}
 .message-row{display:flex;flex-direction:column;gap:3px;max-width:80%}
 .message-row.mine{align-self:flex-end;align-items:flex-end}
@@ -618,7 +619,7 @@ dialog::backdrop{background:rgba(0,0,0,.72)}
 .about-card{text-align:center;justify-items:center}.about-logo{width:62px;height:62px}
 
 /* System */
-.system-dialog{display:grid;place-items:center;background:transparent}
+dialog[open].system-dialog{display:grid;place-items:center;background:transparent}
 .system-message{
   width:min(360px,calc(100vw - 28px));
   max-height:none;

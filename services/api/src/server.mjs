@@ -560,6 +560,30 @@ async function createConversation(req, res) {
     throw error;
   }
 
+  if (kind === "direct") {
+    const targetUserId = memberIds.find((id) => id !== user.id);
+    const mine = await select(
+      "conversation_members",
+      `select=conversation_id&user_id=eq.${encodeURIComponent(user.id)}&limit=200`,
+    );
+    const candidateIds = (mine || []).map((row) => row.conversation_id);
+    if (candidateIds.length) {
+      const direct = await select(
+        "conversations",
+        `select=id,kind,title,image_media_id,updated_at&id=in.(${candidateIds.join(",")})&kind=eq.direct&limit=200`,
+      );
+      for (const conversation of direct || []) {
+        const other = await select(
+          "conversation_members",
+          `select=user_id&conversation_id=eq.${encodeURIComponent(conversation.id)}&user_id=eq.${encodeURIComponent(targetUserId)}&limit=1`,
+        );
+        if (other?.[0]) {
+          return json(res, 200, conversation);
+        }
+      }
+    }
+  }
+
   const created = await insert("conversations", {
     kind,
     title: kind === "group" ? String(body.title || "مجموعة").slice(0, 80) : "",

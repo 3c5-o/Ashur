@@ -551,12 +551,43 @@ async function loadAdmins(){
     const d=await api("/v1/admin/admins");
     $("#adminsList").innerHTML=(d.items||[]).map(a=>{
       const p=Array.isArray(a.profiles)?a.profiles[0]:a.profiles||{};
-      return `<div class="row-card">
-        <div class="grow"><b>${esc(p.name||p.username||a.user_id)}</b><div class="meta">@${esc(p.username||"")} · ${roleLabel[a.role]||a.role}</div></div>
-        <span class="pill ${a.active?"ok":"bad"}">${a.active?"نشط":"متوقف"}</span>
-      </div>`
-    }).join("")||'<div class="panel">لا يوجد مشرفون إضافيون.</div>'
-  }catch(e){$("#adminsList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+      const isOwner=a.role==="owner";
+      return '<div class="admin-card">'+
+        '<div class="grow"><b>'+esc(p.name||p.username||a.user_id)+'</b><div class="meta">@'+esc(p.username||"")+' · '+esc(a.user_id)+'</div>'+
+        '<div class="meta">آخر نشاط: '+(a.last_active_at?new Date(a.last_active_at).toLocaleString("ar-IQ"):"غير متوفر")+'</div></div>'+
+        '<span class="pill '+(a.active?"ok":"bad")+'">'+(a.active?"نشط":"متوقف")+'</span>'+
+        (isOwner?'<span class="pill">المالك</span>':
+          '<select class="admin-role-select" data-admin-role="'+esc(a.user_id)+'">'+
+            ["secondary_admin","moderator","content_moderator","support","analyst"].map(role=>
+              '<option value="'+role+'" '+(a.role===role?"selected":"")+'>'+esc(roleLabel[role]||role)+'</option>'
+            ).join("")+
+          '</select>'+
+          '<button class="small '+(a.active?"danger":"")+'" data-admin-active="'+esc(a.user_id)+'" data-active="'+String(a.active)+'" type="button">'+(a.active?"تعطيل":"تفعيل")+'</button>'
+        )+
+      '</div>';
+    }).join("")||'<div class="panel">لا يوجد مشرفون إضافيون.</div>';
+    $("#adminsList").querySelectorAll("[data-admin-role]").forEach(sel=>sel.onchange=async()=>{
+      const old=sel.dataset.current||"";
+      sel.disabled=true;
+      try{
+        await api("/v1/admin/admins/"+sel.dataset.adminRole,{method:"PATCH",body:JSON.stringify({role:sel.value})});
+        await loadAdmins();
+      }catch(error){
+        alert(error.message);
+        if(old)sel.value=old;
+        sel.disabled=false;
+      }
+    });
+    $("#adminsList").querySelectorAll("[data-admin-active]").forEach(btn=>btn.onclick=async()=>{
+      const active=btn.dataset.active==="true";
+      if(active&&!confirm("تعطيل هذا المشرف؟"))return;
+      btn.disabled=true;
+      try{
+        await api("/v1/admin/admins/"+btn.dataset.adminActive,{method:"PATCH",body:JSON.stringify({active:!active})});
+        await loadAdmins();
+      }catch(error){alert(error.message);btn.disabled=false}
+    });
+  }catch(e){$("#adminsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 $("#addAdminButton").onclick=async()=>{
   const userId=prompt("أدخل معرف المستخدم داخل آشور");
@@ -565,8 +596,51 @@ $("#addAdminButton").onclick=async()=>{
   if(!role)return;
   try{
     await api("/v1/admin/admins",{method:"POST",body:JSON.stringify({user_id:userId.trim(),role:role.trim(),permissions:{}})});
-    await loadAdmins()
+    await loadAdmins();
   }catch(e){alert(e.message)}
+};
+
+async function loadReleases(){
+  try{
+    const d=await api("/v1/admin/releases");
+    $("#releasesList").innerHTML=(d.items||[]).map(r=>
+      '<div class="release-card">'+
+        '<div class="grow"><div class="moderation-head"><div><b>v'+esc(r.version)+'</b><div class="meta">Version Code '+Number(r.version_code||0)+' · '+new Date(r.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(r.status)+'">'+statusLabel(r.status)+'</span></div>'+
+        (r.notes?'<p>'+esc(r.notes)+'</p>':"")+
+        '<div class="meta">أقل إصدار: '+esc(r.minimum_version||"—")+' · '+(r.required?"إجباري":"اختياري")+'</div>'+
+        '<div class="admin-actions">'+
+          (r.status!=="published"?'<button class="small" data-release-publish="'+esc(r.id)+'" type="button">اعتماد كمنشور</button>':"")+
+          (r.status!=="testing"?'<button class="small" data-release-testing="'+esc(r.id)+'" type="button">وضع الاختبار</button>':"")+
+          (r.status!=="retired"?'<button class="small" data-release-retire="'+esc(r.id)+'" type="button">إيقاف الإصدار</button>':"")+
+        '</div>'+
+      '</div>'
+    ).join("")||'<div class="panel">لا توجد إصدارات مسجلة.</div>';
+    const change=async(id,status)=>{
+      await api("/v1/admin/releases/"+id,{method:"PATCH",body:JSON.stringify({status})});
+      await loadReleases();
+    };
+    $("#releasesList").querySelectorAll("[data-release-publish]").forEach(b=>b.onclick=()=>change(b.dataset.releasePublish,"published"));
+    $("#releasesList").querySelectorAll("[data-release-testing]").forEach(b=>b.onclick=()=>change(b.dataset.releaseTesting,"testing"));
+    $("#releasesList").querySelectorAll("[data-release-retire]").forEach(b=>b.onclick=()=>change(b.dataset.releaseRetire,"retired"));
+  }catch(e){$("#releasesList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
+$("#releaseForm").onsubmit=async e=>{
+  e.preventDefault();
+  $("#releaseMessage").textContent="جارٍ الحفظ...";
+  try{
+    await api("/v1/admin/releases",{method:"POST",body:JSON.stringify({
+      version:$("#releaseVersion").value.trim(),
+      version_code:Number($("#releaseCode").value||0),
+      download_url:$("#releaseUrl").value.trim(),
+      notes:$("#releaseNotes").value.trim(),
+      minimum_version:$("#releaseMinimum").value.trim(),
+      status:$("#releaseStatus").value,
+      required:$("#releaseRequired").checked
+    })});
+    $("#releaseMessage").textContent="تمت إضافة الإصدار إلى السجل.";
+    $("#releaseForm").reset();
+    await loadReleases();
+  }catch(error){$("#releaseMessage").textContent=error.message}
 };
 
 async function loadAudit(){
@@ -601,6 +675,9 @@ async function loadAppSettings(){
     $("#featureComments").checked=feat.comments!==false;
     $("#featureExplore").checked=feat.explore!==false;
     $("#featureUploads").checked=feat.uploads!==false;
+    $("#featureSearch").checked=feat.search!==false;
+    $("#featureSaved").checked=feat.saved!==false;
+    $("#featureNotifications").checked=feat.notifications!==false;
 
     const lim=d.limits||{};
     $("#limitGeneral").value=lim.max_upload_mb||60;
@@ -631,7 +708,10 @@ $("#appSettingsForm").onsubmit=async e=>{
       registration:$("#featureRegistration").checked,
       comments:$("#featureComments").checked,
       explore:$("#featureExplore").checked,
-      uploads:$("#featureUploads").checked
+      uploads:$("#featureUploads").checked,
+      search:$("#featureSearch").checked,
+      saved:$("#featureSaved").checked,
+      notifications:$("#featureNotifications").checked
     },
     limits:{
       max_upload_mb:Number($("#limitGeneral").value||60),

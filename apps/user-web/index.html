@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#12100f">
+  <title>آشور</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div id="splash" class="splash">
+    <div class="brand-mark">𒀸</div>
+    <div class="brand-title">آشور</div>
+  </div>
+
+  <div id="auth" class="auth-shell hidden">
+    <section class="auth-card">
+      <div class="brand-mark small">𒀸</div>
+      <h1>آشور</h1>
+      <p>تواصل، شارك، واكتشف.</p>
+
+      <div class="auth-tabs">
+        <button id="loginTab" class="active">تسجيل الدخول</button>
+        <button id="registerTab">إنشاء حساب</button>
+      </div>
+
+      <form id="loginForm" class="form">
+        <label>البريد الإلكتروني<input id="loginEmail" type="email" required autocomplete="email"></label>
+        <label>كلمة المرور<input id="loginPassword" type="password" required autocomplete="current-password"></label>
+        <button class="primary" type="submit">دخول</button>
+        <button class="link-button" id="forgotPassword" type="button">نسيت كلمة المرور؟</button>
+      </form>
+
+      <form id="registerForm" class="form hidden">
+        <label>الاسم<input id="registerName" maxlength="80" required></label>
+        <label>اسم المستخدم<input id="registerUsername" maxlength="24" required autocapitalize="none"></label>
+        <label>البريد الإلكتروني<input id="registerEmail" type="email" required autocomplete="email"></label>
+        <label>كلمة المرور<input id="registerPassword" type="password" minlength="8" required autocomplete="new-password"></label>
+        <label>تأكيد كلمة المرور<input id="registerPassword2" type="password" minlength="8" required autocomplete="new-password"></label>
+        <button class="primary" type="submit">إنشاء الحساب</button>
+      </form>
+      <p id="authMessage" class="message"></p>
+    </section>
+  </div>
+
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <button id="publishButton" class="icon-button" aria-label="نشر">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="brandButton" class="top-brand" aria-label="آشور">
+        <span class="top-symbol">𒀸</span><span>آشور</span>
+      </button>
+      <button id="notificationsButton" class="icon-button badge-wrap" aria-label="الإشعارات">
+        <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+        <span id="notificationBadge" class="badge hidden">0</span>
+      </button>
+    </header>
+
+    <main id="main">
+      <section id="homePage" class="page active">
+        <div id="stories" class="stories"></div>
+        <div id="homeStatus" class="status-line"></div>
+        <div id="feed" class="feed"></div>
+      </section>
+
+      <section id="searchPage" class="page">
+        <div class="page-head">
+          <h2>البحث</h2>
+          <input id="searchInput" class="search-input" placeholder="ابحث عن حساب أو محتوى">
+        </div>
+        <div class="chips">
+          <button class="chip active" data-search-type="all">الكل</button>
+          <button class="chip" data-search-type="accounts">الحسابات</button>
+          <button class="chip" data-search-type="posts">المنشورات</button>
+          <button class="chip" data-search-type="reels">الريلز</button>
+        </div>
+        <div id="searchResults" class="results"></div>
+      </section>
+
+      <section id="reelsPage" class="page reels-page">
+        <div id="reelsFeed" class="reels-feed"></div>
+      </section>
+
+      <section id="messagesPage" class="page">
+        <div class="page-head row">
+          <h2>الرسائل</h2>
+          <button id="newMessageButton" class="small-button">محادثة جديدة</button>
+        </div>
+        <div id="conversationList" class="list"></div>
+      </section>
+
+      <section id="profilePage" class="page">
+        <div id="profileCard" class="profile-card"></div>
+        <div class="profile-tabs">
+          <button class="active">المنشورات</button>
+          <button>الريلز</button>
+        </div>
+        <div id="profileContent" class="feed"></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-page="homePage" aria-label="الرئيسية">
+        <svg viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8V21h-6v-6H9v6H3Z"/></svg><span>الرئيسية</span>
+      </button>
+      <button class="nav-item" data-page="searchPage" aria-label="البحث">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>البحث</span>
+      </button>
+      <button class="nav-item" data-page="reelsPage" aria-label="الريلز">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg><span>الريلز</span>
+      </button>
+      <button class="nav-item" data-page="messagesPage" aria-label="الرسائل">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4Z"/><path d="M8 9h8M8 13h5"/></svg><span>الرسائل</span>
+      </button>
+      <button class="nav-item" data-page="profilePage" aria-label="الملف الشخصي">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-5 4-7 8-7s7 2 8 7"/></svg><span>حسابي</span>
+      </button>
+    </nav>
+  </div>
+
+  <dialog id="publishDialog" class="sheet">
+    <div class="sheet-handle"></div>
+    <h3>إنشاء جديد</h3>
+    <button data-publish="story">قصة</button>
+    <button data-publish="post">منشور</button>
+    <button data-publish="reel">ريلز</button>
+    <button id="closePublish">إلغاء</button>
+  </dialog>
+
+  <dialog id="composerDialog" class="sheet composer">
+    <div class="sheet-handle"></div>
+    <h3 id="composerTitle">إنشاء منشور</h3>
+    <label class="file-drop">
+      <input id="composerFile" type="file" accept="image/*,video/*">
+      <span>اختر صورة أو فيديو</span>
+    </label>
+    <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا..."></textarea>
+    <div id="uploadProgress" class="progress hidden"><div></div></div>
+    <button id="submitComposer" class="primary">نشر</button>
+    <button id="cancelComposer">إلغاء</button>
+    <p id="composerMessage" class="message"></p>
+  </dialog>
+
+  <dialog id="notificationsDialog" class="panel-dialog">
+    <div class="dialog-head"><h3>الإشعارات</h3><button id="closeNotifications">إغلاق</button></div>
+    <div id="notificationsList" class="list"></div>
+  </dialog>
+
+  <dialog id="chatDialog" class="panel-dialog chat-dialog">
+    <div class="dialog-head"><h3 id="chatTitle">المحادثة</h3><button id="closeChat">إغلاق</button></div>
+    <div id="chatMessages" class="chat-messages"></div>
+    <form id="chatForm" class="chat-form">
+      <input id="chatInput" maxlength="4000" placeholder="اكتب رسالة...">
+      <button class="primary" type="submit">إرسال</button>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"></script>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

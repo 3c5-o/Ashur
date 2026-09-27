@@ -428,7 +428,7 @@
     if(page==="profilePage")await loadProfile();
     window.scrollTo({top:0,behavior:"smooth"});
   }
-  $$$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){
@@ -1095,7 +1095,7 @@
 
   async function loadProfileContent(kind="posts"){
     state.profileTab=kind;
-    $$$(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
+    $$(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
     if(kind==="reels"){
       const {data}=await client.from("reels").select("id,caption,media_id,created_at").eq("author_id",state.user.id).order("created_at",{ascending:false});
       $("#profileContent").innerHTML=(data||[]).map(r=>`<article class="post"><video class="post-media" controls playsinline preload="metadata" data-media-id="${r.media_id}"></video><div class="post-body">${escapeHtml(r.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر ريلز بعد.</div>';
@@ -1106,7 +1106,7 @@
     await hydrateMedia($("#profileContent"));
   }
 
-  $$$(".profile-tabs button").forEach((b,i)=>b.onclick=()=>loadProfileContent(i===0?"posts":"reels"));
+  $$(".profile-tabs button").forEach((b,i)=>b.onclick=()=>loadProfileContent(i===0?"posts":"reels"));
 
   async function openPublicProfile(uid){
     if(uid===state.user.id){

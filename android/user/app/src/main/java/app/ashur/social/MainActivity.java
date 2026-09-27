@@ -48,6 +48,27 @@ public class MainActivity extends Activity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return loader.shouldInterceptRequest(request.getUrl());
             }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                String host = uri.getHost() == null ? "" : uri.getHost();
+                String scheme = uri.getScheme() == null ? "" : uri.getScheme();
+
+                if ("appassets.androidplatform.net".equals(host)) {
+                    return false;
+                }
+
+                if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                        return true;
+                    } catch (Exception ignored) {
+                        return false;
+                    }
+                }
+                return false;
+            }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -88,11 +109,19 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
+        if (webView == null) {
             super.onBackPressed();
+            return;
         }
+
+        webView.evaluateJavascript(
+                "(function(){try{return window.ASHUR_HANDLE_BACK ? !!window.ASHUR_HANDLE_BACK() : false;}catch(e){return false;}})()",
+                handled -> {
+                    if (!"true".equals(handled)) {
+                        MainActivity.super.onBackPressed();
+                    }
+                }
+        );
     }
 
     public class AshurBridge {
@@ -100,6 +129,18 @@ public class MainActivity extends Activity {
         public String getApiBaseUrl() {
             return BuildConfig.ASHUR_API_URL == null ? "" : BuildConfig.ASHUR_API_URL;
         }
+        @JavascriptInterface
+        public void openExternal(String url) {
+            if (url == null || url.isBlank()) return;
+            try {
+                Uri uri = Uri.parse(url);
+                String scheme = uri.getScheme() == null ? "" : uri.getScheme();
+                if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return;
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            } catch (Exception ignored) {
+            }
+        }
+
 
         @JavascriptInterface
         public void loginOneSignal(String userId) {

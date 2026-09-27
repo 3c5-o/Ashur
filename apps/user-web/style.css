@@ -305,3 +305,10 @@ dialog::backdrop{background:rgba(0,0,0,.72);backdrop-filter:blur(4px)}
 @media(max-width:560px){
   .story-viewer{width:100vw;height:100dvh;max-height:none;border-radius:0}
 }
+
+.post-user,.profile-result,.reel-user{border:0;background:transparent;color:inherit;text-align:right;padding:0;margin:0}
+.post-user{flex:1;min-width:0}
+.profile-result{display:block;width:100%}
+.reel-user{color:#fff}
+.profile-buttons .small-button,.profile-actions-public .small-button{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.profile-buttons svg,.profile-actions-public svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}

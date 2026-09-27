@@ -35,6 +35,17 @@
         <button class="link-button" id="forgotPassword" type="button">نسيت كلمة المرور؟</button>
       </form>
 
+      <form id="passwordRecoveryForm" class="form hidden">
+        <div class="auth-form-title">
+          <b>تعيين كلمة مرور جديدة</b>
+          <small>اكتب كلمة مرور جديدة للحساب</small>
+        </div>
+        <label><span>كلمة المرور الجديدة</span><input id="recoveryPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="٨ أحرف أو أكثر"></label>
+        <label><span>تأكيد كلمة المرور</span><input id="recoveryPassword2" type="password" minlength="8" required autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></label>
+        <button class="primary" type="submit">حفظ كلمة المرور</button>
+        <button id="cancelPasswordRecovery" class="link-button" type="button">العودة لتسجيل الدخول</button>
+      </form>
+
       <form id="registerForm" class="form hidden">
         <label><span>الاسم</span><input id="registerName" maxlength="80" required placeholder="اسمك الظاهر"></label>
         <label><span>اسم المستخدم</span><input id="registerUsername" maxlength="24" required autocapitalize="none" placeholder="اسم المستخدم"></label>
@@ -180,13 +191,18 @@
 
   <dialog id="notificationsDialog" class="panel-dialog">
     <div class="dialog-head"><div><span class="eyebrow">نشاطك</span><h3>الإشعارات</h3></div><button id="closeNotifications" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
-    <div id="notificationsList" class="list notification-list"></div>
+    <div id="notificationsList" class="dialog-body list notification-list"></div>
   </dialog>
 
   <dialog id="chatDialog" class="panel-dialog chat-dialog">
     <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3></div><button id="closeChat" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div id="chatMessages" class="chat-messages"></div>
+    <div id="chatAttachmentPreview" class="chat-attachment-preview hidden"></div>
     <form id="chatForm" class="chat-form">
+      <label class="chat-attach-button" aria-label="إرفاق ملف">
+        <input id="chatFile" type="file" accept="image/*,video/*,audio/*">
+        <svg viewBox="0 0 24 24"><path d="M8 12.5 14.5 6a3 3 0 1 1 4.2 4.2l-8.3 8.3a5 5 0 0 1-7.1-7.1l8.1-8.1"/><path d="m9.5 14 7-7"/></svg>
+      </label>
       <input id="chatInput" maxlength="4000" placeholder="اكتب رسالة...">
       <button class="send-button" type="submit" aria-label="إرسال">
         <svg viewBox="0 0 24 24"><path d="m4 4 17 8-17 8 4-8Z"/><path d="M8 12h13"/></svg>
@@ -210,8 +226,10 @@
       <div><span class="eyebrow">حساب</span><h3>الملف الشخصي</h3></div>
       <button id="closePublicProfile" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <div id="publicProfileCard" class="profile-card"></div>
-    <div id="publicProfileContent" class="feed profile-feed"></div>
+    <div class="public-profile-scroll">
+      <div id="publicProfileCard" class="profile-card"></div>
+      <div id="publicProfileContent" class="feed profile-feed"></div>
+    </div>
   </dialog>
 
   <dialog id="systemDialog" class="panel-dialog system-dialog">
@@ -227,6 +245,7 @@
   <dialog id="commentsDialog" class="panel-dialog chat-dialog comments-sheet">
     <div class="dialog-head"><div><span class="eyebrow">التفاعل</span><h3>التعليقات</h3></div><button id="closeComments" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div id="commentsList" class="chat-messages comments-list"></div>
+    <div id="commentReplyBar" class="comment-reply-bar hidden"><span id="commentReplyText"></span><button id="cancelCommentReply" type="button" aria-label="إلغاء الرد">×</button></div>
     <form id="commentForm" class="chat-form">
       <input id="commentInput" maxlength="2000" placeholder="اكتب تعليقًا...">
       <button class="send-button" type="submit" aria-label="إرسال"><svg viewBox="0 0 24 24"><path d="m4 4 17 8-17 8 4-8Z"/><path d="M8 12h13"/></svg></button>
@@ -276,21 +295,30 @@
       <button class="primary" type="submit">حفظ إعدادات الإشعارات</button>
       <div class="settings-group secondary-settings">
         <h4>الحساب والخصوصية</h4>
-        <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><span>‹</span></button>
-        <button type="button" class="settings-row" id="blockedAccountsButton"><span><b>الحسابات المحظورة</b><small>إدارة الأشخاص الذين حظرتهم</small></span><span>‹</span></button>
-        <button type="button" class="settings-row" id="securitySessionsButton"><span><b>الأمان والجلسات</b><small>الأجهزة وتسجيلات الدخول</small></span><span>‹</span></button>
+        <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="blockedAccountsButton"><span><b>الحسابات المحظورة</b><small>إدارة الأشخاص الذين حظرتهم</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="securitySessionsButton"><span><b>الأمان والجلسات</b><small>الأجهزة وتسجيلات الدخول</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
-      <button id="settingsLogoutButton" class="danger-wide" type="button">تسجيل الخروج</button>
+      <div class="settings-group secondary-settings">
+        <h4>المحتوى</h4>
+        <button type="button" class="settings-row" id="savedContentButton"><span><b>المحفوظات</b><small>المنشورات والريلز المحفوظة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+      <div class="settings-group secondary-settings follow-requests">
+        <div class="settings-group-title"><div><span class="eyebrow">الخصوصية</span><h4>طلبات المتابعة</h4></div></div>
+        <div id="followRequestsList" class="list compact"></div>
+      </div>
       <div class="settings-group secondary-settings">
         <h4>الدعم</h4>
-        <button type="button" class="settings-row" id="helpButton"><span><b>المساعدة</b><small>الأسئلة الشائعة والدعم</small></span><span>‹</span></button>
-        <button type="button" class="settings-row" id="aboutButton"><span><b>حول آشور</b><small>الإصدار ومعلومات المنصة</small></span><span>‹</span></button>
+        <button type="button" class="settings-row" id="supportTicketsButton"><span><b>الدعم الفني</b><small>إرسال مشكلة ومتابعة الرد</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="helpButton"><span><b>المساعدة</b><small>الأسئلة الشائعة واستخدام التطبيق</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="aboutButton"><span><b>حول آشور</b><small>الإصدار ومعلومات المنصة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+      <div class="settings-group danger-zone">
+        <h4>إدارة الحساب</h4>
+        <button id="settingsLogoutButton" class="danger-wide" type="button">تسجيل الخروج</button>
+        <button id="deleteAccountButton" class="danger-wide danger-outline" type="button">حذف الحساب نهائيًا</button>
       </div>
     </form>
-    <div class="dialog-body follow-requests">
-      <div class="settings-group-title"><div><span class="eyebrow">الخصوصية</span><h4>طلبات المتابعة</h4></div></div>
-      <div id="followRequestsList" class="list compact"></div>
-    </div>
   </dialog>
 
   <dialog id="infoDialog" class="panel-dialog">
@@ -307,6 +335,7 @@
   <script>
     (() => {
       const sources = [
+        "./vendor/supabase.min.js",
         "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
         "https://unpkg.com/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"
       ];
@@ -330,7 +359,7 @@
       const loadApp = () => {
         if (!window.supabase?.createClient) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=1.1.0";
+        script.src = "./app.js?v=1.2.0";
         script.onload = () => { finished = true; };
         script.onerror = fail;
         document.body.appendChild(script);

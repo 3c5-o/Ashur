@@ -16,9 +16,15 @@
     profileTab:"posts",
     searchType:"all",
     chatTimer:null,
+    chatChannel:null,
     reelObserver:null,
     activePage:"homePage",
     previewUrl:null,
+    chatPreviewUrl:null,
+    commentReply:null,
+    currentPublicProfile:null,
+    activeUpload:null,
+    activeUploadId:null,
     features:{},
     limits:{}
   };
@@ -44,7 +50,11 @@
       link:'<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/>',
       edit:'<path d="m4 16-1 5 5-1L19 9l-4-4Z"/><path d="m13 7 4 4"/>',
       logout:'<path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 4h6v16h-6"/>',
-      message:'<path d="M4 5h16v12H8l-4 4Z"/>'
+      message:'<path d="M4 5h16v12H8l-4 4Z"/>',
+      more:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+      trash:'<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
+      reply:'<path d="M10 8 5 12l5 4"/><path d="M6 12h7a5 5 0 0 1 5 5v1"/>',
+      report:'<path d="M5 21V4m0 1h12l-2 4 2 4H5"/>'
     };
     return '<svg viewBox="0 0 24 24" aria-hidden="true">'+(paths[name]||'')+'</svg>';
   };
@@ -194,7 +204,10 @@
       if(dialog.id==="chatDialog"){
         clearInterval(state.chatTimer);
         state.chatTimer=null;
+        state.chatChannel?.unsubscribe?.();
+        state.chatChannel=null;
         state.activeConversation=null;
+        clearChatAttachment();
       }
       try{dialog.close()}catch(_){}
     });
@@ -308,6 +321,7 @@
     setNetworkState(navigator.onLine);
 
     try{
+      await checkRuntimeSettings().catch(()=>{});
       const {data:{session},error:sessionError}=await client.auth.getSession();
       if(sessionError)throw sessionError;
       state.user=session?.user||null;
@@ -331,7 +345,6 @@
       }
 
       await Promise.allSettled([
-        checkRuntimeSettings(),
         loadHome(),
         loadNotificationsBadge()
       ]);
@@ -352,6 +365,15 @@
 
   client.auth.onAuthStateChange(async (event, session)=>{
     state.user=session?.user || null;
+    if(event==="PASSWORD_RECOVERY"){
+      showApp(false);
+      $("#loginForm").classList.add("hidden");
+      $("#registerForm").classList.add("hidden");
+      $("#passwordRecoveryForm").classList.remove("hidden");
+      $(".auth-tabs").classList.add("hidden");
+      showAuthMessage("اكتب كلمة المرور الجديدة للحساب.",true);
+      return;
+    }
     if(state.user){
       await refreshProfile().catch(()=>{});
       await ensureProfileIdentity().catch(()=>{});
@@ -416,8 +438,34 @@
   $("#forgotPassword").onclick=async()=>{
     const email=$("#loginEmail").value.trim();
     if(!email) return showAuthMessage("اكتب البريد الإلكتروني أولًا");
-    const {error}=await client.auth.resetPasswordForEmail(email);
-    showAuthMessage(error?error.message:"تم إرسال رابط استعادة كلمة المرور",!error);
+    const redirectTo="ashur://reset-password";
+    const {error}=await client.auth.resetPasswordForEmail(email,{redirectTo});
+    showAuthMessage(error?error.message:"تم إرسال رابط استعادة كلمة المرور إلى بريدك.",!error);
+  };
+
+  $("#passwordRecoveryForm").onsubmit=async(e)=>{
+    e.preventDefault();
+    const p1=$("#recoveryPassword").value;
+    const p2=$("#recoveryPassword2").value;
+    if(p1.length<8)return showAuthMessage("كلمة المرور يجب ألا تقل عن ٨ أحرف.");
+    if(p1!==p2)return showAuthMessage("كلمتا المرور غير متطابقتين.");
+    const {error}=await client.auth.updateUser({password:p1});
+    if(error)return showAuthMessage(error.message);
+    $("#passwordRecoveryForm").classList.add("hidden");
+    $(".auth-tabs").classList.remove("hidden");
+    $("#loginForm").classList.remove("hidden");
+    $("#loginTab").classList.add("active");
+    $("#registerTab").classList.remove("active");
+    showAuthMessage("تم تغيير كلمة المرور. يمكنك تسجيل الدخول الآن.",true);
+    await client.auth.signOut();
+  };
+  $("#cancelPasswordRecovery").onclick=()=>{
+    $("#passwordRecoveryForm").classList.add("hidden");
+    $(".auth-tabs").classList.remove("hidden");
+    $("#loginForm").classList.remove("hidden");
+    $("#registerForm").classList.add("hidden");
+    $("#loginTab").classList.add("active");
+    $("#registerTab").classList.remove("active");
   };
 
   async function navigateTo(page){

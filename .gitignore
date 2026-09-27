@@ -1,0 +1,21 @@
+# أسرار
+.env
+.env.*
+!.env.example
+
+# جافاسكربت
+node_modules/
+npm-debug.log*
+pnpm-lock.yaml.tmp
+
+# أندرويد
+**/.gradle/
+**/build/
+**/local.properties
+**/*.jks
+**/*.keystore
+
+# ملفات التطوير
+.DS_Store
+.idea/
+.vscode/

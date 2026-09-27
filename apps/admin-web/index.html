@@ -40,12 +40,17 @@
     <button class="nav active" data-page="dashboard"><span class="nav-dot"></span>الرئيسية</button>
     <button class="nav" data-page="users"><span class="nav-dot"></span>المستخدمون</button>
     <button class="nav" data-page="content"><span class="nav-dot"></span>المحتوى</button>
+    <button class="nav" data-page="comments"><span class="nav-dot"></span>التعليقات</button>
     <button class="nav" data-page="reports"><span class="nav-dot"></span>البلاغات</button>
+    <button class="nav" data-page="support"><span class="nav-dot"></span>الدعم</button>
     <div class="sidebar-group-label">النظام</div>
     <button class="nav" data-page="storage"><span class="nav-dot"></span>التخزين</button>
+    <button class="nav" data-page="uploads"><span class="nav-dot"></span>عمليات الرفع</button>
+    <button class="nav" data-page="errors"><span class="nav-dot"></span>الأخطاء</button>
     <button class="nav" data-page="notifications"><span class="nav-dot"></span>الإشعارات</button>
     <button class="nav" data-page="admins"><span class="nav-dot"></span>المشرفون</button>
     <button class="nav" data-page="audit"><span class="nav-dot"></span>سجل الإدارة</button>
+    <button class="nav" data-page="releases"><span class="nav-dot"></span>الإصدارات</button>
     <button class="nav" data-page="appSettings"><span class="nav-dot"></span>إعدادات التطبيق</button>
     <button class="nav" data-page="siteSettings"><span class="nav-dot"></span>الموقع الرسمي</button>
     <button class="nav" data-page="health"><span class="nav-dot"></span>حالة النظام</button>
@@ -68,11 +73,16 @@
     <section id="users" class="page">
       <div class="page-title"><div><span class="eyebrow">الحسابات</span><h2>المستخدمون</h2><p>البحث وإدارة حالة الحسابات.</p></div></div>
       <div class="toolbar"><div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="userSearch" class="search" placeholder="ابحث بالاسم أو اسم المستخدم أو المعرف"></div></div>
+      <div id="userDetail" class="panel user-detail hidden"></div>
       <div id="usersList" class="table-list"></div>
     </section>
 
     <section id="content" class="page">
       <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>المحتوى</h2><p>إدارة المنشورات والريلز والقصص.</p></div></div>
+      <div class="toolbar admin-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="contentSearch" class="search" placeholder="ابحث في وصف المحتوى"></div>
+        <select id="contentStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="hidden">مخفي</option></select>
+      </div>
       <div class="tabs">
         <button class="tab active" data-content-kind="posts">المنشورات</button>
         <button class="tab" data-content-kind="reels">الريلز</button>
@@ -81,9 +91,25 @@
       <div id="contentList" class="table-list"></div>
     </section>
 
+    <section id="comments" class="page">
+      <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>التعليقات</h2><p>البحث ومراجعة وإخفاء أو استعادة التعليقات.</p></div></div>
+      <div class="toolbar admin-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="commentSearch" class="search" placeholder="ابحث داخل التعليقات"></div>
+        <select id="commentStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="hidden">مخفي</option></select>
+      </div>
+      <div id="commentsList" class="table-list"></div>
+    </section>
+
     <section id="reports" class="page">
       <div class="page-title"><div><span class="eyebrow">الأمان</span><h2>البلاغات</h2><p>مراجعة البلاغات واتخاذ القرار.</p></div></div>
+      <div class="toolbar"><select id="reportStatus"><option value="">كل البلاغات</option><option value="open">جديد</option><option value="review">قيد المراجعة</option><option value="resolved">تم اتخاذ إجراء</option><option value="rejected">مرفوض</option></select></div>
       <div id="reportsList" class="table-list"></div>
+    </section>
+
+    <section id="support" class="page">
+      <div class="page-title"><div><span class="eyebrow">المساعدة</span><h2>تذاكر الدعم</h2><p>طلبات المستخدمين والمشاكل التقنية ورد الإدارة.</p></div></div>
+      <div class="toolbar"><select id="supportStatus"><option value="">كل الحالات</option><option value="open">جديد</option><option value="in_progress">قيد المتابعة</option><option value="answered">تم الرد</option><option value="closed">مغلق</option></select></div>
+      <div id="supportList" class="table-list"></div>
     </section>
 
     <section id="storage" class="page">
@@ -92,18 +118,42 @@
       <div id="channelsList" class="cards"></div>
     </section>
 
+    <section id="uploads" class="page">
+      <div class="page-title"><div><span class="eyebrow">الوسائط</span><h2>عمليات الرفع</h2><p>متابعة الملفات الجارية والفاشلة والمكتملة.</p></div></div>
+      <div class="toolbar"><select id="uploadStatus"><option value="">كل العمليات</option><option value="queued">بالانتظار</option><option value="receiving">جارٍ الاستلام</option><option value="storing">جارٍ التخزين</option><option value="completed">مكتمل</option><option value="failed">فشل</option><option value="cancelled">ملغي</option></select></div>
+      <div id="uploadsList" class="table-list"></div>
+    </section>
+
+    <section id="errors" class="page">
+      <div class="page-title"><div><span class="eyebrow">المراقبة</span><h2>أخطاء النظام</h2><p>أخطاء API والرفع والإشعارات والتخزين.</p></div></div>
+      <div class="toolbar"><select id="errorStatus"><option value="">كل الأخطاء</option><option value="new">جديد</option><option value="resolved">تم الحل</option></select></div>
+      <div id="errorsList" class="table-list"></div>
+    </section>
+
     <section id="notifications" class="page">
       <div class="page-title"><div><span class="eyebrow">التواصل</span><h2>الإشعارات</h2><p>إرسال تنبيهات رسمية لمستخدمي آشور.</p></div></div>
       <form id="notificationForm" class="panel form">
         <label><span>العنوان</span><input id="notificationTitle" maxlength="80" required></label>
         <label><span>النص</span><textarea id="notificationBody" maxlength="500" required></textarea></label>
         <label><span>المستلم</span>
-          <select id="notificationAudience"><option value="all">جميع المستخدمين</option><option value="user">مستخدم محدد</option></select>
+          <select id="notificationAudience">
+            <option value="all">جميع المستخدمين</option>
+            <option value="user">مستخدم محدد</option>
+            <option value="verified">الحسابات الموثقة</option>
+            <option value="active">النشطون آخر 30 يوم</option>
+            <option value="inactive">غير النشطين أكثر من 30 يوم</option>
+          </select>
         </label>
         <label id="targetUserRow" class="hidden"><span>معرف المستخدم</span><input id="notificationUser"></label>
-        <button class="primary">إرسال الإشعار</button>
+        <div class="grid2 fields">
+          <label><span>نوع الوجهة عند الضغط</span><select id="notificationEntityType"><option value="">بدون وجهة</option><option value="profile">حساب</option><option value="post">منشور</option><option value="reel">ريلز</option><option value="support_ticket">تذكرة دعم</option></select></label>
+          <label><span>معرف الوجهة</span><input id="notificationEntityId" placeholder="UUID اختياري"></label>
+        </div>
+        <label><span>موعد الإرسال (اختياري)</span><input id="notificationScheduledAt" type="datetime-local"></label>
+        <button class="primary">إرسال / جدولة الإشعار</button>
         <p id="notificationMessage" class="message"></p>
       </form>
+      <div class="panel"><div class="panel-head"><div><span class="eyebrow">السجل</span><h3>سجل الإشعارات</h3></div></div><div id="notificationHistory" class="table-list"></div></div>
     </section>
 
     <section id="admins" class="page">
@@ -115,6 +165,26 @@
     <section id="audit" class="page">
       <div class="page-title"><div><span class="eyebrow">التتبع</span><h2>سجل الإدارة</h2><p>كل العمليات الحساسة في سجل واحد.</p></div></div>
       <div id="auditList" class="timeline"></div>
+    </section>
+
+    <section id="releases" class="page">
+      <div class="page-title"><div><span class="eyebrow">التطبيق</span><h2>إدارة الإصدارات</h2><p>سجل نسخ APK وحالة الاختبار والنشر.</p></div></div>
+      <form id="releaseForm" class="panel form">
+        <div class="grid2 fields">
+          <label><span>الإصدار</span><input id="releaseVersion" placeholder="1.2.0" required></label>
+          <label><span>Version Code</span><input id="releaseCode" type="number" min="1" required></label>
+        </div>
+        <label><span>رابط الملف</span><input id="releaseUrl"></label>
+        <label><span>ملاحظات الإصدار</span><textarea id="releaseNotes"></textarea></label>
+        <div class="grid2 fields">
+          <label><span>أقل إصدار مسموح</span><input id="releaseMinimum"></label>
+          <label><span>الحالة</span><select id="releaseStatus"><option value="draft">مسودة</option><option value="testing">اختبار</option><option value="published">منشور</option><option value="retired">متقاعد</option></select></label>
+        </div>
+        <label class="switch"><span><b>تحديث إجباري</b></span><input id="releaseRequired" type="checkbox"></label>
+        <button class="primary" type="submit">إضافة الإصدار</button>
+        <p id="releaseMessage" class="message"></p>
+      </form>
+      <div id="releasesList" class="table-list"></div>
     </section>
 
     <section id="appSettings" class="page">
@@ -142,6 +212,9 @@
           <label class="switch"><span><b>التعليقات</b></span><input id="featureComments" type="checkbox"></label>
           <label class="switch"><span><b>الاكتشاف</b></span><input id="featureExplore" type="checkbox"></label>
           <label class="switch"><span><b>رفع الملفات</b></span><input id="featureUploads" type="checkbox"></label>
+          <label class="switch"><span><b>البحث</b></span><input id="featureSearch" type="checkbox"></label>
+          <label class="switch"><span><b>المحفوظات</b></span><input id="featureSaved" type="checkbox"></label>
+          <label class="switch"><span><b>الإشعارات</b></span><input id="featureNotifications" type="checkbox"></label>
         </article>
         <article class="panel form">
           <div class="panel-head"><div><span class="eyebrow">الحدود</span><h3>أحجام الرفع</h3></div></div>
@@ -181,8 +254,29 @@
     <button id="moreAdminButton" class="mobile-nav" type="button"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>المزيد</span></button>
   </nav>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"></script>
 <script src="./config.js"></script>
-<script src="./app.js"></script>
+<script>
+(() => {
+  const sources=["./vendor/supabase.min.js","https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"];
+  let i=0;
+  const next=()=>{
+    if(i>=sources.length){
+      document.getElementById("loginMessage").textContent="تعذر تحميل مكونات الإدارة.";
+      return;
+    }
+    const s=document.createElement("script");
+    s.src=sources[i++];
+    s.onload=()=>{
+      if(!window.supabase?.createClient)return next();
+      const app=document.createElement("script");
+      app.src="./app.js?v=1.2.0";
+      document.body.appendChild(app);
+    };
+    s.onerror=next;
+    document.head.appendChild(s);
+  };
+  next();
+})();
+</script>
 </body>
 </html>

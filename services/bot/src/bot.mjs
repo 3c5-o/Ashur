@@ -22,6 +22,20 @@ const channels = [
 let offset = 0;
 let me = null;
 let polling = false;
+let alertTimer = null;
+
+function formatBytes(value) {
+  const n = Number(value || 0);
+  if (n < 1024) return n + " B";
+  if (n < 1024 ** 2) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 ** 3) return (n / 1024 ** 2).toFixed(1) + " MB";
+  return (n / 1024 ** 3).toFixed(2) + " GB";
+}
+
+function shortText(value, max = 90) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+}
 
 function configured() {
   return Boolean(BOT_TOKEN && ADMIN_ID && SUPABASE_URL && SERVICE_KEY);
@@ -68,7 +82,41 @@ async function upsert(table, body, onConflict) {
 }
 
 async function channelRows() {
-  return db("/rest/v1/storage_channels?select=channel_key,channel_id,title,status,last_test_at,enabled");
+  return db("/rest/v1/storage_channels?select=channel_key,channel_id,title,status,last_test_at,last_upload_at,enabled&order=channel_key.asc");
+}
+
+async function uploadRows(status = "", limit = 15) {
+  let path = "/rest/v1/upload_jobs?select=id,client_upload_id,user_id,kind,original_name,size_bytes,received_bytes,status,error,media_id,cancel_requested,created_at,updated_at,completed_at&order=created_at.desc&limit=" + limit;
+  if (status) path += "&status=eq." + encodeURIComponent(status);
+  return db(path);
+}
+
+async function errorRows(status = "new", limit = 15) {
+  let path = "/rest/v1/system_errors?select=id,service,code,message,status,created_at,resolved_at,bot_alerted_at&order=created_at.desc&limit=" + limit;
+  if (status) path += "&status=eq." + encodeURIComponent(status);
+  return db(path);
+}
+
+async function auditRows(limit = 15) {
+  return db("/rest/v1/audit_logs?select=id,actor_user_id,actor_telegram_id,action,target_type,target_id,created_at&order=created_at.desc&limit=" + limit);
+}
+
+async function adminRows() {
+  return db("/rest/v1/admins?select=user_id,role,permissions,active,last_active_at,created_at,profiles(name,username)&order=created_at.asc");
+}
+
+async function writeBotAudit(action, targetType = null, targetId = null, details = {}) {
+  return db("/rest/v1/audit_logs", {
+    method: "POST",
+    body: {
+      actor_telegram_id: ADMIN_ID,
+      action,
+      target_type: targetType,
+      target_id: targetId == null ? null : String(targetId),
+      details,
+    },
+    prefer: "return=minimal",
+  }).catch(() => {});
 }
 
 async function pending(userId) {
@@ -101,16 +149,27 @@ function isAdmin(from) {
 function mainKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: "قنوات التخزين", callback_data: "channels" }],
       [
-        { text: "حالة التخزين", callback_data: "status" },
-        { text: "اختبار الكل", callback_data: "test_all" },
+        { text: "حالة النظام", callback_data: "status" },
+        { text: "قنوات التخزين", callback_data: "channels" },
+      ],
+      [
+        { text: "عمليات الرفع", callback_data: "queue" },
+        { text: "الرفع الفاشل", callback_data: "failed" },
+      ],
+      [
+        { text: "أخطاء النظام", callback_data: "errors" },
+        { text: "سجل العمليات", callback_data: "logs" },
+      ],
+      [
+        { text: "المشرفون", callback_data: "admins" },
+        { text: "اختبار القنوات", callback_data: "test_all" },
       ],
     ],
   };
 }
 
-async function sendMain(chatId, text = "لوحة تخزين آشور\n\nاختر العملية المطلوبة:") {
+async function sendMain(chatId, text = "لوحة تشغيل آشور\n\nاختر العملية المطلوبة:") {
   return tg("sendMessage", {
     chat_id: chatId,
     text,

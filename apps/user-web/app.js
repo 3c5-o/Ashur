@@ -10,7 +10,10 @@
 
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const initials = (name="آشور") => escapeHtml(name.trim().slice(0,1) || "آ");
-  const apiUrl = (path) => (cfg.apiBaseUrl || location.origin).replace(/\/$/,"") + path;
+  const nativeApiBase = () => {
+    try { return window.AshurNative?.getApiBaseUrl?.() || ""; } catch { return ""; }
+  };
+  const apiUrl = (path) => (cfg.apiBaseUrl || nativeApiBase() || location.origin).replace(/\/$/,"") + path;
 
   function avatar(profile, cls="avatar"){
     if (profile?.avatar_media_id) return `<img class="${cls}" src="${apiUrl('/v1/media/'+profile.avatar_media_id)}" alt="">`;

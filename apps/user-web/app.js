@@ -16,8 +16,26 @@
   const apiUrl = (path) => (cfg.apiBaseUrl || nativeApiBase() || location.origin).replace(/\/$/,"") + path;
 
   function avatar(profile, cls="avatar"){
-    if (profile?.avatar_media_id) return `<img class="${cls}" src="${apiUrl('/v1/media/'+profile.avatar_media_id)}" alt="">`;
+    if (profile?.avatar_media_id) return `<img class="${cls}" data-media-id="${profile.avatar_media_id}" alt="">`;
     return `<div class="${cls}" style="display:grid;place-items:center;background:#2a231e;color:#d7b16f;font-weight:800">${initials(profile?.name)}</div>`;
+  }
+
+  async function mediaUrl(mediaId){
+    const result = await api("/v1/media-ticket/" + encodeURIComponent(mediaId));
+    return apiUrl(result.path);
+  }
+
+  async function hydrateMedia(root=document){
+    const nodes=[...root.querySelectorAll("[data-media-id]")];
+    await Promise.all(nodes.map(async node=>{
+      if(node.dataset.mediaReady==="1") return;
+      try{
+        node.src=await mediaUrl(node.dataset.mediaId);
+        node.dataset.mediaReady="1";
+      }catch(_){
+        node.removeAttribute("src");
+      }
+    }));
   }
 
   async function accessToken(){
@@ -156,8 +174,11 @@
       return `<button class="story" data-story="${s.id}" data-media="${s.media_id}"><div class="story-ring">${avatar(p,"avatar")}</div><span>${escapeHtml(p.username||p.name||"مستخدم")}</span></button>`
     }).join("");
     $("#stories").innerHTML=html;
+    await hydrateMedia($("#stories"));
     $("#stories").querySelector("[data-own-story]")?.addEventListener("click",()=>openComposer("story"));
-    $("#stories").querySelectorAll("[data-story]").forEach(b=>b.onclick=()=>window.open(apiUrl("/v1/media/"+b.dataset.media),"_blank"));
+    $("#stories").querySelectorAll("[data-story]").forEach(b=>b.onclick=async()=>{
+      try{ window.open(await mediaUrl(b.dataset.media),"_blank"); }catch(_){}
+    });
   }
 
   async function profilesMap(ids){
@@ -175,11 +196,12 @@
       const p=profiles[post.author_id]||{}, media=(post.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
       return `<article class="post">
         <div class="post-head">${avatar(p)}<div class="post-user"><b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?" ✓":""}</b><small>@${escapeHtml(p.username||"")}</small></div></div>
-        ${media?`<img class="post-media" loading="lazy" src="${apiUrl('/v1/media/'+media)}" alt="">`:""}
+        ${media?`<img class="post-media" loading="lazy" data-media-id="${media}" alt="">`:""}
         <div class="post-body"><div class="post-actions"><button class="action" data-like-post="${post.id}">إعجاب</button><button class="action">تعليق</button><button class="action">حفظ</button></div>
         ${post.caption?`<p class="caption">${escapeHtml(post.caption)}</p>`:""}</div>
       </article>`
     }).join("");
+    await hydrateMedia($("#feed"));
     $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
   }
 
@@ -207,6 +229,7 @@
     const {data,error}=await client.from("profiles").select("id,name,username,avatar_media_id,is_verified").or(`name.ilike.%${q.replace(/[,%]/g,"")}%,username.ilike.%${q.replace(/[,%]/g,"")}%`).limit(30);
     if(error){$("#searchResults").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;return}
     $("#searchResults").innerHTML=(data||[]).map(p=>`<div class="list-card">${avatar(p)}<div class="grow"><b>${escapeHtml(p.name)}${p.is_verified?" ✓":""}</b><div>@${escapeHtml(p.username||"")}</div></div><button class="small-button" data-follow="${p.id}">متابعة</button></div>`).join("")||'<div class="empty">لا توجد نتائج.</div>';
+    await hydrateMedia($("#searchResults"));
     $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=()=>followUser(b.dataset.follow,b));
   }
 
@@ -223,10 +246,11 @@
     const ps=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
     $("#reelsFeed").innerHTML=(data||[]).map(r=>{
       const p=ps[r.author_id]||{};
-      return `<article class="reel"><video playsinline controls preload="metadata" src="${apiUrl('/v1/media/'+r.media_id)}"></video>
+      return `<article class="reel"><video playsinline controls preload="metadata" data-media-id="${r.media_id}"></video>
       <div class="reel-overlay"><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><p>${escapeHtml(r.caption||"")}</p></div>
       <div class="reel-actions"><button class="action" data-like-reel="${r.id}">إعجاب</button></div></article>`
     }).join("")||'<div class="empty">لا توجد ريلز بعد.</div>';
+    await hydrateMedia($("#reelsFeed"));
     $("#reelsFeed").querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
   }
 
@@ -266,7 +290,9 @@
     <button id="logoutButton" class="small-button" style="margin-top:14px">تسجيل الخروج</button>`;
     $("#logoutButton").onclick=()=>client.auth.signOut();
     const {data}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
-    $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">${p.post_media?.[0]?.media_id?`<img class="post-media" src="${apiUrl('/v1/media/'+p.post_media[0].media_id)}">`:""}<div class="post-body">${escapeHtml(p.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
+    $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(p.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
+    await hydrateMedia($("#profileCard"));
+    await hydrateMedia($("#profileContent"));
   }
 
   async function loadNotificationsBadge(){

@@ -319,12 +319,34 @@ async function uploadLimitBytes(kind) {
   }
 }
 
-async function receiveFile(req, maxBytes) {
+async function receiveFile(req, maxBytes, jobId = null) {
   const id = crypto.randomUUID();
-  const filePath = path.join(cacheDir, `upload-${id}.bin`);
+  const filePath = path.join(cacheDir, "upload-" + id + ".bin");
   const stream = fs.createWriteStream(filePath, { flags: "wx" });
   const hash = crypto.createHash("sha256");
   let size = 0;
+  let lastProgress = 0;
+
+  const syncProgress = async (force = false) => {
+    if (!jobId) return;
+    if (!force && size - lastProgress < 4 * 1024 * 1024) return;
+    lastProgress = size;
+    await update(
+      "upload_jobs",
+      "id=eq." + encodeURIComponent(jobId),
+      { received_bytes: size, status: "receiving", updated_at: new Date().toISOString() },
+      { returning: false },
+    ).catch(() => {});
+    const rows = await select(
+      "upload_jobs",
+      "select=cancel_requested&id=eq." + encodeURIComponent(jobId) + "&limit=1",
+    ).catch(() => []);
+    if (rows?.[0]?.cancel_requested) {
+      const error = new Error("تم إلغاء الرفع");
+      error.statusCode = 499;
+      throw error;
+    }
+  };
 
   try {
     for await (const chunk of req) {
@@ -338,7 +360,9 @@ async function receiveFile(req, maxBytes) {
       if (!stream.write(chunk)) {
         await new Promise((resolve) => stream.once("drain", resolve));
       }
+      await syncProgress(false);
     }
+    await syncProgress(true);
     await new Promise((resolve, reject) => stream.end((error) => error ? reject(error) : resolve()));
     return { filePath, size, sha256: hash.digest("hex") };
   } catch (error) {
@@ -351,7 +375,7 @@ async function receiveFile(req, maxBytes) {
 async function handleUpload(req, res, url) {
   const user = await currentUser(req);
   const profile = await profileFor(user.id);
-  if (!profile || profile.is_banned) {
+  if (profileIsBanned(profile)) {
     const error = new Error("الحساب غير مسموح له بالرفع");
     error.statusCode = 403;
     throw error;
@@ -367,7 +391,7 @@ async function handleUpload(req, res, url) {
 
   const channels = await select(
     "storage_channels",
-    `select=*&channel_key=eq.${encodeURIComponent(channelKey)}&enabled=eq.true&status=eq.connected&limit=1`,
+    "select=*&channel_key=eq." + encodeURIComponent(channelKey) + "&enabled=eq.true&status=eq.connected&limit=1",
   );
   const channel = channels?.[0];
   if (!channel) {
@@ -379,20 +403,108 @@ async function handleUpload(req, res, url) {
   const maxBytes = await uploadLimitBytes(kind);
   const declared = Number(req.headers["content-length"] || 0);
   if (declared && declared > maxBytes) {
-    const error = new Error(`الحد الأقصى لهذا الملف ${Math.floor(maxBytes / 1024 / 1024)} ميغابايت`);
+    const error = new Error("الحد الأقصى لهذا الملف " + Math.floor(maxBytes / 1024 / 1024) + " ميغابايت");
     error.statusCode = 413;
     throw error;
   }
 
   const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "ملف"));
   const mimeType = String(req.headers["content-type"] || "application/octet-stream");
-  const received = await receiveFile(req, maxBytes);
+  const clientUploadId = String(req.headers["x-upload-id"] || crypto.randomUUID()).slice(0, 120);
 
+  let job = null;
+  let received = null;
   try {
+    const existingJobs = await select(
+      "upload_jobs",
+      "select=*&client_upload_id=eq." + encodeURIComponent(clientUploadId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+    ).catch(() => []);
+    job = existingJobs?.[0] || null;
+
+    if (job?.status === "completed" && job.media_id) {
+      const mediaRows = await select(
+        "media_objects",
+        "select=*&id=eq." + encodeURIComponent(job.media_id) + "&status=eq.ready&limit=1",
+      ).catch(() => []);
+      if (mediaRows?.[0]) {
+        return json(res, 200, { ...mediaRows[0], reused: true, upload_job_id: job.id });
+      }
+    }
+
+    if (!job) {
+      const jobs = await insert("upload_jobs", {
+        client_upload_id: clientUploadId,
+        user_id: user.id,
+        kind,
+        original_name: originalName.slice(0, 250),
+        size_bytes: declared || 0,
+        received_bytes: 0,
+        status: "queued",
+      });
+      job = jobs?.[0] || null;
+    } else {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          kind,
+          original_name: originalName.slice(0, 250),
+          size_bytes: declared || job.size_bytes || 0,
+          received_bytes: 0,
+          status: "queued",
+          error: null,
+          cancel_requested: false,
+          updated_at: new Date().toISOString(),
+          completed_at: null,
+        },
+        { returning: false },
+      );
+    }
+
+    received = await receiveFile(req, maxBytes, job?.id || null);
+    if (job?.id) {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          size_bytes: received.size,
+          received_bytes: received.size,
+          status: "storing",
+          updated_at: new Date().toISOString(),
+        },
+        { returning: false },
+      ).catch(() => {});
+    }
+
+    const duplicates = await select(
+      "media_objects",
+      "select=*&owner_id=eq." + encodeURIComponent(user.id) +
+        "&kind=eq." + encodeURIComponent(kind) +
+        "&sha256=eq." + encodeURIComponent(received.sha256) +
+        "&status=eq.ready&limit=1",
+    ).catch(() => []);
+
+    if (duplicates?.[0]) {
+      if (job?.id) {
+        await update(
+          "upload_jobs",
+          "id=eq." + encodeURIComponent(job.id),
+          {
+            media_id: duplicates[0].id,
+            status: "completed",
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { returning: false },
+        ).catch(() => {});
+      }
+      return json(res, 200, { ...duplicates[0], duplicate: true, upload_job_id: job?.id || null });
+    }
+
     const uploaded = await uploadToChannel({
       channelId: channel.channel_id,
       filePath: received.filePath,
-      caption: `آشور · ${kind} · ${user.id}`,
+      caption: "آشور · " + kind + " · " + user.id,
     });
 
     const rows = await insert("media_objects", {
@@ -407,18 +519,70 @@ async function handleUpload(req, res, url) {
       sha256: received.sha256,
       status: "ready",
     });
+    const media = rows?.[0] || {};
 
     await update(
       "storage_channels",
-      `channel_key=eq.${encodeURIComponent(channelKey)}`,
+      "channel_key=eq." + encodeURIComponent(channelKey),
       { last_upload_at: new Date().toISOString() },
       { returning: false },
     ).catch(() => {});
 
-    json(res, 201, rows?.[0] || {});
+    if (job?.id) {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          media_id: media.id || null,
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { returning: false },
+      ).catch(() => {});
+    }
+
+    json(res, 201, { ...media, upload_job_id: job?.id || null });
+  } catch (error) {
+    if (job?.id) {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          status: error.statusCode === 499 ? "cancelled" : "failed",
+          error: String(error.message || error).slice(0, 1000),
+          updated_at: new Date().toISOString(),
+        },
+        { returning: false },
+      ).catch(() => {});
+    }
+    if (error.statusCode !== 499) {
+      await logSystemError("upload", error, { kind, client_upload_id: clientUploadId }, user.id);
+    }
+    throw error;
   } finally {
-    await fsp.rm(received.filePath, { force: true }).catch(() => {});
+    if (received?.filePath) {
+      await fsp.rm(received.filePath, { force: true }).catch(() => {});
+    }
   }
+}
+
+async function cancelUploadJob(req, res, uploadId) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "upload_jobs",
+    "select=id,status&client_upload_id=eq." + encodeURIComponent(uploadId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const job = rows?.[0];
+  if (!job) return json(res, 404, { error: "عملية الرفع غير موجودة" });
+  if (job.status === "completed") return json(res, 409, { error: "اكتمل الرفع بالفعل" });
+  await update(
+    "upload_jobs",
+    "id=eq." + encodeURIComponent(job.id),
+    { cancel_requested: true, updated_at: new Date().toISOString() },
+    { returning: false },
+  );
+  return json(res, 200, { ok: true });
 }
 
 async function ensureCachedMedia(media) {

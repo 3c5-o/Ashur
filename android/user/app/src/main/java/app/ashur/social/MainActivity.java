@@ -7,7 +7,6 @@ import android.os.Bundle;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -22,12 +21,9 @@ import com.onesignal.OneSignal;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4107;
-    private static final String REMOTE_APP_URL = "https://ashur-alpha.vercel.app/app/index.html";
-    private static final String REMOTE_APP_HOST = "ashur-alpha.vercel.app";
     private static final String LOCAL_APP_URL = "https://appassets.androidplatform.net/assets/www/index.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
-    private boolean usingLocalFallback = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,12 +45,6 @@ public class MainActivity extends Activity {
                 .build();
 
         webView.setWebViewClient(new WebViewClient() {
-            private void loadLocalFallback(WebView view) {
-                if (usingLocalFallback) return;
-                usingLocalFallback = true;
-                view.loadUrl(LOCAL_APP_URL);
-            }
-
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return loader.shouldInterceptRequest(request.getUrl());
@@ -66,7 +56,7 @@ public class MainActivity extends Activity {
                 String host = uri.getHost() == null ? "" : uri.getHost();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme();
 
-                if ("appassets.androidplatform.net".equals(host) || REMOTE_APP_HOST.equals(host)) {
+                if ("appassets.androidplatform.net".equals(host)) {
                     return false;
                 }
 
@@ -75,26 +65,10 @@ public class MainActivity extends Activity {
                         startActivity(new Intent(Intent.ACTION_VIEW, uri));
                         return true;
                     } catch (Exception ignored) {
-                        return false;
+                        return true;
                     }
                 }
                 return false;
-            }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                super.onReceivedError(view, request, error);
-                if (request.isForMainFrame() && !usingLocalFallback) {
-                    loadLocalFallback(view);
-                }
-            }
-
-            @Override
-            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
-                super.onReceivedHttpError(view, request, errorResponse);
-                if (request.isForMainFrame() && !usingLocalFallback && errorResponse.getStatusCode() >= 400) {
-                    loadLocalFallback(view);
-                }
             }
         });
 
@@ -118,7 +92,7 @@ public class MainActivity extends Activity {
         });
 
         webView.addJavascriptInterface(new AshurBridge(), "AshurNative");
-        webView.loadUrl(REMOTE_APP_URL);
+        webView.loadUrl(LOCAL_APP_URL);
     }
 
     @Override

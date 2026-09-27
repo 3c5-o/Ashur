@@ -71,7 +71,15 @@ $("#loginForm").onsubmit=async e=>{
 };
 $("#logoutButton").onclick=async()=>{await sb.auth.signOut();showApp(false)};
 $("#menuButton").onclick=()=>$("#sidebar").classList.toggle("open");
+$("#moreAdminButton")?.addEventListener("click",()=>$("#sidebar").classList.toggle("open"));
 $("#refreshButton").onclick=()=>navigate(document.querySelector(".page.active")?.id||"dashboard");
+document.addEventListener("click",e=>{
+  if(window.innerWidth>920)return;
+  const side=$("#sidebar");
+  if(!side.classList.contains("open"))return;
+  if(side.contains(e.target)||$("#menuButton").contains(e.target)||$("#moreAdminButton")?.contains(e.target))return;
+  side.classList.remove("open");
+});
 [...$$(".nav"),...$$(".mobile-nav")].filter(x=>x.dataset.page).forEach(b=>b.onclick=()=>navigate(b.dataset.page));
 
 function navigate(page){
@@ -79,6 +87,7 @@ function navigate(page){
   $$("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
   $("#headerSectionName").textContent=titles[page]||"إدارة آشور";
   $("#sidebar").classList.remove("open");
+  $("#moreAdminButton")?.classList.remove("active");
   const loader={
     dashboard:loadDashboard,
     users:loadUsers,

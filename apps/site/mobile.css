@@ -1,0 +1,35 @@
+/* موقع آشور — هاتف أولاً */
+html,body{max-width:100%;overflow-x:hidden}
+body{min-height:100dvh}
+.nav{height:64px;padding:0 14px}
+.logo{font-size:18px}.logo img{width:29px;height:29px}
+.hero{padding:48px 16px 64px;min-height:auto}
+.hero-copy{text-align:center}
+.hero h1{font-size:56px;margin-top:16px}
+.hero p{font-size:15px;line-height:1.75;margin:0 auto;max-width:420px}
+.actions{justify-content:center}
+.primary,.secondary{min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+.trust-row{justify-content:center}
+.hero-visual{min-height:590px}
+.phone{width:min(300px,84vw);height:590px;border-width:5px;border-radius:34px}
+.post-img-demo{height:280px}
+.numbers{margin:0 12px;border-radius:18px}
+.section{padding:68px 14px}
+.section-title h2{font-size:29px;line-height:1.35}
+.features{grid-template-columns:1fr;gap:9px;margin-top:26px}
+.features article{min-height:auto;padding:18px;border-radius:17px}
+.feature-icon{margin-bottom:15px}
+.screen-grid{grid-template-columns:1fr;gap:12px}
+.screen-card{max-width:330px;width:100%;margin:auto;border-radius:18px}
+.mini-phone{height:350px}
+.privacy-card{padding:22px 17px;border-radius:19px}
+.privacy-card h2{font-size:26px}
+.download{padding:78px 15px}
+.download h2{font-size:33px}
+footer{padding:26px 16px 35px;flex-direction:column;text-align:center}
+footer>div{justify-content:center;flex-wrap:wrap}
+@media(min-width:760px){
+  .hero{padding-left:22px;padding-right:22px}
+  .features{grid-template-columns:repeat(3,1fr)}
+  .screen-grid{grid-template-columns:repeat(4,1fr)}
+}

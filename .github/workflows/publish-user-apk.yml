@@ -1,0 +1,63 @@
+name: نشر APK المستخدم على موقع آشور
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "publish-user-apk.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المشروع
+        uses: actions/checkout@v4
+
+      - name: إعداد جافا
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: تثبيت حزم أندرويد
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: إعداد Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: بناء نسخة المستخدم
+        env:
+          ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
+          ONESIGNAL_APP_ID: ${{ vars.ONESIGNAL_APP_ID }}
+        run: gradle -p android/user :app:assembleDebug --stacktrace
+
+      - name: وضع APK داخل الموقع
+        shell: bash
+        run: |
+          mkdir -p apps/site/download
+          cp android/user/app/build/outputs/apk/debug/app-debug.apk apps/site/download/ASHUR-User-latest.apk
+
+      - name: رفع APK للمستودع
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f apps/site/download/ASHUR-User-latest.apk
+          if git diff --cached --quiet; then
+            echo "لا يوجد تغيير"
+            exit 0
+          fi
+          git commit -m "نشر APK المستخدم 1.0.4 [skip ci]"
+          git push

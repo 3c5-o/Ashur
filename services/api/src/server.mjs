@@ -27,6 +27,7 @@ await fsp.mkdir(cacheDir, { recursive: true });
 
 const CHANNELS = {
   profile: "profile_images",
+  profile_cover: "profile_images",
   post_image: "posts_media",
   post_video: "posts_media",
   reel: "reels",
@@ -41,6 +42,7 @@ const CHANNELS = {
 
 const DEFAULT_LIMITS_MB = {
   profile: 10,
+  profile_cover: 10,
   post_image: 10,
   post_video: 60,
   reel: 60,
@@ -195,7 +197,7 @@ async function canReadMedia(user, media) {
   if (!media) return false;
   if (user?.id && media.owner_id === user.id) return true;
 
-  if (media.kind === "profile") {
+  if (media.kind === "profile" || media.kind === "profile_cover") {
     return canViewOwner(user, media.owner_id);
   }
 
@@ -259,6 +261,7 @@ async function uploadLimitBytes(kind) {
     const limits = await setting("limits");
     const mapping = {
       profile: limits.image_mb,
+      profile_cover: limits.image_mb,
       post_image: limits.image_mb,
       post_video: limits.max_upload_mb,
       reel: limits.max_upload_mb,
@@ -422,6 +425,8 @@ async function issueMediaTicket(req, res, mediaId) {
   const ticket = createMediaTicket(mediaId, user.id);
   return json(res, 200, {
     path: `/v1/media/${mediaId}?ticket=${encodeURIComponent(ticket)}`,
+    mime_type: media.mime_type || "application/octet-stream",
+    original_name: media.original_name || "",
     expires_in_seconds: config.mediaTicketMinutes * 60,
   });
 }

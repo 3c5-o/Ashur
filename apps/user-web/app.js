@@ -18,6 +18,7 @@
     chatTimer:null,
     chatChannel:null,
     reelObserver:null,
+    storyTimer:null,
     activePage:"homePage",
     previewUrl:null,
     chatPreviewUrl:null,
@@ -534,31 +535,117 @@
     $("#stories").querySelectorAll("[data-story]").forEach(b=>b.onclick=()=>openStoryViewer(b.dataset.story));
   }
 
+  function closeStoryViewer(){
+    clearTimeout(state.storyTimer);
+    state.storyTimer=null;
+    const video=$("#storyViewerMedia")?.querySelector("video");
+    if(video)video.pause();
+    if($("#storyViewerDialog").open)$("#storyViewerDialog").close();
+  }
+
+  async function openStoryViewers(storyId){
+    closeStoryViewer();
+    openInfoDialog("مشاهدو القصة",'<div id="storyViewersList" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
+    try{
+      const result=await api("/v1/social/story-viewers/"+encodeURIComponent(storyId));
+      $("#storyViewersList").innerHTML=(result.items||[]).map(p=>
+        '<button class="list-card" data-story-viewer-profile="'+escapeHtml(p.id)+'" type="button">'+
+          avatar(p)+'<span class="grow"><b>'+escapeHtml(p.name||"مستخدم")+'</b><small>@'+escapeHtml(p.username||"")+'</small></span>'+
+          '<time>'+new Date(p.viewed_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+
+        '</button>'
+      ).join("")||'<div class="empty">ماكو مشاهدات بعد.</div>';
+      await hydrateMedia($("#storyViewersList"));
+      $("#storyViewersList").querySelectorAll("[data-story-viewer-profile]").forEach(btn=>btn.onclick=()=>{
+        const uid=btn.dataset.storyViewerProfile;
+        $("#infoDialog").close();
+        openPublicProfile(uid);
+      });
+    }catch(error){
+      $("#storyViewersList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+    }
+  }
+
   async function openStoryViewer(id){
     const story=state.stories.get(id);
     if(!story)return;
+    clearTimeout(state.storyTimer);
     const dialog=$("#storyViewerDialog");
     const user=$("#storyViewerUser");
-    user.innerHTML=`${avatar(story.profile)}<span>${escapeHtml(story.profile?.name||story.profile?.username||"مستخدم")}</span>`;
+    const own=story.author_id===state.user.id;
+    user.innerHTML=avatar(story.profile)+'<span>'+escapeHtml(story.profile?.name||story.profile?.username||"مستخدم")+'</span>';
     $("#storyViewerCaption").textContent=story.caption||"";
     $("#storyViewerMedia").innerHTML='<div class="empty">جارٍ تحميل القصة...</div>';
+    $("#storyProgressBar").style.transition="none";
     $("#storyProgressBar").style.width="0%";
+    $("#storyViewerActions").innerHTML=own
+      ?'<button id="storyViewersButton" type="button">المشاهدات</button><button id="manageStoryButton" type="button">إدارة القصة</button>'
+      :'<button id="replyStoryButton" type="button">رد برسالة</button><button id="reportStoryButton" type="button">إبلاغ</button>';
     openDialog(dialog);
     await hydrateMedia(user);
+
+    if(!own){
+      api("/v1/social/story-view/"+encodeURIComponent(id),{method:"POST"}).catch(()=>{});
+      $("#replyStoryButton").onclick=async()=>{
+        try{
+          const conversation=await api("/v1/conversations",{method:"POST",body:JSON.stringify({kind:"direct",target_user_id:story.author_id})});
+          closeStoryViewer();
+          await navigateTo("messagesPage");
+          await openChat(conversation.id,story.profile?.name||story.profile?.username||"محادثة");
+          $("#chatInput").value="رد على قصتك: ";
+          $("#chatInput").focus();
+        }catch(error){alert(error.message)}
+      };
+      $("#reportStoryButton").onclick=()=>{
+        closeStoryViewer();
+        openReportDialog("story",id);
+      };
+    }else{
+      $("#storyViewersButton").onclick=()=>openStoryViewers(id);
+      $("#manageStoryButton").onclick=()=>{
+        closeStoryViewer();
+        openOwnContentActions("stories",id,story.caption||"",true);
+      };
+    }
+
     try{
       const access=await mediaAccess(story.media_id);
-      const media=access.mime_type?.startsWith("video/")
-        ? `<video src="${access.url}" autoplay playsinline controls></video>`
-        : `<img src="${access.url}" alt="">`;
-      $("#storyViewerMedia").innerHTML=media;
-      requestAnimationFrame(()=>$("#storyProgressBar").style.width="100%");
+      if(access.mime_type?.startsWith("video/")){
+        const video=document.createElement("video");
+        video.src=access.url;
+        video.autoplay=true;
+        video.playsInline=true;
+        video.preload="auto";
+        video.muted=false;
+        $("#storyViewerMedia").innerHTML="";
+        $("#storyViewerMedia").appendChild(video);
+        video.addEventListener("timeupdate",()=>{
+          if(Number.isFinite(video.duration)&&video.duration>0){
+            $("#storyProgressBar").style.transition="none";
+            $("#storyProgressBar").style.width=Math.min(100,(video.currentTime/video.duration)*100)+"%";
+          }
+        });
+        video.addEventListener("ended",closeStoryViewer,{once:true});
+        video.play().catch(()=>{});
+      }else{
+        const img=document.createElement("img");
+        img.src=access.url;
+        img.alt="";
+        $("#storyViewerMedia").innerHTML="";
+        $("#storyViewerMedia").appendChild(img);
+        requestAnimationFrame(()=>{
+          $("#storyProgressBar").style.transition="width 6s linear";
+          $("#storyProgressBar").style.width="100%";
+        });
+        state.storyTimer=setTimeout(closeStoryViewer,6000);
+      }
     }catch{
       $("#storyViewerMedia").innerHTML='<div class="empty error">تعذر تحميل القصة.</div>';
     }
   }
-  $("#closeStoryViewer").onclick=()=>$("#storyViewerDialog").close();
-  $("#storyViewerDialog").addEventListener("click",e=>{
-    if(e.target===$("#storyViewerDialog"))$("#storyViewerDialog").close();
+  $("#closeStoryViewer").onclick=closeStoryViewer;
+  $("#storyViewerDialog").addEventListener("cancel",e=>{
+    e.preventDefault();
+    closeStoryViewer();
   });
 
   async function profilesMap(ids){

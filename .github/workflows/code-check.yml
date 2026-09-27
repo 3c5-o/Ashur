@@ -25,18 +25,18 @@ jobs:
       - name: فحص نسخة المستخدم
         run: |
           node --check apps/user-web/app.js
-          if grep -nE '\$\("\.[^"]+"\)\.forEach' apps/user-web/app.js; then
-            echo "محدد قائمة خاطئ: استخدم $ بدل $"
-            exit 1
-          fi
-          if grep -nF '$$(' apps/user-web/app.js; then
-            echo "تم العثور على محدد $$ غير صالح"
-            exit 1
-          fi
-          if grep -nE 'REMOTE_APP_URL|vercel\.app/app' android/user/app/src/main/java/app/ashur/social/MainActivity.java; then
-            echo "نسخة المستخدم يجب أن تعمل من الملفات المحلية فقط"
-            exit 1
-          fi
+          node <<'NODE'
+          const fs = require('fs');
+          const app = fs.readFileSync('apps/user-web/app.js','utf8');
+          const main = fs.readFileSync('android/user/app/src/main/java/app/ashur/social/MainActivity.java','utf8');
+          const badForEach = /(?<!\$)\$\("\.[^"]+"\)\.forEach/g.test(app);
+          const triple = app.includes('$$$(');
+          const remoteUi = /REMOTE_APP_URL|vercel\.app\/app/.test(main);
+          if (badForEach || triple || remoteUi) {
+            console.error({badForEach,triple,remoteUi});
+            process.exit(1);
+          }
+          NODE
 
       - name: فحص نسخة الإدارة
         run: node --check apps/admin-web/app.js

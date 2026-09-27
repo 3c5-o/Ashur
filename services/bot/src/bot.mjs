@@ -8,7 +8,7 @@ const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const channels = [
   ["profile_images", "آشور - صور الحسابات"],
-  ["posts_media", "آشور - صور المنشورات"],
+  ["posts_media", "آشور - وسائط المنشورات"],
   ["reels", "آشور - مقاطع الريلز"],
   ["stories", "آشور - القصص"],
   ["chat_media", "آشور - وسائط المحادثات"],
@@ -19,10 +19,30 @@ const channels = [
   ["backups", "آشور - النسخ الاحتياطي"],
 ];
 
+const allowedBotRoles = new Set([
+  "secondary_admin",
+  "moderator",
+  "content_moderator",
+  "support",
+  "analyst",
+]);
+
+const rolePermissions = {
+  secondary_admin: new Set(["status", "channels", "uploads", "errors", "logs", "admins"]),
+  moderator: new Set(["status", "channels", "uploads", "errors", "logs"]),
+  content_moderator: new Set(["status", "logs"]),
+  support: new Set(["status", "errors", "logs"]),
+  analyst: new Set(["status", "logs"]),
+};
+
 let offset = 0;
 let me = null;
 let polling = false;
 let alertTimer = null;
+
+function configured() {
+  return Boolean(BOT_TOKEN && ADMIN_ID && SUPABASE_URL && SERVICE_KEY);
+}
 
 function formatBytes(value) {
   const n = Number(value || 0);
@@ -32,18 +52,25 @@ function formatBytes(value) {
   return (n / 1024 ** 3).toFixed(2) + " GB";
 }
 
-function shortText(value, max = 90) {
+function shortText(value, max = 120) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > max ? text.slice(0, max - 1) + "…" : text;
 }
 
-function configured() {
-  return Boolean(BOT_TOKEN && ADMIN_ID && SUPABASE_URL && SERVICE_KEY);
+function roleLabel(role) {
+  return ({
+    owner: "المالك",
+    secondary_admin: "مدير ثانوي",
+    moderator: "مشرف",
+    content_moderator: "مشرف محتوى",
+    support: "دعم",
+    analyst: "محلل",
+  })[role] || role;
 }
 
 async function tg(method, body = {}) {
   if (!BOT_TOKEN) throw new Error("توكن البوت غير مضاف");
-  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+  const response = await fetch("https://api.telegram.org/bot" + BOT_TOKEN + "/" + method, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -57,11 +84,11 @@ async function db(path, { method = "GET", body, prefer } = {}) {
   if (!SUPABASE_URL || !SERVICE_KEY) throw new Error("بيانات قاعدة البيانات غير مكتملة");
   const headers = {
     apikey: SERVICE_KEY,
-    Authorization: `Bearer ${SERVICE_KEY}`,
+    Authorization: "Bearer " + SERVICE_KEY,
   };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (prefer) headers.Prefer = prefer;
-  const response = await fetch(`${SUPABASE_URL}${path}`, {
+  const response = await fetch(SUPABASE_URL + path, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -74,7 +101,7 @@ async function db(path, { method = "GET", body, prefer } = {}) {
 }
 
 async function upsert(table, body, onConflict) {
-  return db(`/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
+  return db("/rest/v1/" + table + "?on_conflict=" + encodeURIComponent(onConflict), {
     method: "POST",
     body,
     prefer: "resolution=merge-duplicates,return=representation",
@@ -85,24 +112,25 @@ async function channelRows() {
   return db("/rest/v1/storage_channels?select=channel_key,channel_id,title,status,last_test_at,last_upload_at,enabled&order=channel_key.asc");
 }
 
-async function uploadRows(status = "", limit = 15) {
-  let path = "/rest/v1/upload_jobs?select=id,client_upload_id,user_id,kind,original_name,size_bytes,received_bytes,status,error,media_id,cancel_requested,created_at,updated_at,completed_at&order=created_at.desc&limit=" + limit;
+async function uploadRows(status = "", limit = 20) {
+  let path = "/rest/v1/upload_jobs?select=id,client_upload_id,user_id,kind,original_name,size_bytes,received_bytes,status,error,media_id,cancel_requested,created_at,updated_at,completed_at&order=created_at.desc&limit=" + Number(limit || 20);
   if (status) path += "&status=eq." + encodeURIComponent(status);
   return db(path);
 }
 
-async function errorRows(status = "new", limit = 15) {
-  let path = "/rest/v1/system_errors?select=id,service,code,message,status,created_at,resolved_at,bot_alerted_at&order=created_at.desc&limit=" + limit;
+async function errorRows(status = "new", limit = 20, unalerted = false) {
+  let path = "/rest/v1/system_errors?select=id,service,code,message,status,created_at,resolved_at,bot_alerted_at&order=created_at.desc&limit=" + Number(limit || 20);
   if (status) path += "&status=eq." + encodeURIComponent(status);
+  if (unalerted) path += "&bot_alerted_at=is.null";
   return db(path);
 }
 
-async function auditRows(limit = 15) {
-  return db("/rest/v1/audit_logs?select=id,actor_user_id,actor_telegram_id,action,target_type,target_id,created_at&order=created_at.desc&limit=" + limit);
+async function auditRows(limit = 20) {
+  return db("/rest/v1/audit_logs?select=id,actor_user_id,actor_telegram_id,action,target_type,target_id,created_at&order=created_at.desc&limit=" + Number(limit || 20));
 }
 
-async function adminRows() {
-  return db("/rest/v1/admins?select=user_id,role,permissions,active,last_active_at,created_at,profiles(name,username)&order=created_at.asc");
+async function botAdminRows() {
+  return db("/rest/v1/bot_admins?select=telegram_user_id,role,permissions,active,added_by_telegram_id,created_at,updated_at&order=created_at.asc");
 }
 
 async function writeBotAudit(action, targetType = null, targetId = null, details = {}) {
@@ -121,13 +149,13 @@ async function writeBotAudit(action, targetType = null, targetId = null, details
 
 async function pending(userId) {
   const rows = await db(
-    `/rest/v1/bot_pending?select=*&telegram_user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    "/rest/v1/bot_pending?select=*&telegram_user_id=eq." + encodeURIComponent(userId) + "&limit=1",
   );
   return rows?.[0] || null;
 }
 
 async function clearPending(userId) {
-  await db(`/rest/v1/bot_pending?telegram_user_id=eq.${encodeURIComponent(userId)}`, {
+  await db("/rest/v1/bot_pending?telegram_user_id=eq." + encodeURIComponent(userId), {
     method: "DELETE",
     prefer: "return=minimal",
   });
@@ -142,61 +170,101 @@ async function setPending(userId, action, payload) {
   }, "telegram_user_id");
 }
 
-function isAdmin(from) {
-  return Boolean(from && String(from.id) === ADMIN_ID);
+async function botActor(from) {
+  if (!from) return null;
+  const id = String(from.id);
+  if (id === ADMIN_ID) {
+    return { telegram_user_id: id, role: "owner", permissions: {}, active: true };
+  }
+  const rows = await db(
+    "/rest/v1/bot_admins?select=telegram_user_id,role,permissions,active&telegram_user_id=eq." +
+      encodeURIComponent(id) + "&active=eq.true&limit=1",
+  ).catch(() => []);
+  return rows?.[0] || null;
 }
 
-function mainKeyboard() {
-  return {
-    inline_keyboard: [
-      [
-        { text: "حالة النظام", callback_data: "status" },
-        { text: "قنوات التخزين", callback_data: "channels" },
-      ],
-      [
-        { text: "عمليات الرفع", callback_data: "queue" },
-        { text: "الرفع الفاشل", callback_data: "failed" },
-      ],
-      [
-        { text: "أخطاء النظام", callback_data: "errors" },
-        { text: "سجل العمليات", callback_data: "logs" },
-      ],
-      [
-        { text: "المشرفون", callback_data: "admins" },
-        { text: "اختبار القنوات", callback_data: "test_all" },
-      ],
-    ],
-  };
+function hasPermission(actor, permission) {
+  if (!actor?.active) return false;
+  if (actor.role === "owner") return true;
+  if (actor.permissions?.[permission] === true) return true;
+  if (actor.permissions?.[permission] === false) return false;
+  return rolePermissions[actor.role]?.has(permission) || false;
 }
 
-async function sendMain(chatId, text = "لوحة تشغيل آشور\n\nاختر العملية المطلوبة:") {
+async function requireActor(from, permission = "status") {
+  const actor = await botActor(from);
+  if (!actor || !hasPermission(actor, permission)) {
+    const error = new Error("غير مصرح بهذه العملية");
+    error.statusCode = 403;
+    throw error;
+  }
+  return actor;
+}
+
+function mainKeyboard(actor) {
+  const rows = [];
+  if (hasPermission(actor, "status") || hasPermission(actor, "channels")) {
+    rows.push([
+      ...(hasPermission(actor, "status") ? [{ text: "حالة النظام", callback_data: "status" }] : []),
+      ...(hasPermission(actor, "channels") ? [{ text: "قنوات التخزين", callback_data: "channels" }] : []),
+    ]);
+  }
+  if (hasPermission(actor, "uploads")) {
+    rows.push([
+      { text: "عمليات الرفع", callback_data: "queue" },
+      { text: "الرفع الفاشل", callback_data: "failed" },
+    ]);
+  }
+  if (hasPermission(actor, "errors") || hasPermission(actor, "logs")) {
+    rows.push([
+      ...(hasPermission(actor, "errors") ? [{ text: "أخطاء النظام", callback_data: "errors" }] : []),
+      ...(hasPermission(actor, "logs") ? [{ text: "سجل العمليات", callback_data: "logs" }] : []),
+    ]);
+  }
+  if (hasPermission(actor, "channels") || hasPermission(actor, "admins")) {
+    rows.push([
+      ...(hasPermission(actor, "channels") ? [{ text: "اختبار القنوات", callback_data: "test_all" }] : []),
+      ...(hasPermission(actor, "admins") ? [{ text: "مشرفو البوت", callback_data: "admins" }] : []),
+    ]);
+  }
+  return { inline_keyboard: rows.filter((row) => row.length) };
+}
+
+async function sendMain(chatId, actor, text = "لوحة تشغيل آشور\n\nاختر العملية المطلوبة:") {
   return tg("sendMessage", {
     chat_id: chatId,
     text,
-    reply_markup: mainKeyboard(),
+    reply_markup: mainKeyboard(actor),
   });
 }
 
-async function sendChannels(chatId, messageId = null) {
+async function editMain(chatId, messageId, actor, text = "لوحة تشغيل آشور\n\nاختر العملية المطلوبة:") {
+  return tg("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    reply_markup: mainKeyboard(actor),
+  });
+}
+
+async function sendChannels(chatId, actor, messageId = null) {
+  await requireActor({ id: actor.telegram_user_id }, "channels");
   const rows = await channelRows();
   const map = new Map((rows || []).map((x) => [x.channel_key, x]));
   const keyboard = channels.map(([key, title]) => {
     const linked = map.get(key)?.status === "connected" && map.get(key)?.enabled !== false;
     return [{
-      text: `${linked ? "✅" : "▫️"} ${title}`,
-      callback_data: `link:${key}`,
+      text: (linked ? "✓ " : "• ") + title,
+      callback_data: "link:" + key,
     }];
   });
   keyboard.push([{ text: "رجوع", callback_data: "home" }]);
-
   const body = {
     chat_id: chatId,
-    text: "قنوات التخزين\n\nاضغط القناة التي تريد ربطها أو تغييرها:",
+    text: "قنوات التخزين\n\nاختر القناة التي تريد ربطها أو تغييرها:",
     reply_markup: { inline_keyboard: keyboard },
   };
-  if (messageId) {
-    return tg("editMessageText", { ...body, message_id: messageId });
-  }
+  if (messageId) return tg("editMessageText", { ...body, message_id: messageId });
   return tg("sendMessage", body);
 }
 
@@ -210,7 +278,6 @@ async function validateChannel(channelId) {
   if (!["administrator", "creator"].includes(membership.status)) {
     throw new Error("البوت ليس مشرفًا في هذه القناة");
   }
-
   const test = await tg("sendMessage", {
     chat_id: channelId,
     text: "اختبار ربط تخزين آشور",
@@ -220,7 +287,6 @@ async function validateChannel(channelId) {
     chat_id: channelId,
     message_id: test.message_id,
   }).catch(() => {});
-
   return chat;
 }
 
@@ -253,32 +319,183 @@ async function saveChannel(adminId, key, channelId, chat) {
   }).catch(() => {});
 }
 
+async function sendStatus(chatId, actor) {
+  await requireActor({ id: actor.telegram_user_id }, "status");
+  const [rows, activeUploads, failedUploads, errors, admins] = await Promise.all([
+    channelRows().catch(() => []),
+    db("/rest/v1/upload_jobs?select=id&status=in.(queued,receiving,storing)&limit=1000").catch(() => []),
+    db("/rest/v1/upload_jobs?select=id&status=eq.failed&limit=1000").catch(() => []),
+    errorRows("new", 100).catch(() => []),
+    botAdminRows().catch(() => []),
+  ]);
+  const connected = (rows || []).filter((x) => x.status === "connected" && x.enabled !== false).length;
+  const text = [
+    "حالة نظام آشور",
+    "",
+    "القنوات: " + connected + " من " + channels.length,
+    "رفع جارٍ: " + (activeUploads?.length || 0),
+    "رفع فاشل: " + (failedUploads?.length || 0),
+    "أخطاء جديدة: " + (errors?.length || 0),
+    "مشرفو البوت النشطون: " + (admins || []).filter((x) => x.active).length,
+    "البوت: " + (polling ? "يعمل" : "متوقف"),
+  ].join("\n");
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: { inline_keyboard: [[{ text: "تحديث الحالة", callback_data: "status" }, { text: "رجوع", callback_data: "home" }]] },
+  });
+}
+
+async function sendUploads(chatId, actor, mode = "active") {
+  await requireActor({ id: actor.telegram_user_id }, "uploads");
+  let rows = [];
+  if (mode === "failed") {
+    rows = await uploadRows("failed", 20);
+  } else {
+    const all = await uploadRows("", 40);
+    rows = (all || []).filter((r) => ["queued", "receiving", "storing"].includes(r.status)).slice(0, 20);
+  }
+
+  if (!rows?.length) {
+    return tg("sendMessage", {
+      chat_id: chatId,
+      text: mode === "failed" ? "لا توجد عمليات رفع فاشلة." : "لا توجد عمليات رفع جارية.",
+      reply_markup: { inline_keyboard: [[{ text: "رجوع", callback_data: "home" }]] },
+    });
+  }
+
+  const lines = rows.map((r, index) => {
+    const total = Number(r.size_bytes || 0);
+    const got = Number(r.received_bytes || 0);
+    const pct = total ? Math.min(100, Math.round(got / total * 100)) : 0;
+    const detail = r.status === "failed" ? shortText(r.error || "فشل غير محدد", 80) : pct + "%";
+    return (index + 1) + ". " + shortText(r.original_name || "ملف", 45) + "\n" +
+      "   " + r.kind + " · " + formatBytes(total) + " · " + r.status + " · " + detail;
+  });
+
+  const keyboard = [];
+  if (mode !== "failed") {
+    for (const row of rows.slice(0, 8)) {
+      keyboard.push([{ text: "إلغاء: " + shortText(row.original_name || row.id, 28), callback_data: "cancel_upload:" + row.id }]);
+    }
+  }
+  keyboard.push([{ text: mode === "failed" ? "تحديث" : "تحديث العمليات", callback_data: mode === "failed" ? "failed" : "queue" }, { text: "رجوع", callback_data: "home" }]);
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text: (mode === "failed" ? "آخر عمليات الرفع الفاشلة" : "عمليات الرفع الجارية") + "\n\n" + lines.join("\n\n"),
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+async function sendErrors(chatId, actor) {
+  await requireActor({ id: actor.telegram_user_id }, "errors");
+  const rows = await errorRows("new", 15);
+  if (!rows?.length) {
+    return tg("sendMessage", {
+      chat_id: chatId,
+      text: "لا توجد أخطاء جديدة.",
+      reply_markup: { inline_keyboard: [[{ text: "تحديث", callback_data: "errors" }, { text: "رجوع", callback_data: "home" }]] },
+    });
+  }
+  const lines = rows.map((r, index) =>
+    (index + 1) + ". " + r.service + (r.code ? " · " + r.code : "") + "\n   " + shortText(r.message, 120),
+  );
+  const keyboard = rows.slice(0, 8).map((r) => [
+    { text: "تمت معالجة #" + r.id, callback_data: "resolve_error:" + r.id },
+  ]);
+  keyboard.push([{ text: "تحديث", callback_data: "errors" }, { text: "رجوع", callback_data: "home" }]);
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text: "أخطاء النظام الجديدة\n\n" + lines.join("\n\n"),
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
+async function sendLogs(chatId, actor) {
+  await requireActor({ id: actor.telegram_user_id }, "logs");
+  const rows = await auditRows(20);
+  const lines = (rows || []).map((r, index) => {
+    const actorText = r.actor_telegram_id ? "Telegram " + r.actor_telegram_id : (r.actor_user_id ? "User " + r.actor_user_id.slice(0, 8) : "System");
+    return (index + 1) + ". " + shortText(r.action, 45) + "\n   " + actorText +
+      (r.target_type ? " · " + r.target_type : "") +
+      (r.target_id ? " · " + shortText(r.target_id, 28) : "");
+  });
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text: "سجل العمليات\n\n" + (lines.join("\n\n") || "السجل فارغ."),
+    reply_markup: { inline_keyboard: [[{ text: "تحديث", callback_data: "logs" }, { text: "رجوع", callback_data: "home" }]] },
+  });
+}
+
+async function sendAdmins(chatId, actor) {
+  await requireActor({ id: actor.telegram_user_id }, "admins");
+  const rows = await botAdminRows();
+  const lines = [
+    "المالك: " + ADMIN_ID,
+    ...(rows || []).map((r, index) =>
+      (index + 1) + ". " + r.telegram_user_id + " · " + roleLabel(r.role) + " · " + (r.active ? "نشط" : "متوقف"),
+    ),
+  ];
+  const keyboard = [
+    [{ text: "إضافة مشرف", callback_data: "add_bot_admin" }],
+    ...(rows || []).slice(0, 8).map((r) => [
+      { text: (r.active ? "تعطيل " : "تفعيل ") + r.telegram_user_id, callback_data: "toggle_bot_admin:" + r.telegram_user_id },
+      { text: "حذف", callback_data: "delete_bot_admin:" + r.telegram_user_id },
+    ]),
+    [{ text: "رجوع", callback_data: "home" }],
+  ];
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text: "مشرفو بوت آشور\n\n" + lines.join("\n"),
+    reply_markup: { inline_keyboard: keyboard },
+  });
+}
+
 async function handleText(message) {
   const from = message.from;
-  if (!isAdmin(from)) {
+  const text = String(message.text || "").trim();
+
+  if (text === "/id") {
     return tg("sendMessage", {
       chat_id: message.chat.id,
-      text: "هذا البوت مخصص لإدارة تخزين آشور.",
+      text: "معرف حسابك في تيليجرام: " + String(from?.id || ""),
     }).catch(() => {});
   }
 
-  const text = String(message.text || "").trim();
+  const actor = await botActor(from);
+  if (!actor) {
+    return tg("sendMessage", {
+      chat_id: message.chat.id,
+      text: "هذا البوت مخصص لإدارة نظام آشور.",
+    }).catch(() => {});
+  }
+
   if (text === "/start" || text === "/menu") {
     await clearPending(from.id).catch(() => {});
-    return sendMain(message.chat.id);
+    return sendMain(message.chat.id, actor);
   }
+  if (text === "/status") return sendStatus(message.chat.id, actor);
+  if (text === "/queue") return sendUploads(message.chat.id, actor, "active");
+  if (text === "/errors") return sendErrors(message.chat.id, actor);
+  if (text === "/logs") return sendLogs(message.chat.id, actor);
+  if (text === "/admins") return sendAdmins(message.chat.id, actor);
+
   if (text === "/cancel" || text === "إلغاء") {
     await clearPending(from.id).catch(() => {});
-    return sendMain(message.chat.id, "تم إلغاء العملية.");
+    return sendMain(message.chat.id, actor, "تم إلغاء العملية.");
   }
 
   const p = await pending(from.id);
   if (!p || new Date(p.expires_at) <= new Date()) {
     if (p) await clearPending(from.id).catch(() => {});
-    return sendMain(message.chat.id, "اختر العملية من القائمة.");
+    return sendMain(message.chat.id, actor, "اختر العملية من القائمة.");
   }
 
   if (p.action === "link_channel") {
+    if (!hasPermission(actor, "channels")) {
+      await clearPending(from.id).catch(() => {});
+      return tg("sendMessage", { chat_id: message.chat.id, text: "لا تملك صلاحية ربط القنوات." });
+    }
     if (!/^-100\d{5,}$/.test(text)) {
       return tg("sendMessage", {
         chat_id: message.chat.id,
@@ -288,10 +505,7 @@ async function handleText(message) {
 
     const key = p.payload?.channel_key;
     const title = channels.find(([k]) => k === key)?.[1] || "القناة";
-    await tg("sendMessage", {
-      chat_id: message.chat.id,
-      text: `جارٍ فحص ${title}...`,
-    });
+    await tg("sendMessage", { chat_id: message.chat.id, text: "جارٍ فحص " + title + "..." });
 
     try {
       const chat = await validateChannel(text);
@@ -299,20 +513,56 @@ async function handleText(message) {
       await clearPending(from.id);
       await tg("sendMessage", {
         chat_id: message.chat.id,
-        text: `تم ربط ${title} بنجاح.\n\nمعرف القناة: ${text}`,
+        text: "تم ربط " + title + " بنجاح.\n\nمعرف القناة: " + text,
       });
-      return sendMain(message.chat.id);
+      return sendMain(message.chat.id, actor);
     } catch (error) {
       return tg("sendMessage", {
         chat_id: message.chat.id,
-        text: `تعذر ربط القناة:\n${error.message}\n\nتأكد أن البوت مشرف وله صلاحية النشر والحذف.`,
+        text: "تعذر ربط القناة:\n" + error.message + "\n\nتأكد أن البوت مشرف وله صلاحية النشر والحذف.",
       });
     }
+  }
+
+  if (p.action === "add_bot_admin") {
+    if (!hasPermission(actor, "admins")) {
+      await clearPending(from.id).catch(() => {});
+      return tg("sendMessage", { chat_id: message.chat.id, text: "لا تملك صلاحية إدارة المشرفين." });
+    }
+    const parts = text.split(/\s+/).filter(Boolean);
+    const telegramUserId = parts[0] || "";
+    const role = parts[1] || "moderator";
+    if (!/^\d{5,20}$/.test(telegramUserId) || !allowedBotRoles.has(role)) {
+      return tg("sendMessage", {
+        chat_id: message.chat.id,
+        text: "الصيغة غير صحيحة.\n\nأرسل: TelegramID role\nمثال: 123456789 moderator\n\nالأدوار: secondary_admin, moderator, content_moderator, support, analyst",
+      });
+    }
+    if (telegramUserId === ADMIN_ID) {
+      await clearPending(from.id).catch(() => {});
+      return tg("sendMessage", { chat_id: message.chat.id, text: "هذا الحساب هو المالك بالفعل." });
+    }
+    await upsert("bot_admins", {
+      telegram_user_id: telegramUserId,
+      role,
+      permissions: {},
+      active: true,
+      added_by_telegram_id: String(from.id),
+      updated_at: new Date().toISOString(),
+    }, "telegram_user_id");
+    await writeBotAudit("add_bot_admin", "telegram_user", telegramUserId, { role, by: String(from.id) });
+    await clearPending(from.id);
+    await tg("sendMessage", {
+      chat_id: message.chat.id,
+      text: "تمت إضافة " + telegramUserId + " بدور " + roleLabel(role) + ".",
+    });
+    return sendAdmins(message.chat.id, actor);
   }
 }
 
 async function handleCallback(query) {
-  if (!isAdmin(query.from)) {
+  const actor = await botActor(query.from);
+  if (!actor) {
     return tg("answerCallbackQuery", {
       callback_query_id: query.id,
       text: "غير مصرح",
@@ -320,94 +570,195 @@ async function handleCallback(query) {
     });
   }
 
-  await tg("answerCallbackQuery", { callback_query_id: query.id }).catch(() => {});
   const data = String(query.data || "");
   const chatId = query.message?.chat?.id;
   const messageId = query.message?.message_id;
+  await tg("answerCallbackQuery", { callback_query_id: query.id }).catch(() => {});
 
-  if (data === "home") {
-    await clearPending(query.from.id).catch(() => {});
-    return tg("editMessageText", {
-      chat_id: chatId,
-      message_id: messageId,
-      text: "لوحة تخزين آشور\n\nاختر العملية المطلوبة:",
-      reply_markup: mainKeyboard(),
-    });
-  }
-
-  if (data === "channels") return sendChannels(chatId, messageId);
-
-  if (data === "status") {
-    const rows = await channelRows();
-    const map = new Map((rows || []).map((x) => [x.channel_key, x]));
-    const lines = channels.map(([key, title]) => {
-      const row = map.get(key);
-      const mark = row?.status === "connected" && row?.enabled !== false ? "✅" : "▫️";
-      return `${mark} ${title}`;
-    });
-    return tg("sendMessage", {
-      chat_id: chatId,
-      text: `حالة تخزين آشور\n\n${lines.join("\n")}\n\nالمربوط: ${rows?.filter((x) => x.status === "connected" && x.enabled !== false).length || 0} من 10`,
-      reply_markup: {
-        inline_keyboard: [[{ text: "قنوات التخزين", callback_data: "channels" }]],
-      },
-    });
-  }
-
-  if (data === "test_all") {
-    const rows = await channelRows();
-    if (!rows?.length) {
-      return tg("sendMessage", { chat_id: chatId, text: "لا توجد قنوات مربوطة بعد." });
+  try {
+    if (data === "home") {
+      await clearPending(query.from.id).catch(() => {});
+      return editMain(chatId, messageId, actor);
     }
-    let ok = 0;
-    let failed = 0;
-    for (const row of rows) {
-      try {
-        await validateChannel(row.channel_id);
-        await db(`/rest/v1/storage_channels?channel_key=eq.${encodeURIComponent(row.channel_key)}`, {
-          method: "PATCH",
-          body: {
-            status: "connected",
-            last_test_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          prefer: "return=minimal",
-        });
-        ok++;
-      } catch (error) {
-        failed++;
-        await db(`/rest/v1/storage_channels?channel_key=eq.${encodeURIComponent(row.channel_key)}`, {
-          method: "PATCH",
-          body: {
-            status: "error",
-            last_test_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          prefer: "return=minimal",
-        }).catch(() => {});
+
+    if (data === "status") return sendStatus(chatId, actor);
+    if (data === "channels") return sendChannels(chatId, actor, messageId);
+    if (data === "queue") return sendUploads(chatId, actor, "active");
+    if (data === "failed") return sendUploads(chatId, actor, "failed");
+    if (data === "errors") return sendErrors(chatId, actor);
+    if (data === "logs") return sendLogs(chatId, actor);
+    if (data === "admins") return sendAdmins(chatId, actor);
+
+    if (data === "test_all") {
+      await requireActor(query.from, "channels");
+      const rows = await channelRows();
+      if (!rows?.length) return tg("sendMessage", { chat_id: chatId, text: "لا توجد قنوات مربوطة بعد." });
+      let ok = 0;
+      let failed = 0;
+      for (const row of rows) {
+        try {
+          await validateChannel(row.channel_id);
+          await db("/rest/v1/storage_channels?channel_key=eq." + encodeURIComponent(row.channel_key), {
+            method: "PATCH",
+            body: {
+              status: "connected",
+              last_test_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            prefer: "return=minimal",
+          });
+          ok++;
+        } catch {
+          failed++;
+          await db("/rest/v1/storage_channels?channel_key=eq." + encodeURIComponent(row.channel_key), {
+            method: "PATCH",
+            body: {
+              status: "error",
+              last_test_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            prefer: "return=minimal",
+          }).catch(() => {});
+        }
       }
+      await writeBotAudit("test_storage_channels", "storage", null, { ok, failed, by: String(query.from.id) });
+      return tg("sendMessage", {
+        chat_id: chatId,
+        text: "اكتمل فحص القنوات.\n\nتعمل: " + ok + "\nتحتاج مراجعة: " + failed,
+      });
     }
-    return tg("sendMessage", {
-      chat_id: chatId,
-      text: `اكتمل فحص القنوات.\n\nتعمل: ${ok}\nتحتاج مراجعة: ${failed}`,
-    });
-  }
 
-  if (data.startsWith("link:")) {
-    const key = data.slice(5);
-    const channel = channels.find(([k]) => k === key);
-    if (!channel) return;
-    await setPending(query.from.id, "link_channel", { channel_key: key });
+    if (data.startsWith("link:")) {
+      await requireActor(query.from, "channels");
+      const key = data.slice(5);
+      const channel = channels.find(([k]) => k === key);
+      if (!channel) return;
+      await setPending(query.from.id, "link_channel", { channel_key: key });
+      return tg("sendMessage", {
+        chat_id: chatId,
+        text: "ربط " + channel[1] + "\n\nأرسل الآن معرف القناة الذي يبدأ بـ -100.\n\nللإلغاء أرسل /cancel",
+      });
+    }
+
+    if (data.startsWith("cancel_upload:")) {
+      await requireActor(query.from, "uploads");
+      const id = data.slice("cancel_upload:".length);
+      if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("معرف الرفع غير صالح");
+      await db("/rest/v1/upload_jobs?id=eq." + encodeURIComponent(id), {
+        method: "PATCH",
+        body: { cancel_requested: true, updated_at: new Date().toISOString() },
+        prefer: "return=minimal",
+      });
+      await writeBotAudit("cancel_upload_from_bot", "upload_job", id, { by: String(query.from.id) });
+      return tg("sendMessage", { chat_id: chatId, text: "تم إرسال طلب إلغاء الرفع." });
+    }
+
+    if (data.startsWith("resolve_error:")) {
+      await requireActor(query.from, "errors");
+      const id = data.slice("resolve_error:".length);
+      if (!/^\d+$/.test(id)) throw new Error("معرف الخطأ غير صالح");
+      await db("/rest/v1/system_errors?id=eq." + encodeURIComponent(id), {
+        method: "PATCH",
+        body: { status: "resolved", resolved_at: new Date().toISOString() },
+        prefer: "return=minimal",
+      });
+      await writeBotAudit("resolve_system_error_from_bot", "system_error", id, { by: String(query.from.id) });
+      return sendErrors(chatId, actor);
+    }
+
+    if (data === "add_bot_admin") {
+      await requireActor(query.from, "admins");
+      await setPending(query.from.id, "add_bot_admin", {});
+      return tg("sendMessage", {
+        chat_id: chatId,
+        text: "أرسل معرف تيليجرام ثم الدور بهذا الشكل:\n\n123456789 moderator\n\nالأدوار: secondary_admin, moderator, content_moderator, support, analyst\n\nيمكن للمستخدم معرفة معرفه بإرسال /id.",
+      });
+    }
+
+    if (data.startsWith("toggle_bot_admin:")) {
+      await requireActor(query.from, "admins");
+      const target = data.slice("toggle_bot_admin:".length);
+      const rows = await db("/rest/v1/bot_admins?select=telegram_user_id,active&telegram_user_id=eq." + encodeURIComponent(target) + "&limit=1");
+      const row = rows?.[0];
+      if (!row) throw new Error("المشرف غير موجود");
+      await db("/rest/v1/bot_admins?telegram_user_id=eq." + encodeURIComponent(target), {
+        method: "PATCH",
+        body: { active: !row.active, updated_at: new Date().toISOString() },
+        prefer: "return=minimal",
+      });
+      await writeBotAudit("toggle_bot_admin", "telegram_user", target, { active: !row.active, by: String(query.from.id) });
+      return sendAdmins(chatId, actor);
+    }
+
+    if (data.startsWith("delete_bot_admin:")) {
+      await requireActor(query.from, "admins");
+      const target = data.slice("delete_bot_admin:".length);
+      await db("/rest/v1/bot_admins?telegram_user_id=eq." + encodeURIComponent(target), {
+        method: "DELETE",
+        prefer: "return=minimal",
+      });
+      await writeBotAudit("delete_bot_admin", "telegram_user", target, { by: String(query.from.id) });
+      return sendAdmins(chatId, actor);
+    }
+  } catch (error) {
     return tg("sendMessage", {
       chat_id: chatId,
-      text: `ربط ${channel[1]}\n\nأرسل الآن معرف القناة الذي يبدأ بـ -100.\n\nللإلغاء أرسل /cancel`,
-    });
+      text: "تعذر تنفيذ العملية:\n" + shortText(error.message, 300),
+    }).catch(() => {});
   }
 }
 
 async function processUpdate(update) {
   if (update.message?.text) return handleText(update.message);
   if (update.callback_query) return handleCallback(update.callback_query);
+}
+
+async function sendErrorAlerts() {
+  if (!configured()) return;
+  const rows = await errorRows("new", 10, true).catch(() => []);
+  if (!rows?.length) return;
+
+  const admins = await botAdminRows().catch(() => []);
+  const recipients = new Set([ADMIN_ID]);
+  for (const admin of admins || []) {
+    if (admin.active && hasPermission(admin, "errors")) recipients.add(String(admin.telegram_user_id));
+  }
+
+  for (const row of rows) {
+    const text = [
+      "تنبيه خطأ في آشور",
+      "",
+      "الخدمة: " + row.service,
+      row.code ? "الكود: " + row.code : "",
+      "الخطأ: " + shortText(row.message, 250),
+      "الوقت: " + new Date(row.created_at).toLocaleString("ar-IQ"),
+    ].filter(Boolean).join("\n");
+
+    let delivered = false;
+    for (const chatId of recipients) {
+      try {
+        await tg("sendMessage", {
+          chat_id: chatId,
+          text,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "أخطاء النظام", callback_data: "errors" },
+              { text: "تمت المعالجة", callback_data: "resolve_error:" + row.id },
+            ]],
+          },
+        });
+        delivered = true;
+      } catch {}
+    }
+
+    if (delivered) {
+      await db("/rest/v1/system_errors?id=eq." + encodeURIComponent(row.id), {
+        method: "PATCH",
+        body: { bot_alerted_at: new Date().toISOString() },
+        prefer: "return=minimal",
+      }).catch(() => {});
+    }
+  }
 }
 
 async function poll() {
@@ -445,6 +796,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       configured: configured(),
       polling,
+      alerts: Boolean(alertTimer),
       bot: me?.username || null,
     }));
   }
@@ -453,10 +805,13 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`ASHUR storage bot listening on ${PORT}`);
+  console.log("ASHUR storage bot listening on " + PORT);
   if (!configured()) {
     console.log("البوت بانتظار إضافة المتغيرات السرية.");
-  } else {
-    poll().catch((error) => console.error("[ASHUR BOT]", error));
+    return;
   }
+  alertTimer = setInterval(() => sendErrorAlerts().catch(() => {}), 30_000);
+  alertTimer.unref();
+  sendErrorAlerts().catch(() => {});
+  poll().catch((error) => console.error("[ASHUR BOT]", error));
 });

@@ -72,6 +72,39 @@ function bearer(req) {
   return value.startsWith("Bearer ") ? value.slice(7).trim() : "";
 }
 
+function mediaTicketKey() {
+  if (!config.serviceRoleKey) throw new Error("لم يتم إعداد مفتاح الخادم");
+  return crypto.createHash("sha256").update(config.serviceRoleKey).digest();
+}
+
+function createMediaTicket(mediaId, userId) {
+  const expires = Math.floor(Date.now() / 1000) + config.mediaTicketMinutes * 60;
+  const payload = `${mediaId}.${userId}.${expires}`;
+  const signature = crypto
+    .createHmac("sha256", mediaTicketKey())
+    .update(payload)
+    .digest("base64url");
+  return `${userId}.${expires}.${signature}`;
+}
+
+function verifyMediaTicket(mediaId, ticket) {
+  if (!ticket || !config.serviceRoleKey) return null;
+  const [userId, expiresRaw, signature] = String(ticket).split(".");
+  const expires = Number(expiresRaw);
+  if (!userId || !Number.isFinite(expires) || !signature || expires < Math.floor(Date.now() / 1000)) {
+    return null;
+  }
+  const payload = `${mediaId}.${userId}.${expires}`;
+  const expected = crypto
+    .createHmac("sha256", mediaTicketKey())
+    .update(payload)
+    .digest("base64url");
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  return { id: userId };
+}
+
 async function currentUser(req, required = true) {
   const user = await verifyUserToken(bearer(req));
   if (!user && required) {
@@ -375,7 +408,25 @@ async function ensureCachedMedia(media) {
   return filePath;
 }
 
-async function handleMedia(req, res, mediaId) {
+async function issueMediaTicket(req, res, mediaId) {
+  const user = await currentUser(req, true);
+  const rows = await select(
+    "media_objects",
+    `select=*&id=eq.${encodeURIComponent(mediaId)}&status=eq.ready&limit=1`,
+  );
+  const media = rows?.[0];
+  if (!media) return json(res, 404, { error: "الملف غير موجود" });
+  if (!(await canReadMedia(user, media))) {
+    return json(res, 403, { error: "لا تملك صلاحية مشاهدة هذا الملف" });
+  }
+  const ticket = createMediaTicket(mediaId, user.id);
+  return json(res, 200, {
+    path: `/v1/media/${mediaId}?ticket=${encodeURIComponent(ticket)}`,
+    expires_in_seconds: config.mediaTicketMinutes * 60,
+  });
+}
+
+async function handleMedia(req, res, mediaId, url) {
   const rows = await select(
     "media_objects",
     `select=*&id=eq.${encodeURIComponent(mediaId)}&status=eq.ready&limit=1`,
@@ -386,7 +437,9 @@ async function handleMedia(req, res, mediaId) {
     return;
   }
 
-  const user = await currentUser(req, false).catch(() => null);
+  const user =
+    verifyMediaTicket(mediaId, url?.searchParams?.get("ticket")) ||
+    await currentUser(req, false).catch(() => null);
   if (!(await canReadMedia(user, media))) {
     json(res, 403, { error: "لا تملك صلاحية مشاهدة هذا الملف" });
     return;
@@ -806,9 +859,14 @@ const server = http.createServer(async (req, res) => {
       return handleUpload(req, res, url);
     }
 
+    const ticketMatch = /^\/v1\/media-ticket\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && ticketMatch) {
+      return issueMediaTicket(req, res, ticketMatch[1]);
+    }
+
     const mediaMatch = /^\/v1\/media\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "GET" && mediaMatch) {
-      return handleMedia(req, res, mediaMatch[1]);
+      return handleMedia(req, res, mediaMatch[1], url);
     }
 
     if (url.pathname === "/v1/conversations") {

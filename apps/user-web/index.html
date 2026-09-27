@@ -286,8 +286,55 @@
     </div>
   </dialog>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"></script>
   <script src="./config.js"></script>
-  <script src="./app.js"></script>
+  <script>
+    (() => {
+      const sources = [
+        "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
+        "https://unpkg.com/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"
+      ];
+      let sourceIndex = 0;
+      let finished = false;
+
+      const fail = () => {
+        if (finished) return;
+        finished = true;
+        const splash = document.getElementById("splash");
+        if (splash) splash.remove();
+        const auth = document.getElementById("auth");
+        if (auth) auth.classList.remove("hidden");
+        const message = document.getElementById("authMessage");
+        if (message) {
+          message.textContent = "تعذر تحميل مكونات التطبيق. تحقق من اتصال الإنترنت ثم افتح التطبيق من جديد.";
+          message.className = "message error";
+        }
+      };
+
+      const loadApp = () => {
+        if (!window.supabase?.createClient) return fail();
+        const script = document.createElement("script");
+        script.src = "./app.js?v=1.0.1-fix1";
+        script.onload = () => { finished = true; };
+        script.onerror = fail;
+        document.body.appendChild(script);
+      };
+
+      const loadSupabase = () => {
+        if (sourceIndex >= sources.length) return fail();
+        const script = document.createElement("script");
+        script.src = sources[sourceIndex++];
+        script.async = false;
+        script.onload = loadApp;
+        script.onerror = loadSupabase;
+        document.head.appendChild(script);
+      };
+
+      setTimeout(() => {
+        if (!finished && !window.supabase?.createClient) fail();
+      }, 12000);
+
+      loadSupabase();
+    })();
+  </script>
 </body>
 </html>

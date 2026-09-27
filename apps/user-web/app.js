@@ -218,7 +218,9 @@
     if($("#searchInput").value.trim()) return runSearch();
     const {data}=await client.from("reels").select("id,media_id,caption,author_id").eq("explore_enabled",true).order("created_at",{ascending:false}).limit(24);
     $("#searchResults").innerHTML=(data||[]).map(r=>`<div class="list-card"><div class="grow"><b>ريلز</b><div>${escapeHtml(r.caption||"")}</div></div><button class="small-button" data-open-media="${r.media_id}">فتح</button></div>`).join("")||'<div class="empty">سيظهر المحتوى المقترح هنا.</div>';
-    $("#searchResults").querySelectorAll("[data-open-media]").forEach(b=>b.onclick=()=>window.open(apiUrl("/v1/media/"+b.dataset.openMedia),"_blank"));
+    $("#searchResults").querySelectorAll("[data-open-media]").forEach(b=>b.onclick=async()=>{
+      try{ window.open(await mediaUrl(b.dataset.openMedia),"_blank"); }catch(_){}
+    });
   }
 
   let searchTimer;

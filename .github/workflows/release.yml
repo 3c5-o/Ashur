@@ -1,0 +1,107 @@
+name: إصدار آشور الرسمي
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "release-trigger.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المشروع
+        uses: actions/checkout@v4
+
+      - name: قراءة رقم الإصدار
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(cat release-trigger.txt | tr -d '[:space:]')"
+          if [ -z "$VERSION" ]; then
+            echo "رقم الإصدار مفقود"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: التحقق من أسرار التوقيع
+        env:
+          KEYSTORE_B64: ${{ secrets.ASHUR_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ASHUR_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          test -n "$KEYSTORE_B64" || (echo "ASHUR_KEYSTORE_BASE64 غير موجود" && exit 1)
+          test -n "$STORE_PASS" || (echo "ASHUR_KEYSTORE_PASSWORD غير موجود" && exit 1)
+          test -n "$KEY_ALIAS" || (echo "ASHUR_KEY_ALIAS غير موجود" && exit 1)
+          test -n "$KEY_PASS" || (echo "ASHUR_KEY_PASSWORD غير موجود" && exit 1)
+
+      - name: إعداد جافا
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: تثبيت حزم أندرويد
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: إعداد Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: تجهيز مفتاح التوقيع
+        env:
+          KEYSTORE_B64: ${{ secrets.ASHUR_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/ashur-release.jks"
+          chmod 600 "$RUNNER_TEMP/ashur-release.jks"
+
+      - name: بناء نسخة المستخدم الرسمية
+        env:
+          ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
+          ONESIGNAL_APP_ID: ${{ vars.ONESIGNAL_APP_ID }}
+          ASHUR_KEYSTORE_FILE: ${{ runner.temp }}/ashur-release.jks
+          ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_KEY_PASSWORD }}
+        run: gradle -p android/user :app:assembleRelease --stacktrace
+
+      - name: بناء نسخة الإدارة الرسمية
+        env:
+          ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
+          ASHUR_KEYSTORE_FILE: ${{ runner.temp }}/ashur-release.jks
+          ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_KEY_PASSWORD }}
+        run: gradle -p android/admin :app:assembleRelease --stacktrace
+
+      - name: تجهيز ملفات الإصدار
+        shell: bash
+        run: |
+          mkdir -p release
+          cp android/user/app/build/outputs/apk/release/*.apk "release/ASHUR-User-v${{ steps.version.outputs.version }}.apk"
+          cp android/admin/app/build/outputs/apk/release/*.apk "release/ASHUR-Admin-v${{ steps.version.outputs.version }}.apk"
+
+      - name: إنشاء إصدار GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "آشور v${{ steps.version.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            release/ASHUR-User-v${{ steps.version.outputs.version }}.apk
+            release/ASHUR-Admin-v${{ steps.version.outputs.version }}.apk

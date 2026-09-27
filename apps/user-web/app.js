@@ -1592,7 +1592,7 @@
 
   async function loadProfileContent(kind="posts"){
     state.profileTab=kind;
-    $(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
+    $$(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
     if(kind==="reels"){
       const {data,error}=await client.from("reels").select("id,caption,media_id,created_at,comments_enabled").eq("author_id",state.user.id).order("created_at",{ascending:false});
       if(error){$("#profileContent").innerHTML=errorMarkup(error.message,"profilePage");return}

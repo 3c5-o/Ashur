@@ -2,7 +2,8 @@
 const cfg=window.ASHUR_ADMIN_CONFIG;
 const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey,{auth:{persistSession:true,autoRefreshToken:true}});
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const apiBase=()=> (cfg.apiBaseUrl||location.origin).replace(/\/$/,"");
+const nativeApiBase=()=>{try{return window.AshurNative?.getApiBaseUrl?.()||""}catch{return ""}};
+const apiBase=()=> (cfg.apiBaseUrl||nativeApiBase()||location.origin).replace(/\/$/,"");
 const esc=(v="")=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
 async function api(path,opt={}){const h=new Headers(opt.headers||{});const t=await token();if(t)h.set("Authorization","Bearer "+t);if(opt.body&&!h.has("Content-Type"))h.set("Content-Type","application/json");const r=await fetch(apiBase()+path,{...opt,headers:h});const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.error||"تعذر تنفيذ الطلب");return b}

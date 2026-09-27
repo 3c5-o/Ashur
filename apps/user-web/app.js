@@ -448,6 +448,7 @@
   let searchTimer;
   $("#searchInput").oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(runSearch,300)};
   async function runSearch(){
+    $("#searchResults").classList.remove("explore-media-grid");
     const q=$("#searchInput").value.trim();
     if(!q)return loadExplore();
     const {data,error}=await client.from("profiles").select("id,name,username,avatar_media_id,is_verified,is_private").or(`name.ilike.%${q.replace(/[,%]/g,"")}%,username.ilike.%${q.replace(/[,%]/g,"")}%`).limit(30);

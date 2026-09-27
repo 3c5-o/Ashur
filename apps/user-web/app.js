@@ -6,7 +6,13 @@
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
-  const state = { user:null, profile:null, composerType:"post", activeConversation:null };
+  const state = {
+    user:null,
+    profile:null,
+    composerType:"post",
+    activeConversation:null,
+    commentTarget:null
+  };
 
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const initials = (name="آشور") => escapeHtml(name.trim().slice(0,1) || "آ");
@@ -197,12 +203,13 @@
       return `<article class="post">
         <div class="post-head">${avatar(p)}<div class="post-user"><b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?" ✓":""}</b><small>@${escapeHtml(p.username||"")}</small></div></div>
         ${media?`<img class="post-media" loading="lazy" data-media-id="${media}" alt="">`:""}
-        <div class="post-body"><div class="post-actions"><button class="action" data-like-post="${post.id}">إعجاب</button><button class="action">تعليق</button><button class="action">حفظ</button></div>
+        <div class="post-body"><div class="post-actions"><button class="action" data-like-post="${post.id}">إعجاب</button><button class="action" data-comment-post="${post.id}">تعليق</button><button class="action">حفظ</button></div>
         ${post.caption?`<p class="caption">${escapeHtml(post.caption)}</p>`:""}</div>
       </article>`
     }).join("");
     await hydrateMedia($("#feed"));
     $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
+    $("#feed").querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
   }
 
   async function toggleLike(type,id,button){
@@ -250,10 +257,11 @@
       const p=ps[r.author_id]||{};
       return `<article class="reel"><video playsinline controls preload="metadata" data-media-id="${r.media_id}"></video>
       <div class="reel-overlay"><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><p>${escapeHtml(r.caption||"")}</p></div>
-      <div class="reel-actions"><button class="action" data-like-reel="${r.id}">إعجاب</button></div></article>`
+      <div class="reel-actions"><button class="action" data-like-reel="${r.id}">إعجاب</button><button class="action" data-comment-reel="${r.id}">تعليق</button></div></article>`
     }).join("")||'<div class="empty">لا توجد ريلز بعد.</div>';
     await hydrateMedia($("#reelsFeed"));
     $("#reelsFeed").querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
+    $("#reelsFeed").querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
   }
 
   async function loadConversations(){
@@ -280,6 +288,52 @@
   };
   $("#closeChat").onclick=()=>$("#chatDialog").close();
 
+  async function openComments(type,id){
+    state.commentTarget={type,id};
+    $("#commentsDialog").showModal();
+    await loadComments();
+  }
+
+  async function loadComments(){
+    if(!state.commentTarget)return;
+    const field=state.commentTarget.type==="post"?"post_id":"reel_id";
+    const {data,error}=await client.from("comments")
+      .select("id,author_id,body,created_at")
+      .eq(field,state.commentTarget.id)
+      .order("created_at",{ascending:true})
+      .limit(150);
+    if(error){
+      $("#commentsList").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      return;
+    }
+    const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
+    $("#commentsList").innerHTML=(data||[]).map(row=>{
+      const p=profiles[row.author_id]||{};
+      return `<div class="list-card">${avatar(p)}<div class="grow"><div class="comment-author">${escapeHtml(p.name||p.username||"مستخدم")}</div><div>${escapeHtml(row.body)}</div><div class="comment-time">${new Date(row.created_at).toLocaleString("ar-IQ")}</div></div></div>`;
+    }).join("")||'<div class="empty">لا توجد تعليقات بعد.</div>';
+    await hydrateMedia($("#commentsList"));
+    $("#commentsList").scrollTop=$("#commentsList").scrollHeight;
+  }
+
+  $("#commentForm").onsubmit=async(e)=>{
+    e.preventDefault();
+    if(!state.commentTarget)return;
+    const body=$("#commentInput").value.trim();
+    if(!body)return;
+    const payload={
+      author_id:state.user.id,
+      body,
+      post_id:state.commentTarget.type==="post"?state.commentTarget.id:null,
+      reel_id:state.commentTarget.type==="reel"?state.commentTarget.id:null
+    };
+    const {error}=await client.from("comments").insert(payload);
+    if(!error){
+      $("#commentInput").value="";
+      await loadComments();
+    }
+  };
+  $("#closeComments").onclick=()=>$("#commentsDialog").close();
+
   async function loadProfile(){
     await refreshProfile();
     const [{count:posts},{count:followers},{count:following}] = await Promise.all([
@@ -289,8 +343,14 @@
     ]);
     $("#profileCard").innerHTML=`<div class="profile-top">${avatar(state.profile)}<div><h2>${escapeHtml(state.profile.name||"مستخدم")}</h2><div>@${escapeHtml(state.profile.username||"")}</div><p>${escapeHtml(state.profile.bio||"")}</p></div></div>
     <div class="profile-stats"><div><b>${posts||0}</b><span>منشور</span></div><div><b>${followers||0}</b><span>متابع</span></div><div><b>${following||0}</b><span>يتابع</span></div></div>
-    <button id="logoutButton" class="small-button" style="margin-top:14px">تسجيل الخروج</button>`;
+    <div class="profile-buttons">
+      <button id="editProfileButton" class="small-button">تعديل الحساب</button>
+      <button id="settingsButton" class="small-button">الإعدادات</button>
+      <button id="logoutButton" class="small-button">تسجيل الخروج</button>
+    </div>`;
     $("#logoutButton").onclick=()=>client.auth.signOut();
+    $("#editProfileButton").onclick=openEditProfile;
+    $("#settingsButton").onclick=openSettings;
     const {data}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
     $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(p.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
     await hydrateMedia($("#profileCard"));
@@ -355,6 +415,150 @@
     return body;
   }
 
-  $("#newMessageButton").onclick=()=>alert("إنشاء المحادثات الجديدة سيظهر هنا بعد ربط البحث بالمحادثات.");
+  $("#newMessageButton").onclick=()=>{
+    $("#newConversationUsername").value="";
+    $("#newConversationResult").innerHTML="";
+    $("#newConversationDialog").showModal();
+  };
+  $("#closeNewConversation").onclick=()=>$("#newConversationDialog").close();
+
+  $("#findConversationUser").onclick=async()=>{
+    const username=$("#newConversationUsername").value.trim().toLowerCase();
+    if(!username){
+      $("#newConversationResult").innerHTML='<div class="empty">اكتب اسم المستخدم.</div>';
+      return;
+    }
+    const {data,error}=await client.from("profiles")
+      .select("id,name,username,avatar_media_id,is_verified")
+      .eq("username",username)
+      .neq("id",state.user.id)
+      .limit(1);
+    if(error||!data?.length){
+      $("#newConversationResult").innerHTML='<div class="empty">لم يتم العثور على الحساب.</div>';
+      return;
+    }
+    const p=data[0];
+    $("#newConversationResult").innerHTML=`<div class="list-card">${avatar(p)}<div class="grow"><b>${escapeHtml(p.name||"مستخدم")}</b><div>@${escapeHtml(p.username||"")}</div></div><button class="small-button" data-start-chat="${p.id}">بدء المحادثة</button></div>`;
+    await hydrateMedia($("#newConversationResult"));
+    $("#newConversationResult").querySelector("[data-start-chat]").onclick=async()=>{
+      try{
+        const conversation=await api("/v1/conversations",{
+          method:"POST",
+          body:JSON.stringify({kind:"direct",target_user_id:p.id})
+        });
+        $("#newConversationDialog").close();
+        await loadConversations();
+        await openChat(conversation.id,p.name||p.username||"محادثة");
+      }catch(error){
+        $("#newConversationResult").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      }
+    };
+  };
+
+  function openEditProfile(){
+    $("#editName").value=state.profile?.name||"";
+    $("#editUsername").value=state.profile?.username||"";
+    $("#editBio").value=state.profile?.bio||"";
+    $("#editPrivate").checked=!!state.profile?.is_private;
+    $("#editAvatarFile").value="";
+    $("#editProfileMessage").textContent="";
+    $("#editProfileDialog").showModal();
+  }
+  $("#closeEditProfile").onclick=()=>$("#editProfileDialog").close();
+  $("#editProfileForm").onsubmit=async(e)=>{
+    e.preventDefault();
+    const name=$("#editName").value.trim();
+    const username=$("#editUsername").value.trim().toLowerCase();
+    const bio=$("#editBio").value.trim();
+    if(!name)return;
+    if(!/^[a-z0-9_]{3,24}$/.test(username)){
+      $("#editProfileMessage").textContent="اسم المستخدم غير صالح";
+      return;
+    }
+    $("#editProfileMessage").textContent="جارٍ الحفظ...";
+    try{
+      let avatarMediaId=state.profile?.avatar_media_id||null;
+      const file=$("#editAvatarFile").files[0];
+      if(file){
+        if(file.size>10*1024*1024)throw new Error("صورة الحساب يجب ألا تتجاوز 10 ميغابايت");
+        const media=await uploadFile(file,"profile");
+        avatarMediaId=media.id;
+      }
+      const {error}=await client.from("profiles").update({
+        name,
+        username,
+        bio,
+        is_private:$("#editPrivate").checked,
+        avatar_media_id:avatarMediaId,
+        updated_at:new Date().toISOString()
+      }).eq("id",state.user.id);
+      if(error)throw error;
+      await refreshProfile();
+      $("#editProfileDialog").close();
+      await loadProfile();
+    }catch(error){
+      $("#editProfileMessage").textContent=error.message;
+    }
+  };
+
+  async function openSettings(){
+    const {data}=await client.from("notification_preferences")
+      .select("*").eq("user_id",state.user.id).single();
+    const p=data||{};
+    $("#notifyMessages").checked=p.messages!==false;
+    $("#notifyGroups").checked=p.groups!==false;
+    $("#notifyLikes").checked=p.likes!==false;
+    $("#notifyComments").checked=p.comments!==false;
+    $("#notifyFollows").checked=p.follows!==false;
+    $("#notifyStories").checked=p.stories!==false;
+    $("#notifySystem").checked=p.system!==false;
+    $("#notifyPreview").checked=p.preview_message!==false;
+    await loadFollowRequests();
+    $("#settingsDialog").showModal();
+  }
+  $("#closeSettings").onclick=()=>$("#settingsDialog").close();
+
+  $("#notificationSettingsForm").onsubmit=async(e)=>{
+    e.preventDefault();
+    const {error}=await client.from("notification_preferences").update({
+      messages:$("#notifyMessages").checked,
+      groups:$("#notifyGroups").checked,
+      likes:$("#notifyLikes").checked,
+      comments:$("#notifyComments").checked,
+      follows:$("#notifyFollows").checked,
+      stories:$("#notifyStories").checked,
+      system:$("#notifySystem").checked,
+      preview_message:$("#notifyPreview").checked,
+      updated_at:new Date().toISOString()
+    }).eq("user_id",state.user.id);
+    if(!error) $("#settingsDialog").close();
+  };
+
+  async function loadFollowRequests(){
+    const {data,error}=await client.from("follows")
+      .select("follower_id,created_at")
+      .eq("following_id",state.user.id)
+      .eq("status","pending")
+      .order("created_at",{ascending:false});
+    if(error){
+      $("#followRequestsList").innerHTML='<div class="empty">تعذر تحميل الطلبات.</div>';
+      return;
+    }
+    const ps=await profilesMap((data||[]).map(x=>x.follower_id));
+    $("#followRequestsList").innerHTML=(data||[]).map(row=>{
+      const p=ps[row.follower_id]||{};
+      return `<div class="list-card">${avatar(p)}<div class="grow"><b>${escapeHtml(p.name||"مستخدم")}</b><div>@${escapeHtml(p.username||"")}</div></div><button class="small-button" data-accept-follow="${row.follower_id}">قبول</button><button class="small-button" data-reject-follow="${row.follower_id}">رفض</button></div>`;
+    }).join("")||'<div class="empty">لا توجد طلبات متابعة.</div>';
+    await hydrateMedia($("#followRequestsList"));
+    $("#followRequestsList").querySelectorAll("[data-accept-follow]").forEach(b=>b.onclick=async()=>{
+      await client.from("follows").update({status:"accepted"}).eq("follower_id",b.dataset.acceptFollow).eq("following_id",state.user.id);
+      loadFollowRequests();
+    });
+    $("#followRequestsList").querySelectorAll("[data-reject-follow]").forEach(b=>b.onclick=async()=>{
+      await client.from("follows").delete().eq("follower_id",b.dataset.rejectFollow).eq("following_id",state.user.id);
+      loadFollowRequests();
+    });
+  }
+
   boot().catch(e=>{console.error(e);showAuthMessage("حدث خطأ أثناء بدء التطبيق")});
 })();

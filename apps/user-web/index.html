@@ -172,7 +172,7 @@
     <div class="sheet-handle"></div>
     <div class="sheet-title"><div><span class="eyebrow">نشر جديد</span><h3 id="composerTitle">إنشاء منشور</h3></div></div>
     <label class="file-drop">
-      <input id="composerFile" type="file" accept="image/*,video/*">
+      <input id="composerFile" type="file" accept="image/*,video/*" multiple>
       <span class="upload-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 15v5h16v-5"/></svg></span>
       <b>اختر صورة أو فيديو</b>
       <small>الحد الأقصى حسب نوع المحتوى</small>
@@ -180,6 +180,15 @@
     <div id="composerPreview" class="composer-preview hidden"></div>
     <div id="composerFileMeta" class="composer-file-meta hidden"></div>
     <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا للمحتوى..."></textarea>
+    <div id="composerOptions" class="composer-options">
+      <label><span>من يشاهد المحتوى؟</span>
+        <select id="composerVisibility">
+          <option value="public">الجميع</option>
+          <option value="followers">المتابعون فقط</option>
+        </select>
+      </label>
+      <label class="switch-row"><span><b>السماح بالتعليقات</b><small>تقدر تغيرها لاحقًا</small></span><input id="composerCommentsEnabled" type="checkbox" checked></label>
+    </div>
     <div id="uploadProgress" class="upload-progress-wrap hidden">
       <div class="progress"><div></div></div>
       <span id="uploadProgressText">0%</span>

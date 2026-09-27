@@ -284,13 +284,16 @@
     showAuthMessage(error?error.message:"تم إرسال رابط استعادة كلمة المرور",!error);
   };
 
-  function navigateTo(page){
-    $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
-    if(page==="searchPage")loadExplore();
-    if(page==="reelsPage")loadReels();
-    if(page==="messagesPage")loadConversations();
-    if(page==="profilePage")loadProfile();
+  async function navigateTo(page){
+    $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    if(page!=="reelsPage"){
+      $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
+    }
+    if(page==="searchPage")await loadExplore();
+    if(page==="reelsPage")await loadReels();
+    if(page==="messagesPage")await loadConversations();
+    if(page==="profilePage")await loadProfile();
     window.scrollTo({top:0,behavior:"smooth"});
   }
   $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
@@ -462,10 +465,14 @@
 
   async function shareContent(type,id){
     const text=type==="reel"?"ريلز على آشور":"منشور على آشور";
-    const url=location.origin+location.pathname+"#"+type+"-"+id;
+    const base=(cfg.shareBaseUrl||"").replace(/\/$/,"");
+    const url=base?base+"/#"+type+"-"+id:"";
     try{
-      if(navigator.share)await navigator.share({title:"آشور",text,url});
-      else await navigator.clipboard.writeText(url);
+      if(navigator.share){
+        await navigator.share({title:"آشور",text,...(url?{url}:{})});
+      }else if(url){
+        await navigator.clipboard.writeText(url);
+      }
     }catch(_){}
   }
 
@@ -579,8 +586,7 @@
       });
       $("#searchResults").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
       $("#searchResults").querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=async()=>{
-        navigateTo("reelsPage");
-        await loadReels();
+        await navigateTo("reelsPage");
         requestAnimationFrame(()=>{
           const target=$(`.reel[data-reel-id="${b.dataset.openReel}"]`);
           target?.scrollIntoView({block:"start"});
@@ -1329,6 +1335,16 @@
     });
   }
 
+
+  document.addEventListener("click",e=>{
+    const link=e.target.closest?.("a[href]");
+    if(!link)return;
+    const href=link.href||"";
+    if(/^https?:\/\//i.test(href) && window.AshurNative?.openExternal){
+      e.preventDefault();
+      try{window.AshurNative.openExternal(href)}catch(_){}
+    }
+  });
 
   window.ASHUR_HANDLE_BACK=()=>{
     const openDialogs=[...document.querySelectorAll("dialog[open]")];

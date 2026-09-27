@@ -14,6 +14,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import org.json.JSONObject;
+
 import androidx.annotation.Nullable;
 import androidx.webkit.WebViewAssetLoader;
 
@@ -25,10 +27,13 @@ public class MainActivity extends Activity {
     private static final String LOCAL_APP_URL = "https://appassets.androidplatform.net/assets/www/index.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
+    private String pendingDeepLink;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        pendingDeepLink = getIntent() != null ? getIntent().getDataString() : null;
 
         webView = new WebView(this);
         setContentView(webView);
@@ -67,6 +72,11 @@ public class MainActivity extends Activity {
                     return false;
                 }
 
+                if ("ashur".equalsIgnoreCase(scheme) && "reset-password".equalsIgnoreCase(host)) {
+                    handleDeepLink(uri.toString());
+                    return true;
+                }
+
                 if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
                     try {
                         startActivity(new Intent(Intent.ACTION_VIEW, uri));
@@ -75,7 +85,13 @@ public class MainActivity extends Activity {
                         return true;
                     }
                 }
-                return false;
+                return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                dispatchPendingDeepLink();
             }
         });
 
@@ -100,6 +116,37 @@ public class MainActivity extends Activity {
 
         webView.addJavascriptInterface(new AshurBridge(), "AshurNative");
         webView.loadUrl(LOCAL_APP_URL);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String deepLink = intent != null ? intent.getDataString() : null;
+        if (deepLink != null && !deepLink.isBlank()) {
+            handleDeepLink(deepLink);
+        }
+    }
+
+    private void handleDeepLink(String deepLink) {
+        if (deepLink == null || deepLink.isBlank()) return;
+        pendingDeepLink = deepLink;
+        dispatchPendingDeepLink();
+    }
+
+    private void dispatchPendingDeepLink() {
+        if (webView == null || pendingDeepLink == null || pendingDeepLink.isBlank()) return;
+        final String deepLink = pendingDeepLink;
+        webView.evaluateJavascript(
+                "(function(){try{if(window.ASHUR_HANDLE_AUTH_LINK){window.ASHUR_HANDLE_AUTH_LINK(" +
+                        JSONObject.quote(deepLink) +
+                        ");return true;}return false;}catch(e){return false;}})()",
+                handled -> {
+                    if ("true".equals(handled)) {
+                        pendingDeepLink = null;
+                    }
+                }
+        );
     }
 
     @Override

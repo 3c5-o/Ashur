@@ -195,6 +195,15 @@
     state.profile=data;
   }
 
+  async function ensureProfileIdentity(){
+    if(!state.user||state.profile?.username)return;
+    const username=String(state.user.user_metadata?.username||"").trim().toLowerCase();
+    const name=String(state.user.user_metadata?.name||state.profile?.name||"مستخدم").trim();
+    if(!/^[a-z0-9_]{3,24}$/.test(username))return;
+    const {error}=await client.rpc("claim_username",{p_username:username,p_name:name});
+    if(!error)await refreshProfile();
+  }
+
   async function boot(){
     const splash=$("#splash");
     const closeSplash=()=>{
@@ -209,6 +218,7 @@
       state.user=session?.user || null;
       if(state.user){
         await refreshProfile();
+        await ensureProfileIdentity();
         await nativeLogin(state.user.id);
         showApp(true);
         await checkRuntimeSettings();
@@ -235,6 +245,7 @@
     state.user=session?.user || null;
     if(state.user){
       await refreshProfile().catch(()=>{});
+      await ensureProfileIdentity().catch(()=>{});
       await nativeLogin(state.user.id);
       showApp(true);
       checkRuntimeSettings(); loadHome(); loadNotificationsBadge();
@@ -265,12 +276,25 @@
     const email=$("#registerEmail").value.trim(), p1=$("#registerPassword").value, p2=$("#registerPassword2").value;
     if(p1!==p2) return showAuthMessage("كلمتا المرور غير متطابقتين");
     if(!/^[a-z0-9_]{3,24}$/.test(username)) return showAuthMessage("اسم المستخدم يقبل الحروف الإنجليزية والأرقام والشرطة السفلية فقط");
+    showAuthMessage("جارٍ التحقق من اسم المستخدم...",true);
+    const {data:existingUsername,error:checkError}=await client.from("profiles")
+      .select("id")
+      .eq("username",username)
+      .maybeSingle();
+    if(checkError)return showAuthMessage("تعذر التحقق من اسم المستخدم");
+    if(existingUsername)return showAuthMessage("اسم المستخدم مستخدم بالفعل");
+
     showAuthMessage("جارٍ إنشاء الحساب...",true);
-    const {data,error}=await client.auth.signUp({email,password:p1,options:{data:{name}}});
+    const {data,error}=await client.auth.signUp({
+      email,
+      password:p1,
+      options:{data:{name,username}}
+    });
     if(error) return showAuthMessage(error.message);
     if(data.session){
       const {error:claimError}=await client.rpc("claim_username",{p_username:username,p_name:name});
       if(claimError) return showAuthMessage(claimError.message);
+      await refreshProfile().catch(()=>{});
       showAuthMessage("تم إنشاء الحساب",true);
     }else{
       showAuthMessage("تم إنشاء الحساب. افتح رسالة التحقق في بريدك ثم سجّل الدخول.",true);

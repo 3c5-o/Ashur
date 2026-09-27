@@ -1,0 +1,43 @@
+name: فحص كود آشور
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**/*.js"
+      - "services/**/*.mjs"
+      - ".github/workflows/code-check.yml"
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    name: فحص ملفات جافاسكربت
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المشروع
+        uses: actions/checkout@v4
+
+      - name: إعداد نود
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: فحص نسخة المستخدم
+        run: node --check apps/user-web/app.js
+
+      - name: فحص نسخة الإدارة
+        run: node --check apps/admin-web/app.js
+
+      - name: فحص الموقع
+        run: node --check apps/site/app.js
+
+      - name: فحص بوابة آشور
+        run: |
+          node --check services/api/src/config.mjs
+          node --check services/api/src/supabase.mjs
+          node --check services/api/src/telegram.mjs
+          node --check services/api/src/onesignal.mjs
+          node --check services/api/src/server.mjs
+
+      - name: فحص بوت التخزين
+        run: node --check services/bot/src/bot.mjs

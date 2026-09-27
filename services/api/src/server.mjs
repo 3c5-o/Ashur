@@ -512,20 +512,27 @@ async function listConversations(req, res) {
       `select=body,created_at&conversation_id=eq.${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=1`,
     );
     let title = conversation.title || "";
-    if (!title && conversation.kind === "direct") {
+    let peerProfile = null;
+    if (conversation.kind === "direct") {
       const members = await select(
         "conversation_members",
         `select=user_id&conversation_id=eq.${encodeURIComponent(conversation.id)}&user_id=neq.${encodeURIComponent(user.id)}&limit=1`,
       );
       if (members?.[0]) {
-        const profile = await profileFor(members[0].user_id);
-        title = profile?.name || profile?.username || "محادثة";
+        const profiles = await select(
+          "profiles",
+          `select=id,name,username,avatar_media_id,is_verified&id=eq.${encodeURIComponent(members[0].user_id)}&limit=1`,
+        );
+        peerProfile = profiles?.[0] || null;
+        if (!title) title = peerProfile?.name || peerProfile?.username || "محادثة";
       }
     }
     items.push({
       ...conversation,
       title: title || "محادثة",
+      peer_profile: peerProfile,
       last_message: messages?.[0]?.body || "",
+      updated_at: messages?.[0]?.created_at || conversation.updated_at,
     });
   }
   json(res, 200, { items });

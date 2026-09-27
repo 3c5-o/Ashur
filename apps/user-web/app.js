@@ -311,9 +311,14 @@
     };
     setFeature("reelsPage","reels");
     setFeature("messagesPage","messages");
+    setFeature("searchPage","search");
     $("#publishButton").classList.toggle("hidden",state.features.uploads===false);
+    $("#notificationsButton").classList.toggle("hidden",state.features.notifications===false);
+    $("#savedContentButton")?.classList.toggle("hidden",state.features.saved===false);
+    $("#supportTicketsButton")?.classList.toggle("hidden",state.features.support===false);
     $("#registerTab").classList.toggle("hidden",state.features.registration===false);
     $(".home-intro").classList.toggle("stories-disabled",state.features.stories===false);
+    document.body.classList.toggle("comments-disabled",state.features.comments===false);
 
     const current=cfg.appVersion||"1.0.0";
     const required=Boolean(version.required) ||

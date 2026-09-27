@@ -1215,6 +1215,77 @@
     openEditProfile();
   };
 
+  function openInfoDialog(title,html){
+    $("#infoDialogTitle").textContent=title;
+    $("#infoDialogBody").innerHTML=html;
+    $("#settingsDialog").close();
+    $("#infoDialog").showModal();
+  }
+  $("#closeInfoDialog").onclick=()=>$("#infoDialog").close();
+
+  $("#blockedAccountsButton").onclick=async()=>{
+    const {data,error}=await client.from("blocks")
+      .select("blocked_id,created_at")
+      .eq("blocker_id",state.user.id)
+      .order("created_at",{ascending:false});
+    if(error){
+      return openInfoDialog("الحسابات المحظورة",'<div class="empty error">تعذر تحميل القائمة.</div>');
+    }
+    const profiles=await profilesMap((data||[]).map(x=>x.blocked_id));
+    const html=(data||[]).map(row=>{
+      const p=profiles[row.blocked_id]||{};
+      return `<div class="list-card">
+        ${avatar(p)}
+        <div class="grow"><b>${escapeHtml(p.name||"مستخدم")}</b><div>@${escapeHtml(p.username||"")}</div></div>
+        <button class="small-button" data-unblock="${row.blocked_id}" type="button">رفع الحظر</button>
+      </div>`;
+    }).join("")||'<div class="empty">لا توجد حسابات محظورة.</div>';
+    openInfoDialog("الحسابات المحظورة",`<div id="blockedList" class="list compact">${html}</div>`);
+    await hydrateMedia($("#infoDialogBody"));
+    $("#infoDialogBody").querySelectorAll("[data-unblock]").forEach(btn=>btn.onclick=async()=>{
+      const {error:removeError}=await client.from("blocks")
+        .delete()
+        .eq("blocker_id",state.user.id)
+        .eq("blocked_id",btn.dataset.unblock);
+      if(!removeError)btn.closest(".list-card")?.remove();
+    });
+  };
+
+  $("#securitySessionsButton").onclick=()=>{
+    const email=state.user?.email||"غير متوفر";
+    openInfoDialog("الأمان والجلسات",`
+      <div class="settings-info">
+        <div class="info-row"><span>البريد الحالي</span><b>${escapeHtml(email)}</b></div>
+        <div class="info-row"><span>حالة الجلسة</span><b>نشطة</b></div>
+        <button id="globalSignOutButton" class="danger-wide" type="button">تسجيل الخروج من جميع الأجهزة</button>
+      </div>`);
+    $("#globalSignOutButton").onclick=async()=>{
+      $("#globalSignOutButton").disabled=true;
+      await client.auth.signOut({scope:"global"});
+      $("#infoDialog").close();
+    };
+  };
+
+  $("#helpButton").onclick=()=>{
+    openInfoDialog("المساعدة",`
+      <div class="settings-info help-copy">
+        <h4>استخدام آشور</h4>
+        <p>من زر الإضافة بالأعلى تقدر تنشر منشور أو قصة أو ريلز. من البحث تقدر تختار الحسابات أو المنشورات أو الريلز. ومن الرسائل تقدر تبدأ محادثة باسم المستخدم.</p>
+        <h4>إذا ما ظهر المحتوى</h4>
+        <p>تأكد من اتصال الإنترنت، ثم ارجع للرئيسية وأعد فتح القسم. التطبيق يعرض رسالة واضحة إذا تعذر الاتصال بالخدمة.</p>
+      </div>`);
+  };
+
+  $("#aboutButton").onclick=()=>{
+    openInfoDialog("حول آشور",`
+      <div class="settings-info about-card">
+        <img src="./assets/logo.svg" class="about-logo" alt="آشور">
+        <h3>آشور</h3>
+        <p>منصة اجتماعية عربية.</p>
+        <div class="info-row"><span>الإصدار</span><b>${escapeHtml(cfg.appVersion||"")}</b></div>
+      </div>`);
+  };
+
   $("#notificationSettingsForm").onsubmit=async(e)=>{
     e.preventDefault();
     const {error}=await client.from("notification_preferences").upsert({

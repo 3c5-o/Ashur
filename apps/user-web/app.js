@@ -1499,8 +1499,15 @@
       navigateTo("profilePage");
       return;
     }
-    const {data:p,error}=await client.from("profiles").select("id,name,username,bio,avatar_media_id,cover_media_id,profile_link,is_verified,is_private").eq("id",uid).single();
-    if(error||!p)return;
+    $("#publicProfileContent").innerHTML='<div class="empty">جارٍ التحميل...</div>';
+    const {data:p,error}=await client.from("profiles")
+      .select("id,name,username,bio,avatar_media_id,cover_media_id,profile_link,is_verified,is_private")
+      .eq("id",uid).single();
+    if(error||!p){
+      openInfoDialog("الحساب غير متاح",'<div class="empty">تعذر فتح هذا الحساب. قد يكون محظورًا أو غير متاح.</div>');
+      return;
+    }
+    state.currentPublicProfile=p;
     const [{count:posts},{count:followers},{count:following},{data:followRow}] = await Promise.all([
       client.from("posts").select("*",{count:"exact",head:true}).eq("author_id",uid),
       client.from("follows").select("*",{count:"exact",head:true}).eq("following_id",uid).eq("status","accepted"),
@@ -1508,52 +1515,99 @@
       client.from("follows").select("status").eq("follower_id",state.user.id).eq("following_id",uid).maybeSingle()
     ]);
     const link=safeLink(p.profile_link||"");
-    const followLabel=followRow?.status==="accepted"?"تتابعه":followRow?.status==="pending"?"تم إرسال الطلب":"متابعة";
-    $("#publicProfileCard").innerHTML=`
-      <div class="profile-cover">${p.cover_media_id?`<img class="cover-image" data-media-id="${p.cover_media_id}" alt="">`:""}</div>
-      <div class="profile-main">
-        <div class="profile-avatar-wrap">${avatar(p)}</div>
-        <div class="profile-info">
-          <div class="profile-name-row"><h2>${escapeHtml(p.name||"مستخدم")}</h2>${p.is_verified?'<span class="verified-badge">✓</span>':""}</div>
-          <div class="profile-username">@${escapeHtml(p.username||"")}</div>
-          ${p.bio?`<p class="profile-bio">${escapeHtml(p.bio)}</p>`:""}
-          ${link?`<a class="profile-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${icon("link")}<span>${escapeHtml(p.profile_link)}</span></a>`:""}
-          <div class="profile-stats"><div><b>${posts||0}</b><span>منشور</span></div><div><b>${followers||0}</b><span>متابع</span></div><div><b>${following||0}</b><span>يتابع</span></div></div>
-          <div class="profile-actions-public">
-            <button id="publicFollowButton" class="primary">${followLabel}</button>
-            <button id="publicMessageButton" class="small-button">${icon("message")} مراسلة</button>
-          </div>
-        </div>
-      </div>`;
+    const followText=followRow?.status==="accepted"?"تتابعه":followRow?.status==="pending"?"تم إرسال الطلب":"متابعة";
+    $("#publicProfileCard").innerHTML=
+      '<div class="profile-cover">'+(p.cover_media_id?'<img class="cover-image" data-media-id="'+escapeHtml(p.cover_media_id)+'" alt="">':"")+'</div>'+
+      '<div class="profile-main"><div class="profile-avatar-wrap">'+avatar(p)+'</div><div class="profile-info">'+
+      '<div class="profile-name-row"><h2>'+escapeHtml(p.name||"مستخدم")+'</h2>'+(p.is_verified?'<span class="verified-badge">✓</span>':"")+'</div>'+
+      '<div class="profile-username">@'+escapeHtml(p.username||"")+'</div>'+
+      (p.bio?'<p class="profile-bio">'+escapeHtml(p.bio)+'</p>':"")+
+      (link?'<a class="profile-link" href="'+escapeHtml(link)+'" target="_blank" rel="noopener">'+icon("link")+'<span>'+escapeHtml(p.profile_link)+'</span></a>':"")+
+      '<div class="profile-stats"><div><b>'+Number(posts||0)+'</b><span>منشور</span></div>'+
+      '<button id="publicFollowersButton" class="profile-stat-button" type="button"><b>'+Number(followers||0)+'</b><span>متابع</span></button>'+
+      '<button id="publicFollowingButton" class="profile-stat-button" type="button"><b>'+Number(following||0)+'</b><span>يتابع</span></button></div>'+
+      '<div class="profile-actions-public">'+
+      '<button id="publicFollowButton" class="primary" type="button">'+followText+'</button>'+
+      '<button id="publicMessageButton" class="small-button" type="button">'+icon("message")+' مراسلة</button>'+
+      '<button id="publicMoreButton" class="profile-more-button" type="button" aria-label="المزيد">'+icon("more")+'</button>'+
+      '</div></div></div>';
     await hydrateMedia($("#publicProfileCard"));
     openDialog($("#publicProfileDialog"));
+
+    $("#publicFollowersButton").onclick=()=>openFollowList(uid,"followers","المتابعون");
+    $("#publicFollowingButton").onclick=()=>openFollowList(uid,"following","الحسابات التي يتابعها");
     $("#publicFollowButton").onclick=()=>followUser(uid,$("#publicFollowButton"));
     $("#publicMessageButton").onclick=async()=>{
+      $("#publicMessageButton").disabled=true;
       try{
         const conversation=await api("/v1/conversations",{method:"POST",body:JSON.stringify({kind:"direct",target_user_id:uid})});
         $("#publicProfileDialog").close();
-        navigateTo("messagesPage");
+        await navigateTo("messagesPage");
         await openChat(conversation.id,p.name||p.username||"محادثة");
-      }catch(_){}
+      }catch(error){
+        alert(error.message);
+      }finally{
+        if($("#publicMessageButton"))$("#publicMessageButton").disabled=false;
+      }
     };
+    $("#publicMoreButton").onclick=()=>{
+      $("#publicProfileDialog").close();
+      openInfoDialog("خيارات الحساب",
+        '<div class="settings-info">'+
+          '<button id="reportProfileButton" class="settings-row" type="button"><span><b>إبلاغ عن الحساب</b><small>إرسال الحساب للإدارة للمراجعة</small></span></button>'+
+          '<button id="blockProfileButton" class="danger-wide danger-outline" type="button">حظر الحساب</button>'+
+        '</div>');
+      $("#reportProfileButton").onclick=()=>{
+        $("#infoDialog").close();
+        openReportDialog("profile",uid);
+      };
+      $("#blockProfileButton").onclick=async()=>{
+        if(!confirm("حظر هذا الحساب؟ لن تتمكنا من رؤية محتوى بعضكما أو بدء محادثة مباشرة."))return;
+        $("#blockProfileButton").disabled=true;
+        try{
+          await api("/v1/social/block/"+uid,{method:"POST",body:JSON.stringify({blocked:true})});
+          $("#infoDialog").close();
+          state.currentPublicProfile=null;
+          await loadConversations().catch(()=>{});
+        }catch(error){
+          alert(error.message);
+          $("#blockProfileButton").disabled=false;
+        }
+      };
+    };
+
     const mayView=!p.is_private||followRow?.status==="accepted";
     if(!mayView){
       $("#publicProfileContent").innerHTML='<div class="empty">هذا الحساب خاص. تابع الحساب وانتظر الموافقة لعرض المحتوى.</div>';
     }else{
       const {data:content,error:contentError}=await client.from("posts")
-        .select("id,caption,post_media(media_id,sort_order)")
+        .select("id,caption,created_at,post_media(media_id,sort_order)")
         .eq("author_id",uid)
         .order("created_at",{ascending:false})
         .limit(30);
       if(contentError){
-        $("#publicProfileContent").innerHTML=errorMarkup(contentError.message,"searchPage");
+        $("#publicProfileContent").innerHTML='<div class="empty error">'+escapeHtml(contentError.message)+'</div>';
       }else{
-        $("#publicProfileContent").innerHTML=(content||[]).map(row=>`<article class="post">${row.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${row.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(row.caption||"")}</div></article>`).join("")||'<div class="empty">لا توجد منشورات بعد.</div>';
+        $("#publicProfileContent").innerHTML=(content||[]).map(row=>{
+          const media=(row.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
+          return '<article class="post">'+
+            (media?'<img class="post-media" data-media-id="'+escapeHtml(media)+'" alt="">':"")+
+            '<div class="post-body">'+escapeHtml(row.caption||"")+
+              '<div class="content-owner-actions"><button data-report-public-post="'+escapeHtml(row.id)+'" type="button">إبلاغ</button></div>'+
+            '</div></article>';
+        }).join("")||'<div class="empty">لا توجد منشورات بعد.</div>';
         await hydrateMedia($("#publicProfileContent"));
+        $("#publicProfileContent").querySelectorAll("[data-report-public-post]").forEach(btn=>btn.onclick=()=>{
+          $("#publicProfileDialog").close();
+          openReportDialog("post",btn.dataset.reportPublicPost);
+        });
       }
     }
   }
-  $("#closePublicProfile").onclick=()=>$("#publicProfileDialog").close();
+  $("#closePublicProfile").onclick=()=>{
+    state.currentPublicProfile=null;
+    $("#publicProfileDialog").close();
+  };
 
   async function loadNotificationsBadge(){
     if(!state.user)return;

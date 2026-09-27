@@ -1752,6 +1752,62 @@ const server = http.createServer(async (req, res) => {
       return handleUpload(req, res, url);
     }
 
+
+    const cancelUploadMatch = /^\/v1\/uploads\/([^/]+)\/cancel$/.exec(url.pathname);
+    if (req.method === "POST" && cancelUploadMatch) {
+      return cancelUploadJob(req, res, decodeURIComponent(cancelUploadMatch[1]));
+    }
+
+    const blockMatch = /^\/v1\/social\/block\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "POST" && blockMatch) {
+      return socialBlock(req, res, blockMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/social/blocked") {
+      return socialBlockedList(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/report") {
+      return socialReport(req, res);
+    }
+    if (url.pathname === "/v1/social/support") {
+      if (req.method === "GET") return socialSupportList(req, res);
+      if (req.method === "POST") return socialSupport(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/save") {
+      return socialSave(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/social/saved") {
+      return socialSaved(req, res, url);
+    }
+    const storyViewMatch = /^\/v1\/social\/story-view\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "POST" && storyViewMatch) {
+      return socialStoryView(req, res, storyViewMatch[1]);
+    }
+    const storyViewersMatch = /^\/v1\/social\/story-viewers\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && storyViewersMatch) {
+      return socialStoryViewers(req, res, storyViewersMatch[1]);
+    }
+    const followListMatch = /^\/v1\/social\/follows\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && followListMatch) {
+      return socialFollowList(req, res, followListMatch[1], url);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/message-read") {
+      return socialMessageRead(req, res);
+    }
+    const socialContentMatch = /^\/v1\/social\/content\/(posts|reels|stories)\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (socialContentMatch && req.method === "PATCH") {
+      return socialEditContent(req, res, socialContentMatch[1], socialContentMatch[2]);
+    }
+    if (socialContentMatch && req.method === "DELETE") {
+      return socialDeleteContent(req, res, socialContentMatch[1], socialContentMatch[2]);
+    }
+    const socialCommentMatch = /^\/v1\/social\/comments\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (socialCommentMatch && ["PATCH", "DELETE"].includes(req.method)) {
+      return socialEditComment(req, res, socialCommentMatch[1]);
+    }
+    if (req.method === "DELETE" && url.pathname === "/v1/account") {
+      return socialDeleteAccount(req, res);
+    }
+
     const ticketMatch = /^\/v1\/media-ticket\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "GET" && ticketMatch) {
       return issueMediaTicket(req, res, ticketMatch[1]);
@@ -1787,9 +1843,26 @@ const server = http.createServer(async (req, res) => {
       return setBan(req, res, banMatch[1]);
     }
 
+    const adminUserDetailMatch = /^\/v1\/admin\/users\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && adminUserDetailMatch) {
+      return adminUserDetail(req, res, adminUserDetailMatch[1]);
+    }
+    const adminUserActionMatch = /^\/v1\/admin\/users\/([0-9a-f-]{36})\/action$/.exec(url.pathname);
+    if (req.method === "POST" && adminUserActionMatch) {
+      return adminUserAction(req, res, adminUserActionMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/comments") {
+      return adminComments(req, res, url);
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/admin/content") {
       return adminContent(req, res, url);
     }
+    const moderateMatch = /^\/v1\/admin\/content\/(posts|reels|stories|comments)\/([0-9a-f-]{36})\/moderate$/.exec(url.pathname);
+    if (req.method === "POST" && moderateMatch) {
+      return moderateContent(req, res, moderateMatch[1], moderateMatch[2]);
+    }
+
     const contentMatch = /^\/v1\/admin\/content\/(posts|reels|stories)\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "DELETE" && contentMatch) {
       return deleteContent(req, res, contentMatch[1], contentMatch[2]);
@@ -1798,6 +1871,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/admin/reports") {
       return adminReports(req, res);
     }
+    const reportActionMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})\/action$/.exec(url.pathname);
+    if (req.method === "POST" && reportActionMatch) {
+      return reportAction(req, res, reportActionMatch[1]);
+    }
+
     const reportMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})\/resolve$/.exec(url.pathname);
     if (req.method === "POST" && reportMatch) {
       return resolveReport(req, res, reportMatch[1]);
@@ -1806,9 +1884,50 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/admin/channels") {
       return adminChannels(req, res);
     }
+    const channelTestMatch = /^\/v1\/admin\/channels\/([^/]+)\/test$/.exec(url.pathname);
+    if (req.method === "POST" && channelTestMatch) {
+      return testAdminChannel(req, res, decodeURIComponent(channelTestMatch[1]));
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/uploads") {
+      return adminUploads(req, res, url);
+    }
+    const adminUploadCancelMatch = /^\/v1\/admin\/uploads\/([0-9a-f-]{36})\/cancel$/.exec(url.pathname);
+    if (req.method === "POST" && adminUploadCancelMatch) {
+      return adminCancelUpload(req, res, adminUploadCancelMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/errors") {
+      return adminErrors(req, res, url);
+    }
+    const errorResolveMatch = /^\/v1\/admin\/errors\/(\d+)\/resolve$/.exec(url.pathname);
+    if (req.method === "POST" && errorResolveMatch) {
+      return resolveSystemError(req, res, errorResolveMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/support") {
+      return adminSupport(req, res, url);
+    }
+    const supportReplyMatch = /^\/v1\/admin\/support\/([0-9a-f-]{36})\/reply$/.exec(url.pathname);
+    if (req.method === "POST" && supportReplyMatch) {
+      return replySupport(req, res, supportReplyMatch[1]);
+    }
+    if (url.pathname === "/v1/admin/releases" && ["GET", "POST"].includes(req.method)) {
+      return adminReleases(req, res);
+    }
+    const releaseMatch = /^\/v1\/admin\/releases\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "PATCH" && releaseMatch) {
+      return updateRelease(req, res, releaseMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/notifications/history") {
+      return adminNotificationHistory(req, res);
+    }
+
+
     if (url.pathname === "/v1/admin/admins") {
       if (req.method === "GET") return adminAdmins(req, res);
       if (req.method === "POST") return addAdmin(req, res);
+    }
+    const adminRecordMatch = /^\/v1\/admin\/admins\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "PATCH" && adminRecordMatch) {
+      return updateAdminRecord(req, res, adminRecordMatch[1]);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/audit") {
       return adminAudit(req, res);

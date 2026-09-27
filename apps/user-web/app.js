@@ -153,6 +153,44 @@
     return body;
   }
 
+  function enterPasswordRecoveryMode(message="اكتب كلمة المرور الجديدة للحساب."){
+    showApp(false);
+    $("#loginForm").classList.add("hidden");
+    $("#registerForm").classList.add("hidden");
+    $("#passwordRecoveryForm").classList.remove("hidden");
+    $(".auth-tabs").classList.add("hidden");
+    showAuthMessage(message,true);
+  }
+
+  window.ASHUR_HANDLE_AUTH_LINK=async(link)=>{
+    try{
+      const url=new URL(String(link||""));
+      let authenticated=false;
+      const code=url.searchParams.get("code");
+      if(code){
+        const result=await client.auth.exchangeCodeForSession(code);
+        if(result.error)throw result.error;
+        authenticated=true;
+      }else{
+        const hash=new URLSearchParams(String(url.hash||"").replace(/^#/,""));
+        const accessToken=hash.get("access_token");
+        const refreshToken=hash.get("refresh_token");
+        if(accessToken&&refreshToken){
+          const result=await client.auth.setSession({access_token:accessToken,refresh_token:refreshToken});
+          if(result.error)throw result.error;
+          authenticated=true;
+        }
+      }
+      if(!authenticated)throw new Error("رابط الاستعادة غير مكتمل أو منتهي.");
+      enterPasswordRecoveryMode();
+      return true;
+    }catch(error){
+      showApp(false);
+      showAuthMessage(error?.message||"تعذر فتح رابط استعادة كلمة المرور.");
+      return false;
+    }
+  };
+
   function showAuthMessage(text, good=false){
     const el=$("#authMessage"); el.textContent=text; el.className="message "+(good?"success":"error");
   }
@@ -389,12 +427,7 @@
   client.auth.onAuthStateChange(async (event, session)=>{
     state.user=session?.user || null;
     if(event==="PASSWORD_RECOVERY"){
-      showApp(false);
-      $("#loginForm").classList.add("hidden");
-      $("#registerForm").classList.add("hidden");
-      $("#passwordRecoveryForm").classList.remove("hidden");
-      $(".auth-tabs").classList.add("hidden");
-      showAuthMessage("اكتب كلمة المرور الجديدة للحساب.",true);
+      enterPasswordRecoveryMode();
       return;
     }
     if(state.user){

@@ -1,0 +1,15 @@
+{
+  "name": "ashur-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node services/api/src/server.mjs"
+  },
+  "dependencies": {
+    "teleproto": "1.229.0"
+  }
+}

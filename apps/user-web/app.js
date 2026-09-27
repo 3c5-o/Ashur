@@ -581,6 +581,43 @@
     return status==="accepted"?"تتابعه":status==="pending"?"تم إرسال الطلب":"متابعة";
   }
 
+  function openReportDialog(targetType,targetId){
+    openInfoDialog("إرسال بلاغ",`
+      <div class="form settings-info">
+        <label><span>سبب البلاغ</span>
+          <select id="reportReason">
+            <option value="spam">محتوى مزعج أو متكرر</option>
+            <option value="harassment">إساءة أو مضايقة</option>
+            <option value="impersonation">انتحال شخصية</option>
+            <option value="inappropriate">محتوى غير مناسب</option>
+            <option value="other">سبب آخر</option>
+          </select>
+        </label>
+        <label><span>تفاصيل إضافية</span><textarea id="reportDetails" maxlength="1500" placeholder="اكتب التفاصيل التي تساعد الإدارة على المراجعة"></textarea></label>
+        <button id="submitReportButton" class="primary" type="button">إرسال البلاغ</button>
+        <p id="reportMessage" class="message"></p>
+      </div>`);
+    $("#submitReportButton").onclick=async()=>{
+      $("#submitReportButton").disabled=true;
+      try{
+        await api("/v1/social/report",{
+          method:"POST",
+          body:JSON.stringify({
+            target_type:targetType,
+            target_id:targetId,
+            reason:$("#reportReason").value,
+            details:$("#reportDetails").value.trim()
+          })
+        });
+        $("#reportMessage").textContent="تم إرسال البلاغ للإدارة.";
+        setTimeout(()=>$("#infoDialog").close(),650);
+      }catch(error){
+        $("#reportMessage").textContent=error.message;
+        $("#submitReportButton").disabled=false;
+      }
+    };
+  }
+
   function openOwnContentActions(kind,id,caption="",commentsEnabled=true){
     const label=kind==="reels"?"الريلز":kind==="stories"?"القصة":"المنشور";
     const commentsField=kind==="stories"?"":`

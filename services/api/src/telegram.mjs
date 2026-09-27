@@ -77,6 +77,21 @@ export async function downloadMessageMedia({
   return outputFile;
 }
 
+export async function testTelegramChannel(channelId) {
+  if (!telegramConfigured()) {
+    return { ok: false, detail: "بيانات تيليجرام غير مضافة بعد" };
+  }
+  try {
+    const tg = await telegramClient();
+    const entity = await tg.getEntity(String(channelId));
+    await tg.getMessages(entity, { limit: 1 });
+    const title = entity?.title || entity?.username || String(channelId);
+    return { ok: true, detail: "يمكن الوصول إلى " + title };
+  } catch (error) {
+    return { ok: false, detail: error.message };
+  }
+}
+
 export async function testTelegramConnection() {
   if (!telegramConfigured()) {
     return { ok: false, detail: "بيانات تيليجرام غير مضافة بعد" };

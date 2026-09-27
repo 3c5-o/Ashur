@@ -1659,48 +1659,135 @@ async function siteSettings(req, res) {
   json(res, 200, { ok: true });
 }
 
+async function notificationRecipients(audience, targetUserId = null) {
+  if (audience === "user") {
+    return targetUserId ? { ids: [targetUserId], all: false } : { ids: [], all: false };
+  }
+  let query = "select=id&is_banned=eq.false&limit=10000";
+  if (audience === "verified") query += "&is_verified=eq.true";
+  if (audience === "active") {
+    const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    query += "&last_seen_at=gte." + encodeURIComponent(since);
+  }
+  if (audience === "inactive") {
+    const before = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    query += "&or=(last_seen_at.is.null,last_seen_at.lt." + encodeURIComponent(before) + ")";
+  }
+  const users = await select("profiles", query);
+  return { ids: (users || []).map((x) => x.id), all: audience === "all" };
+}
+
+async function deliverAdminNotification(record) {
+  const audience = record.audience || "all";
+  const targetUserId = record.target_user_id || null;
+  const recipients = await notificationRecipients(audience, targetUserId);
+  const data = {
+    kind: "system",
+    ...(record.deep_link || {}),
+    notification_history_id: record.id,
+  };
+
+  const inAppRows = recipients.ids.map((userId) => ({
+    user_id: userId,
+    actor_id: record.actor_user_id || null,
+    kind: "system",
+    title: record.title,
+    body: record.body,
+    entity_type: record.deep_link?.entity_type || null,
+    entity_id: record.deep_link?.entity_id || null,
+  }));
+  if (inAppRows.length) {
+    await insert("notifications", inAppRows, { returning: false });
+  }
+
+  const push = await sendPush({
+    ...(recipients.all ? { all: true } : { userIds: recipients.ids }),
+    title: record.title,
+    body: record.body,
+    data,
+    idempotencyKey: record.id,
+  });
+
+  await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+    status: "sent",
+    sent_at: new Date().toISOString(),
+    push_result: push || {},
+  }, { returning: false });
+  return push;
+}
+
 async function sendAdminNotification(req, res) {
   const actor = await requireAdmin(req, "notifications");
   const body = await readJson(req);
   const title = String(body.title || "").trim().slice(0, 80);
   const message = String(body.body || "").trim().slice(0, 500);
+  const audience = ["all", "user", "verified", "active", "inactive"].includes(body.audience)
+    ? body.audience
+    : "all";
+  const userId = audience === "user" ? String(body.user_id || "").trim() : null;
+  const deepLink = body.deep_link && typeof body.deep_link === "object" ? body.deep_link : {};
+  const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : null;
   if (!title || !message) return json(res, 400, { error: "العنوان والنص مطلوبان" });
-
-  if (body.audience === "user") {
-    const userId = String(body.user_id || "").trim();
-    if (!userId) return json(res, 400, { error: "معرف المستخدم مطلوب" });
-    await insert("notifications", {
-      user_id: userId,
-      actor_id: actor.user.id,
-      kind: "system",
-      title,
-      body: message,
-    }, { returning: false });
-    const push = await sendPush({
-      userIds: [userId],
-      title,
-      body: message,
-      data: { kind: "system" },
-    });
-    return json(res, 200, { ok: true, push });
+  if (audience === "user" && !/^[0-9a-f-]{36}$/i.test(userId || "")) {
+    return json(res, 400, { error: "معرف المستخدم مطلوب" });
+  }
+  if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
+    return json(res, 400, { error: "موعد الإرسال غير صالح" });
   }
 
-  const users = await select("profiles", "select=id&is_banned=eq.false&limit=10000");
-  const rows = (users || []).map((x) => ({
-    user_id: x.id,
-    actor_id: actor.user.id,
-    kind: "system",
+  const rows = await insert("admin_notification_history", {
+    actor_user_id: actor.user.id,
     title,
     body: message,
-  }));
-  if (rows.length) await insert("notifications", rows, { returning: false });
-  const push = await sendPush({
-    all: true,
-    title,
-    body: message,
-    data: { kind: "system" },
+    audience,
+    target_user_id: userId,
+    deep_link: deepLink,
+    scheduled_at: scheduledAt ? scheduledAt.toISOString() : null,
+    status: scheduledAt && scheduledAt.getTime() > Date.now() + 15_000 ? "scheduled" : "pending",
   });
-  json(res, 200, { ok: true, push });
+  const record = rows?.[0];
+
+  if (record.status === "scheduled") {
+    await writeAudit(actor.user.id, "schedule_notification", "notification", record.id, { audience, scheduled_at: record.scheduled_at });
+    return json(res, 202, { ok: true, scheduled: true, id: record.id });
+  }
+
+  try {
+    const push = await deliverAdminNotification(record);
+    await writeAudit(actor.user.id, "send_notification", "notification", record.id, { audience });
+    return json(res, 200, { ok: true, push, id: record.id });
+  } catch (error) {
+    await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+      status: "failed",
+      push_result: { error: String(error.message || error).slice(0, 1000) },
+    }, { returning: false }).catch(() => {});
+    await logSystemError("notifications", error, { history_id: record.id }, actor.user.id);
+    throw error;
+  }
+}
+
+async function processScheduledAdminNotifications() {
+  if (!readiness().database) return;
+  const now = new Date().toISOString();
+  const rows = await select(
+    "admin_notification_history",
+    "select=id,actor_user_id,title,body,audience,target_user_id,deep_link,scheduled_at,status&status=eq.scheduled&scheduled_at=lte." +
+      encodeURIComponent(now) + "&order=scheduled_at.asc&limit=20",
+  ).catch(() => []);
+  for (const record of rows || []) {
+    await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+      status: "processing",
+    }, { returning: false }).catch(() => {});
+    try {
+      await deliverAdminNotification(record);
+    } catch (error) {
+      await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+        status: "failed",
+        push_result: { error: String(error.message || error).slice(0, 1000) },
+      }, { returning: false }).catch(() => {});
+      await logSystemError("notifications", error, { history_id: record.id }, record.actor_user_id);
+    }
+  }
 }
 
 async function healthDetails(res) {
@@ -2013,7 +2100,10 @@ server.listen(config.port, "0.0.0.0", () => {
   console.log("Readiness:", readiness());
 });
 
-const worker = setInterval(() => processNotificationOutbox().catch(() => {}), 5000);
+const worker = setInterval(() => {
+  processNotificationOutbox().catch(() => {});
+  processScheduledAdminNotifications().catch(() => {});
+}, 5000);
 worker.unref();
 const cleaner = setInterval(() => cleanupCache().catch(() => {}), 10 * 60_000);
 cleaner.unref();

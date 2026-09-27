@@ -802,6 +802,278 @@ async function createConversation(req, res) {
   json(res, 201, conversation);
 }
 
+
+async function socialBlock(req, res, targetUserId) {
+  const user = await currentUser(req);
+  if (targetUserId === user.id) return json(res, 400, { error: "لا يمكنك حظر حسابك" });
+  const target = await profileFor(targetUserId);
+  if (!target) return json(res, 404, { error: "الحساب غير موجود" });
+  const body = await readJson(req);
+  const blocked = body.blocked !== false;
+
+  if (blocked) {
+    await upsert("blocks", {
+      blocker_id: user.id,
+      blocked_id: targetUserId,
+      created_at: new Date().toISOString(),
+    }, "blocker_id,blocked_id");
+    await remove(
+      "follows",
+      "or=(and(follower_id.eq." + encodeURIComponent(user.id) + ",following_id.eq." + encodeURIComponent(targetUserId) + "),and(follower_id.eq." + encodeURIComponent(targetUserId) + ",following_id.eq." + encodeURIComponent(user.id) + "))",
+    ).catch(() => {});
+  } else {
+    await remove(
+      "blocks",
+      "blocker_id=eq." + encodeURIComponent(user.id) + "&blocked_id=eq." + encodeURIComponent(targetUserId),
+    );
+  }
+  json(res, 200, { ok: true, blocked });
+}
+
+async function socialBlockedList(req, res) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "blocks",
+    "select=blocked_id,created_at&blocker_id=eq." + encodeURIComponent(user.id) + "&order=created_at.desc&limit=200",
+  );
+  const items = [];
+  for (const row of rows || []) {
+    const profiles = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.blocked_id) + "&limit=1",
+    );
+    if (profiles?.[0]) items.push({ ...profiles[0], blocked_at: row.created_at });
+  }
+  json(res, 200, { items });
+}
+
+async function socialReport(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const targetType = String(body.target_type || "").trim();
+  const targetId = String(body.target_id || "").trim();
+  const reason = String(body.reason || "").trim().slice(0, 120);
+  const details = String(body.details || "").trim().slice(0, 1500);
+  const allowed = ["profile", "post", "reel", "story", "comment", "message"];
+  if (!allowed.includes(targetType) || !/^[0-9a-f-]{36}$/i.test(targetId) || !reason) {
+    return json(res, 400, { error: "بيانات البلاغ غير مكتملة" });
+  }
+  const recent = await select(
+    "reports",
+    "select=id&reporter_id=eq." + encodeURIComponent(user.id) +
+      "&target_type=eq." + encodeURIComponent(targetType) +
+      "&target_id=eq." + encodeURIComponent(targetId) +
+      "&status=in.(open,review)&limit=1",
+  ).catch(() => []);
+  if (recent?.length) return json(res, 409, { error: "سبق أن أرسلت بلاغًا عن هذا العنصر" });
+
+  const rows = await insert("reports", {
+    reporter_id: user.id,
+    target_type: targetType,
+    target_id: targetId,
+    reason,
+    details,
+    status: "open",
+  });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function socialSupport(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const subject = String(body.subject || "").trim().slice(0, 160);
+  const message = String(body.body || "").trim().slice(0, 4000);
+  if (!subject || !message) return json(res, 400, { error: "اكتب عنوان المشكلة وتفاصيلها" });
+  const rows = await insert("support_tickets", {
+    user_id: user.id,
+    category: String(body.category || "general").slice(0, 60),
+    subject,
+    body: message,
+    app_version: String(body.app_version || "").slice(0, 40),
+    device_info: String(body.device_info || "").slice(0, 300),
+  });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function socialSupportList(req, res) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "support_tickets",
+    "select=id,category,subject,body,status,priority,admin_reply,created_at,updated_at,closed_at&user_id=eq." +
+      encodeURIComponent(user.id) + "&order=created_at.desc&limit=100",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function socialSave(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const kind = body.kind === "reel" ? "reel" : body.kind === "post" ? "post" : "";
+  const id = String(body.id || "");
+  if (!kind || !/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "المحتوى غير صالح" });
+  const table = kind === "reel" ? "saved_reels" : "saved_posts";
+  const idField = kind === "reel" ? "reel_id" : "post_id";
+  if (body.saved === false) {
+    await remove(table, "user_id=eq." + encodeURIComponent(user.id) + "&" + idField + "=eq." + encodeURIComponent(id));
+    return json(res, 200, { ok: true, saved: false });
+  }
+  await upsert(table, { user_id: user.id, [idField]: id }, "user_id," + idField);
+  json(res, 200, { ok: true, saved: true });
+}
+
+async function socialSaved(req, res, url) {
+  const user = await currentUser(req);
+  const kind = url.searchParams.get("kind") === "reels" ? "reels" : "posts";
+  const table = kind === "reels" ? "saved_reels" : "saved_posts";
+  const idField = kind === "reels" ? "reel_id" : "post_id";
+  const rows = await select(
+    table,
+    "select=" + idField + ",created_at&user_id=eq." + encodeURIComponent(user.id) + "&order=created_at.desc&limit=100",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function socialStoryView(req, res, storyId) {
+  const user = await currentUser(req);
+  const stories = await select(
+    "stories",
+    "select=id,author_id,expires_at&id=eq." + encodeURIComponent(storyId) + "&limit=1",
+  );
+  const story = stories?.[0];
+  if (!story || new Date(story.expires_at) <= new Date()) return json(res, 404, { error: "القصة غير موجودة" });
+  if (!(await canViewOwner(user, story.author_id))) return json(res, 403, { error: "لا يمكنك مشاهدة هذه القصة" });
+  if (story.author_id !== user.id) {
+    await upsert("story_views", {
+      story_id: storyId,
+      user_id: user.id,
+      viewed_at: new Date().toISOString(),
+    }, "story_id,user_id");
+  }
+  json(res, 200, { ok: true });
+}
+
+async function socialStoryViewers(req, res, storyId) {
+  const user = await currentUser(req);
+  const stories = await select(
+    "stories",
+    "select=id,author_id&id=eq." + encodeURIComponent(storyId) + "&limit=1",
+  );
+  if (!stories?.[0]) return json(res, 404, { error: "القصة غير موجودة" });
+  if (stories[0].author_id !== user.id) return json(res, 403, { error: "هذه البيانات لصاحب القصة فقط" });
+  const rows = await select(
+    "story_views",
+    "select=user_id,viewed_at&story_id=eq." + encodeURIComponent(storyId) + "&order=viewed_at.desc&limit=500",
+  );
+  const items = [];
+  for (const row of rows || []) {
+    const p = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.user_id) + "&limit=1",
+    );
+    if (p?.[0]) items.push({ ...p[0], viewed_at: row.viewed_at });
+  }
+  json(res, 200, { items });
+}
+
+async function socialFollowList(req, res, profileId, url) {
+  const user = await currentUser(req);
+  const mode = url.searchParams.get("mode") === "following" ? "following" : "followers";
+  if (await isBlockedBetween(user.id, profileId)) return json(res, 403, { error: "هذه القائمة غير متاحة" });
+  const profile = await profileFor(profileId);
+  if (!profile) return json(res, 404, { error: "الحساب غير موجود" });
+  if (profile.is_private && profileId !== user.id && !(await canViewOwner(user, profileId))) {
+    return json(res, 403, { error: "الحساب خاص" });
+  }
+  const filter = mode === "following"
+    ? "follower_id=eq." + encodeURIComponent(profileId)
+    : "following_id=eq." + encodeURIComponent(profileId);
+  const idField = mode === "following" ? "following_id" : "follower_id";
+  const rows = await select("follows", "select=" + idField + ",created_at&" + filter + "&status=eq.accepted&order=created_at.desc&limit=500");
+  const items = [];
+  for (const row of rows || []) {
+    const id = row[idField];
+    if (await isBlockedBetween(user.id, id)) continue;
+    const p = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified,is_private&id=eq." + encodeURIComponent(id) + "&is_banned=eq.false&limit=1",
+    );
+    if (p?.[0]) items.push(p[0]);
+  }
+  json(res, 200, { items });
+}
+
+async function socialMessageRead(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const ids = Array.isArray(body.message_ids) ? body.message_ids.filter((x) => /^[0-9a-f-]{36}$/i.test(String(x))).slice(0, 200) : [];
+  if (!ids.length) return json(res, 200, { ok: true, count: 0 });
+  const rows = ids.map((messageId) => ({ message_id: messageId, user_id: user.id, read_at: new Date().toISOString() }));
+  await upsert("message_reads", rows, "message_id,user_id");
+  json(res, 200, { ok: true, count: rows.length });
+}
+
+async function socialEditContent(req, res, kind, id) {
+  const user = await currentUser(req);
+  const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
+  if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+  const rows = await select(table, "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
+  if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك تعديل هذا المحتوى" });
+  const body = await readJson(req);
+  const patch = {};
+  if (body.caption !== undefined) patch.caption = String(body.caption || "").slice(0, 2200);
+  if (body.comments_enabled !== undefined && table !== "stories") patch.comments_enabled = Boolean(body.comments_enabled);
+  if (body.visibility !== undefined && table !== "stories") patch.visibility = ["public", "followers"].includes(body.visibility) ? body.visibility : "public";
+  if (table === "posts") patch.updated_at = new Date().toISOString();
+  if (!Object.keys(patch).length) return json(res, 400, { error: "لا توجد تعديلات" });
+  const updated = await update(table, "id=eq." + encodeURIComponent(id), patch);
+  json(res, 200, updated?.[0] || { ok: true });
+}
+
+async function socialDeleteContent(req, res, kind, id) {
+  const user = await currentUser(req);
+  const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
+  if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+  const rows = await select(table, "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
+  if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك حذف هذا المحتوى" });
+  await remove(table, "id=eq." + encodeURIComponent(id));
+  json(res, 200, { ok: true });
+}
+
+async function socialEditComment(req, res, commentId) {
+  const user = await currentUser(req);
+  const rows = await select("comments", "select=id,author_id&id=eq." + encodeURIComponent(commentId) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "التعليق غير موجود" });
+  if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك تعديل هذا التعليق" });
+  if (req.method === "DELETE") {
+    await remove("comments", "id=eq." + encodeURIComponent(commentId));
+    return json(res, 200, { ok: true });
+  }
+  const body = await readJson(req);
+  const text = String(body.body || "").trim().slice(0, 2000);
+  if (!text) return json(res, 400, { error: "التعليق فارغ" });
+  const updated = await update("comments", "id=eq." + encodeURIComponent(commentId), {
+    body: text,
+    updated_at: new Date().toISOString(),
+  });
+  json(res, 200, updated?.[0] || { ok: true });
+}
+
+async function socialDeleteAccount(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  if (String(body.confirm || "") !== "DELETE") return json(res, 400, { error: "تأكيد حذف الحساب غير صحيح" });
+  await update("profiles", "id=eq." + encodeURIComponent(user.id), {
+    deleted_at: new Date().toISOString(),
+    is_banned: true,
+    ban_reason: "account_deleted",
+  }, { returning: false }).catch(() => {});
+  await writeAudit(user.id, "delete_own_account", "profile", user.id, {});
+  await serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(user.id), { method: "DELETE" });
+  json(res, 200, { ok: true });
+}
+
 async function adminStats(req, res) {
   await requireAdmin(req, "analytics");
   const [users, posts, reels, openReports, recent] = await Promise.all([

@@ -3,6 +3,11 @@ plugins {
 }
 
 def apiUrl = System.getenv("ASHUR_API_URL") ?: ""
+def keystoreFilePath = System.getenv("ASHUR_KEYSTORE_FILE") ?: ""
+def keystorePassword = System.getenv("ASHUR_KEYSTORE_PASSWORD") ?: ""
+def keyAliasName = System.getenv("ASHUR_KEY_ALIAS") ?: ""
+def keyPasswordValue = System.getenv("ASHUR_KEY_PASSWORD") ?: ""
+def hasReleaseSigning = keystoreFilePath && keystorePassword && keyAliasName && keyPasswordValue && file(keystoreFilePath).exists()
 
 android {
     namespace 'app.ashur.admin'
@@ -21,9 +26,21 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(keystoreFilePath)
+                storePassword keystorePassword
+                keyAlias keyAliasName
+                keyPassword keyPasswordValue
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            if (hasReleaseSigning) signingConfig signingConfigs.release
         }
     }
 

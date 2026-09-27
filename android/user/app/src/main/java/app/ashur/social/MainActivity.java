@@ -2,6 +2,7 @@ package app.ashur.social;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
@@ -39,6 +40,12 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setSupportZoom(false);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+        settings.setTextZoom(100);
+        webView.setBackgroundColor(Color.rgb(5, 7, 6));
+        webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
 
         final WebViewAssetLoader loader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
@@ -123,6 +130,18 @@ public class MainActivity extends Activity {
                     }
                 }
         );
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (webView != null) {
+            webView.stopLoading();
+            webView.loadUrl("about:blank");
+            webView.removeJavascriptInterface("AshurNative");
+            webView.destroy();
+            webView = null;
+        }
+        super.onDestroy();
     }
 
     public class AshurBridge {

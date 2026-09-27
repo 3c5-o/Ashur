@@ -1612,8 +1612,42 @@
   async function loadNotificationsBadge(){
     if(!state.user)return;
     const {count}=await client.from("notifications").select("*",{count:"exact",head:true}).eq("user_id",state.user.id).is("read_at",null);
-    const badge=$("#notificationBadge"); badge.textContent=count||0; badge.classList.toggle("hidden",!count);
+    const badge=$("#notificationBadge");
+    badge.textContent=count||0;
+    badge.classList.toggle("hidden",!count);
   }
+
+  async function handleNotificationTarget(notification){
+    const type=notification.entity_type||notification.kind||"";
+    const id=notification.entity_id||"";
+    $("#notificationsDialog").close();
+    if(type==="profile"&&id){
+      return openPublicProfile(id);
+    }
+    if(type==="post"&&id){
+      await navigateTo("homePage");
+      await loadFeed();
+      document.querySelector('[data-post-id="'+CSS.escape(id)+'"]')?.scrollIntoView({behavior:"smooth",block:"center"});
+      return;
+    }
+    if(type==="reel"&&id){
+      await navigateTo("reelsPage");
+      document.querySelector('[data-reel-id="'+CSS.escape(id)+'"]')?.scrollIntoView({behavior:"smooth",block:"center"});
+      return;
+    }
+    if((type==="conversation"||type==="message")&&id){
+      await navigateTo("messagesPage");
+      return openChat(id,"المحادثة");
+    }
+    if(type==="support_ticket"||type==="support"){
+      return openSupportCenter();
+    }
+    if(notification.kind==="follow"&&notification.actor_id){
+      return openPublicProfile(notification.actor_id);
+    }
+    return navigateTo("homePage");
+  }
+
   $("#notificationsButton").onclick=async()=>{
     openDialog($("#notificationsDialog"));
     $("#notificationsList").innerHTML='<div class="empty">جارٍ تحميل الإشعارات...</div>';
@@ -1626,7 +1660,17 @@
       $("#notificationsList").innerHTML=errorMarkup(error.message,"homePage");
       return;
     }
-    $("#notificationsList").innerHTML=(data||[]).map(n=>`<div class="list-card"><div class="grow"><b>${escapeHtml(n.title)}</b><div>${escapeHtml(n.body)}</div></div></div>`).join("")||'<div class="empty">لا توجد إشعارات.</div>';
+    $("#notificationsList").innerHTML=(data||[]).map(n=>
+      '<button class="notification-item '+(!n.read_at?"unread":"")+'" data-notification-id="'+escapeHtml(n.id)+'" type="button">'+
+        '<div class="grow"><b>'+escapeHtml(n.title||"إشعار")+'</b><div>'+escapeHtml(n.body||"")+'</div>'+
+        '<time>'+new Date(n.created_at).toLocaleString("ar-IQ")+'</time></div>'+
+      '</button>'
+    ).join("")||'<div class="empty">لا توجد إشعارات.</div>';
+    const map=new Map((data||[]).map(n=>[String(n.id),n]));
+    $("#notificationsList").querySelectorAll("[data-notification-id]").forEach(btn=>btn.onclick=()=>{
+      const row=map.get(btn.dataset.notificationId);
+      if(row)handleNotificationTarget(row).catch(()=>{});
+    });
     await client.from("notifications").update({read_at:new Date().toISOString()}).eq("user_id",state.user.id).is("read_at",null);
     loadNotificationsBadge().catch(()=>{});
   };

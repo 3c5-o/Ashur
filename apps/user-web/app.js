@@ -1727,6 +1727,14 @@
   };
 
   $("#cancelComposer").onclick=()=>{
+    if(state.activeUpload){
+      try{state.activeUpload.abort()}catch(_){}
+      if(state.activeUploadId){
+        api("/v1/uploads/"+encodeURIComponent(state.activeUploadId)+"/cancel",{method:"POST"}).catch(()=>{});
+      }
+    }
+    state.activeUpload=null;
+    state.activeUploadId=null;
     clearComposerPreview();
     $("#composerDialog").close();
   };
@@ -1757,35 +1765,45 @@
       $("#composerFile").value="";
       $("#composerCaption").value="";
       await loadHome();
-    }catch(e){$("#composerMessage").textContent=e.message}
+    }catch(e){
+      $("#composerMessage").textContent=e.message+" — يمكنك الضغط على «نشر الآن» لإعادة المحاولة.";
+    }
     finally{$("#submitComposer").disabled=false}
   };
 
-  async function uploadFile(file,kind){
+  async function uploadFile(file,kind,{silent=false}={}){
     const token=await accessToken();
     if(!token)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
-    const progress=$("#uploadProgress");
+    const progress=silent?null:$("#uploadProgress");
     const bar=progress?.querySelector(".progress>div");
-    const progressText=$("#uploadProgressText");
+    const progressText=silent?null:$("#uploadProgressText");
+    const uploadId=(crypto.randomUUID?.()||("upload-"+Date.now()+"-"+Math.random().toString(36).slice(2)));
     if(progress){
       progress.classList.remove("hidden");
       if(bar)bar.style.width="0%";
       if(progressText)progressText.textContent="0%";
     }
 
+    state.activeUploadId=uploadId;
     try{
       return await new Promise((resolve,reject)=>{
         const xhr=new XMLHttpRequest();
+        state.activeUpload=xhr;
         xhr.open("POST",apiUrl("/v1/storage/upload?kind="+encodeURIComponent(kind)));
         xhr.setRequestHeader("Authorization","Bearer "+token);
         xhr.setRequestHeader("Content-Type",file.type||"application/octet-stream");
         xhr.setRequestHeader("X-File-Name",encodeURIComponent(file.name||"file"));
+        xhr.setRequestHeader("X-Upload-Id",uploadId);
 
         xhr.upload.onprogress=(event)=>{
-          if(event.lengthComputable && bar){
+          if(event.lengthComputable){
             const percent=Math.min(100,Math.round((event.loaded/event.total)*100));
-            bar.style.width=percent+"%";
+            if(bar)bar.style.width=percent+"%";
             if(progressText)progressText.textContent=percent+"%";
+            if(silent&&$("#chatAttachmentPreview")&&!$("#chatAttachmentPreview").classList.contains("hidden")){
+              const small=$("#chatAttachmentPreview").querySelector("small");
+              if(small)small.textContent=percent+"% · "+(file.size/1024/1024).toFixed(1)+" MB";
+            }
           }
         };
         xhr.onerror=()=>reject(new Error("تعذر الاتصال بخادم الرفع"));
@@ -1799,9 +1817,13 @@
         xhr.send(file);
       });
     }finally{
-      if(bar)bar.style.width="100%";
-      if(progressText)progressText.textContent="100%";
-      setTimeout(()=>progress?.classList.add("hidden"),450);
+      state.activeUpload=null;
+      state.activeUploadId=null;
+      if(progress){
+        if(bar)bar.style.width="100%";
+        if(progressText)progressText.textContent="100%";
+        setTimeout(()=>progress?.classList.add("hidden"),450);
+      }
     }
   }
 

@@ -115,6 +115,45 @@
     $("#app").classList.toggle("hidden", !loggedIn);
   }
 
+  const PROFILE_CACHE_KEY="ashur_profile_cache_v1";
+
+  function cacheProfile(profile){
+    try{
+      if(profile?.id)localStorage.setItem(PROFILE_CACHE_KEY,JSON.stringify(profile));
+    }catch(_){}
+  }
+
+  function readCachedProfile(userId){
+    try{
+      const cached=JSON.parse(localStorage.getItem(PROFILE_CACHE_KEY)||"null");
+      return cached?.id===userId?cached:null;
+    }catch{return null}
+  }
+
+  function setNetworkState(online,message=""){
+    const banner=$("#networkBanner");
+    if(!banner)return;
+    banner.classList.toggle("hidden",online);
+    const text=banner.querySelector("span");
+    if(text)text.textContent=message||"لا يوجد اتصال بالإنترنت";
+  }
+
+  async function retryCurrentView(){
+    if(!navigator.onLine){
+      setNetworkState(false,"لا يوجد اتصال بالإنترنت");
+      return;
+    }
+    setNetworkState(true);
+    const active=$(".page.active")?.id||"homePage";
+    if(active==="homePage")await loadHome();
+    else await navigateTo(active);
+    await loadNotificationsBadge().catch(()=>{});
+  }
+
+  $("#retryNetworkButton").onclick=()=>retryCurrentView();
+  window.addEventListener("offline",()=>setNetworkState(false));
+  window.addEventListener("online",()=>{setNetworkState(true);retryCurrentView().catch(()=>{})});
+
   function closeTransientDialogs(except=null){
     document.querySelectorAll("dialog[open]").forEach(dialog=>{
       if(dialog===except)return;
@@ -209,10 +248,11 @@
   $("#systemLater").onclick=()=>$("#systemDialog").close();
 
   async function refreshProfile(){
-    if(!state.user) return;
-    const { data, error } = await client.from("profiles").select("*").eq("id",state.user.id).single();
-    if(error) throw error;
+    if(!state.user)return;
+    const {data,error}=await client.from("profiles").select("*").eq("id",state.user.id).single();
+    if(error)throw error;
     state.profile=data;
+    cacheProfile(data);
   }
 
   async function ensureProfileIdentity(){
@@ -229,26 +269,42 @@
     const closeSplash=()=>{
       if(!splash?.isConnected)return;
       splash.style.opacity="0";
-      setTimeout(()=>splash.remove(),260);
+      setTimeout(()=>splash.remove(),240);
     };
-    const fallbackTimer=setTimeout(closeSplash,4500);
+    const fallbackTimer=setTimeout(closeSplash,5000);
+    setNetworkState(navigator.onLine);
+
     try{
-      const { data:{session}, error:sessionError } = await client.auth.getSession();
-      if(sessionError) throw sessionError;
-      state.user=session?.user || null;
-      if(state.user){
+      const {data:{session},error:sessionError}=await client.auth.getSession();
+      if(sessionError)throw sessionError;
+      state.user=session?.user||null;
+
+      if(!state.user){
+        showApp(false);
+        return;
+      }
+
+      state.profile=readCachedProfile(state.user.id);
+      showApp(true);
+      await nativeLogin(state.user.id);
+
+      try{
         await refreshProfile();
         await ensureProfileIdentity();
-        await nativeLogin(state.user.id);
-        showApp(true);
-        await checkRuntimeSettings();
-        await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
-      }else{
-        showApp(false);
+        setNetworkState(true);
+      }catch(error){
+        console.warn("ASHUR_PROFILE_OFFLINE",error);
+        setNetworkState(false,"تعذر الاتصال بالخدمة. سيتم عرض آخر بيانات متاحة.");
       }
+
+      await Promise.allSettled([
+        checkRuntimeSettings(),
+        loadHome(),
+        loadNotificationsBadge()
+      ]);
     }finally{
       clearTimeout(fallbackTimer);
-      setTimeout(closeSplash,500);
+      setTimeout(closeSplash,350);
     }
   }
 

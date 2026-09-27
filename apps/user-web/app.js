@@ -1965,6 +1965,140 @@
   }
   $("#closeInfoDialog").onclick=()=>$("#infoDialog").close();
 
+  async function openSupportCenter(){
+    openInfoDialog("الدعم الفني",`
+      <div class="settings-info">
+        <div class="settings-group">
+          <h4>إرسال مشكلة</h4>
+          <label><span>نوع المشكلة</span>
+            <select id="supportCategory">
+              <option value="technical">مشكلة تقنية</option>
+              <option value="account">الحساب</option>
+              <option value="content">المحتوى</option>
+              <option value="upload">رفع الملفات</option>
+              <option value="other">أخرى</option>
+            </select>
+          </label>
+          <label><span>العنوان</span><input id="supportSubject" maxlength="160" placeholder="عنوان مختصر"></label>
+          <label><span>التفاصيل</span><textarea id="supportBody" maxlength="4000" placeholder="اشرح المشكلة بالتفصيل"></textarea></label>
+          <button id="submitSupportTicket" class="primary" type="button">إرسال للدعم</button>
+          <p id="supportMessage" class="message"></p>
+        </div>
+        <div class="settings-group">
+          <h4>طلباتك السابقة</h4>
+          <div id="supportTicketsList" class="list compact"><div class="empty">جارٍ التحميل...</div></div>
+        </div>
+      </div>`);
+    const loadTickets=async()=>{
+      try{
+        const result=await api("/v1/social/support");
+        $("#supportTicketsList").innerHTML=(result.items||[]).map(t=>`
+          <div class="list-card support-ticket-card">
+            <div class="grow">
+              <b>${escapeHtml(t.subject||"طلب دعم")}</b>
+              <div class="meta">${escapeHtml(t.status||"open")} · ${new Date(t.created_at).toLocaleString("ar-IQ")}</div>
+              <p>${escapeHtml(t.body||"")}</p>
+              ${t.admin_reply?`<div class="support-reply"><b>رد الإدارة</b><p>${escapeHtml(t.admin_reply)}</p></div>`:""}
+            </div>
+          </div>`).join("")||'<div class="empty">ما عندك طلبات دعم بعد.</div>';
+      }catch(error){
+        $("#supportTicketsList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+      }
+    };
+    await loadTickets();
+    $("#submitSupportTicket").onclick=async()=>{
+      const subject=$("#supportSubject").value.trim();
+      const body=$("#supportBody").value.trim();
+      if(!subject||!body){
+        $("#supportMessage").textContent="اكتب العنوان والتفاصيل.";
+        return;
+      }
+      $("#submitSupportTicket").disabled=true;
+      try{
+        await api("/v1/social/support",{
+          method:"POST",
+          body:JSON.stringify({
+            category:$("#supportCategory").value,
+            subject,
+            body,
+            app_version:cfg.appVersion||"",
+            device_info:navigator.userAgent.slice(0,300)
+          })
+        });
+        $("#supportSubject").value="";
+        $("#supportBody").value="";
+        $("#supportMessage").textContent="تم إرسال الطلب.";
+        await loadTickets();
+      }catch(error){
+        $("#supportMessage").textContent=error.message;
+      }finally{$("#submitSupportTicket").disabled=false}
+    };
+  }
+
+  async function openSavedContent(){
+    openInfoDialog("المحفوظات",`
+      <div class="settings-info">
+        <div class="chips">
+          <button id="savedPostsTab" class="chip active" type="button">المنشورات</button>
+          <button id="savedReelsTab" class="chip" type="button">الريلز</button>
+        </div>
+        <div id="savedContentList" class="feed"><div class="empty">جارٍ التحميل...</div></div>
+      </div>`);
+    const loadSaved=async(kind)=>{
+      const isReels=kind==="reels";
+      $("#savedPostsTab").classList.toggle("active",!isReels);
+      $("#savedReelsTab").classList.toggle("active",isReels);
+      $("#savedContentList").innerHTML='<div class="empty">جارٍ التحميل...</div>';
+      try{
+        const result=await api("/v1/social/saved?kind="+kind);
+        const ids=(result.items||[]).map(x=>x[isReels?"reel_id":"post_id"]).filter(Boolean);
+        if(!ids.length){
+          $("#savedContentList").innerHTML='<div class="empty">ماكو محتوى محفوظ بهذا القسم.</div>';
+          return;
+        }
+        if(isReels){
+          const {data,error}=await client.from("reels").select("id,caption,media_id,author_id").in("id",ids);
+          if(error)throw error;
+          const order=new Map(ids.map((id,i)=>[id,i]));
+          const rows=(data||[]).sort((a,b)=>(order.get(a.id)||0)-(order.get(b.id)||0));
+          $("#savedContentList").innerHTML=rows.map(r=>`<article class="post">
+            <video class="post-media" playsinline preload="metadata" data-media-id="${r.media_id}"></video>
+            <div class="post-body">${escapeHtml(r.caption||"")}
+              <div class="content-owner-actions"><button data-unsave-reel="${r.id}" type="button">إزالة من المحفوظات</button></div>
+            </div>
+          </article>`).join("");
+          $("#savedContentList").querySelectorAll("[data-unsave-reel]").forEach(b=>b.onclick=async()=>{
+            await api("/v1/social/save",{method:"POST",body:JSON.stringify({kind:"reel",id:b.dataset.unsaveReel,saved:false})});
+            loadSaved("reels");
+          });
+        }else{
+          const {data,error}=await client.from("posts").select("id,caption,author_id,post_media(media_id,sort_order)").in("id",ids);
+          if(error)throw error;
+          const order=new Map(ids.map((id,i)=>[id,i]));
+          const rows=(data||[]).sort((a,b)=>(order.get(a.id)||0)-(order.get(b.id)||0));
+          $("#savedContentList").innerHTML=rows.map(p=>{
+            const media=(p.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
+            return `<article class="post">${media?`<img class="post-media" data-media-id="${media}" alt="">`:""}
+              <div class="post-body">${escapeHtml(p.caption||"")}
+                <div class="content-owner-actions"><button data-unsave-post="${p.id}" type="button">إزالة من المحفوظات</button></div>
+              </div>
+            </article>`;
+          }).join("");
+          $("#savedContentList").querySelectorAll("[data-unsave-post]").forEach(b=>b.onclick=async()=>{
+            await api("/v1/social/save",{method:"POST",body:JSON.stringify({kind:"post",id:b.dataset.unsavePost,saved:false})});
+            loadSaved("posts");
+          });
+        }
+        await hydrateMedia($("#savedContentList"));
+      }catch(error){
+        $("#savedContentList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+      }
+    };
+    $("#savedPostsTab").onclick=()=>loadSaved("posts");
+    $("#savedReelsTab").onclick=()=>loadSaved("reels");
+    await loadSaved("posts");
+  }
+
   $("#blockedAccountsButton").onclick=async()=>{
     const {data,error}=await client.from("blocks")
       .select("blocked_id,created_at")

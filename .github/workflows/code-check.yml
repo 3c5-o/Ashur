@@ -23,7 +23,20 @@ jobs:
           node-version: "22"
 
       - name: فحص نسخة المستخدم
-        run: node --check apps/user-web/app.js
+        run: |
+          node --check apps/user-web/app.js
+          if grep -nE '\$\("\.[^"]+"\)\.forEach' apps/user-web/app.js; then
+            echo "محدد قائمة خاطئ: استخدم $ بدل $"
+            exit 1
+          fi
+          if grep -nF '$$(' apps/user-web/app.js; then
+            echo "تم العثور على محدد $$ غير صالح"
+            exit 1
+          fi
+          if grep -nE 'REMOTE_APP_URL|vercel\.app/app' android/user/app/src/main/java/app/ashur/social/MainActivity.java; then
+            echo "نسخة المستخدم يجب أن تعمل من الملفات المحلية فقط"
+            exit 1
+          fi
 
       - name: فحص نسخة الإدارة
         run: node --check apps/admin-web/app.js

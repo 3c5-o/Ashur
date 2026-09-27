@@ -176,44 +176,122 @@ function navigate(page){
 
 async function loadDashboard(){
   try{
-    const d=await api("/v1/admin/stats");
+    const [d,health]=await Promise.all([
+      api("/v1/admin/stats"),
+      api("/health/details").catch(()=>({services:{}}))
+    ]);
     $("#stats").innerHTML=[
       ["المستخدمون",d.users],
+      ["نشطون 7 أيام",d.active_7d],
       ["المنشورات",d.posts],
       ["الريلز",d.reels],
-      ["البلاغات المفتوحة",d.open_reports]
-    ].map(([a,b])=>`<div class="stat"><b>${Number(b||0).toLocaleString("ar-IQ")}</b><span>${a}</span></div>`).join("");
-    $("#recentReports").innerHTML=(d.recent_reports||[]).map(r=>`
-      <div class="row-card">
-        <div class="grow"><b>${esc(r.reason)}</b><div class="meta">${esc(r.target_type)} · ${new Date(r.created_at).toLocaleString("ar-IQ")}</div></div>
-        <span class="pill">قيد المراجعة</span>
-      </div>`).join("")||'<div class="meta">لا توجد بلاغات حديثة.</div>';
-    $("#serviceStatus").innerHTML=`
-      <div class="row-card"><div class="grow"><b>قاعدة البيانات</b><div class="meta">متصلة</div></div><span class="pill ok">تعمل</span></div>
-      <div class="row-card"><div class="grow"><b>بوابة آشور</b><div class="meta">الخدمة الرئيسية</div></div><span class="pill ok">تعمل</span></div>`;
-  }catch(e){$("#stats").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+      ["التعليقات",d.comments],
+      ["البلاغات المفتوحة",d.open_reports],
+      ["تذاكر الدعم",d.open_support],
+      ["رفع فاشل",d.failed_uploads],
+      ["أخطاء جديدة",d.open_errors]
+    ].map(([a,b])=>'<div class="stat"><b>'+Number(b||0).toLocaleString("ar-IQ")+'</b><span>'+a+'</span></div>').join("");
+    $("#recentReports").innerHTML=(d.recent_reports||[]).map(r=>
+      '<div class="row-card"><div class="grow"><b>'+esc(r.reason)+'</b><div class="meta">'+esc(r.target_type)+' · '+new Date(r.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(r.status)+'">'+statusLabel(r.status)+'</span></div>'
+    ).join("")||'<div class="meta">لا توجد بلاغات حديثة.</div>';
+    $("#serviceStatus").innerHTML=Object.entries(health.services||{}).map(([k,v])=>
+      '<div class="row-card"><div class="grow"><b>'+esc(v.label||k)+'</b><div class="meta">'+esc(v.detail||"")+'</div></div><span class="pill '+(v.ok?"ok":"bad")+'">'+(v.ok?"تعمل":"متوقفة")+'</span></div>'
+    ).join("")||'<div class="meta">تعذر قراءة حالة الخدمات.</div>';
+    if(d.today){
+      $("#recentReports").insertAdjacentHTML("beforebegin",
+        '<div class="today-strip"><span>اليوم</span><b>'+Number(d.today.new_users||0)+' مستخدم جديد</b><b>'+Number(d.today.posts||0)+' منشور</b><b>'+Number(d.today.reels||0)+' ريلز</b><b>'+Number(d.today.comments||0)+' تعليق</b></div>');
+    }
+  }catch(e){$("#stats").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
 let userTimer;
-$("#userSearch").oninput=()=>{clearTimeout(userTimer);userTimer=setTimeout(loadUsers,300)};
+$("#userSearch").oninput=()=>{clearTimeout(userTimer);userTimer=setTimeout(loadUsers,260)};
+
+async function loadUserDetail(id){
+  try{
+    const d=await api("/v1/admin/users/"+encodeURIComponent(id));
+    const u=d.profile||{};
+    const s=d.stats||{};
+    $("#userDetail").classList.remove("hidden");
+    $("#userDetail").innerHTML=
+      '<div class="panel-head"><div><span class="eyebrow">تفاصيل الحساب</span><h3>'+esc(u.name||u.username||"مستخدم")+'</h3></div><button id="closeUserDetail" class="small" type="button">إغلاق</button></div>'+
+      '<div class="user-detail-grid">'+
+        '<div><span>اسم المستخدم</span><b>@'+esc(u.username||"")+'</b></div>'+
+        '<div><span>المعرف</span><b>'+esc(u.id||"")+'</b></div>'+
+        '<div><span>الحالة</span><b>'+((u.is_banned||u.banned_until)?"محظور":"نشط")+'</b></div>'+
+        '<div><span>التوثيق</span><b>'+(u.is_verified?"موثق":"غير موثق")+'</b></div>'+
+        '<div><span>المنشورات</span><b>'+Number(s.posts||0)+'</b></div>'+
+        '<div><span>الريلز</span><b>'+Number(s.reels||0)+'</b></div>'+
+        '<div><span>المتابعون</span><b>'+Number(s.followers||0)+'</b></div>'+
+        '<div><span>يتابع</span><b>'+Number(s.following||0)+'</b></div>'+
+        '<div><span>البلاغات</span><b>'+Number(s.reports||0)+'</b></div>'+
+        '<div><span>التحذيرات</span><b>'+Number(u.warning_count||0)+'</b></div>'+
+      '</div>'+
+      (u.ban_reason?'<div class="info-banner"><span></span><p>سبب الحظر: '+esc(u.ban_reason)+'</p></div>':"")+
+      '<div class="admin-actions">'+
+        '<button id="toggleVerifyUser" class="small" type="button">'+(u.is_verified?"إلغاء التوثيق":"توثيق الحساب")+'</button>'+
+        '<button id="warnUserButton" class="small" type="button">إرسال تحذير</button>'+
+        '<button id="banUserDetailButton" class="small '+((u.is_banned||u.banned_until)?"":"danger")+'" type="button">'+((u.is_banned||u.banned_until)?"رفع الحظر":"حظر الحساب")+'</button>'+
+        '<button id="viewUserContentButton" class="small" type="button">عرض محتوى الحساب</button>'+
+      '</div>';
+    $("#closeUserDetail").onclick=()=>$("#userDetail").classList.add("hidden");
+    $("#toggleVerifyUser").onclick=async()=>{
+      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:u.is_verified?"unverify":"verify"})});
+      await loadUserDetail(id); await loadUsers();
+    };
+    $("#warnUserButton").onclick=async()=>{
+      const reason=prompt("اكتب نص التحذير");
+      if(!reason)return;
+      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"warn",reason})});
+      await loadUserDetail(id);
+    };
+    $("#banUserDetailButton").onclick=async()=>{
+      if(u.is_banned||u.banned_until){
+        await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
+      }else{
+        const reason=prompt("سبب الحظر")||"";
+        const choice=prompt("مدة الحظر بالساعات. اتركها 0 للحظر الدائم","24");
+        if(choice===null)return;
+        await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:true,reason,duration_hours:Number(choice||0)})});
+      }
+      await loadUserDetail(id); await loadUsers();
+    };
+    $("#viewUserContentButton").onclick=()=>{
+      navigate("content");
+      $("#contentSearch").value="";
+      loadContent("posts",id);
+    };
+  }catch(e){
+    $("#userDetail").classList.remove("hidden");
+    $("#userDetail").innerHTML='<div class="panel">'+esc(e.message)+'</div>';
+  }
+}
+
 async function loadUsers(){
   try{
     const q=$("#userSearch").value.trim();
     const d=await api("/v1/admin/users?q="+encodeURIComponent(q));
-    $("#usersList").innerHTML=(d.items||[]).map(u=>`
-      <div class="row-card">
-        <div class="grow">
-          <b>${esc(u.name||"مستخدم")}${u.is_verified?' <span style="color:var(--brand)">✓</span>':""}</b>
-          <div class="meta">@${esc(u.username||"")} · ${esc(u.id)} · ${u.is_private?"خاص":"عام"}</div>
-        </div>
-        <span class="pill ${u.is_banned?"bad":"ok"}">${u.is_banned?"محظور":"نشط"}</span>
-        <button class="small" data-ban="${u.id}" data-state="${u.is_banned}">${u.is_banned?"رفع الحظر":"حظر"}</button>
-      </div>`).join("")||'<div class="panel">لا توجد نتائج.</div>';
+    $("#usersList").innerHTML=(d.items||[]).map(u=>{
+      const banned=u.is_banned||(u.banned_until&&new Date(u.banned_until)>new Date());
+      return '<div class="row-card">'+
+        '<button class="row-main-button grow" data-user-detail="'+esc(u.id)+'" type="button"><b>'+esc(u.name||"مستخدم")+(u.is_verified?' <span class="verified-admin">✓</span>':"")+'</b><div class="meta">@'+esc(u.username||"")+' · '+esc(u.id)+' · '+(u.is_private?"خاص":"عام")+'</div></button>'+
+        '<span class="pill '+(banned?"bad":"ok")+'">'+(banned?"محظور":"نشط")+'</span>'+
+        '<button class="small" data-ban="'+esc(u.id)+'" data-state="'+String(banned)+'">'+(banned?"رفع الحظر":"حظر")+'</button>'+
+      '</div>';
+    }).join("")||'<div class="panel">لا توجد نتائج.</div>';
+    $("#usersList").querySelectorAll("[data-user-detail]").forEach(b=>b.onclick=()=>loadUserDetail(b.dataset.userDetail));
     $("#usersList").querySelectorAll("[data-ban]").forEach(b=>b.onclick=async()=>{
-      await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:b.dataset.state!=="true"})});
-      loadUsers()
-    })
-  }catch(e){$("#usersList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+      if(b.dataset.state==="true"){
+        await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
+      }else{
+        const reason=prompt("سبب الحظر")||"";
+        const hours=prompt("مدة الحظر بالساعات، 0 = دائم","24");
+        if(hours===null)return;
+        await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:true,reason,duration_hours:Number(hours||0)})});
+      }
+      loadUsers();
+    });
+  }catch(e){$("#usersList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
 $$("[data-content-kind]").forEach(b=>b.onclick=()=>{

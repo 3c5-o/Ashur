@@ -138,8 +138,14 @@
   });
 
   function showApp(loggedIn){
-    $("#auth").classList.toggle("hidden", loggedIn);
-    $("#app").classList.toggle("hidden", !loggedIn);
+    $("#auth").classList.toggle("hidden",loggedIn);
+    $("#app").classList.toggle("hidden",!loggedIn);
+    if(!loggedIn){
+      closeTransientDialogs();
+      state.activePage="homePage";
+      $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      $(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+    }
   }
 
   const PROFILE_CACHE_KEY="ashur_profile_cache_v1";
@@ -353,7 +359,10 @@
       showApp(true);
       checkRuntimeSettings(); loadHome(); loadNotificationsBadge();
     }else{
-      state.profile=null; nativeLogout(); showApp(false);
+      state.profile=null;
+      try{localStorage.removeItem(PROFILE_CACHE_KEY)}catch(_){}
+      nativeLogout();
+      showApp(false);
     }
   });
 
@@ -1151,9 +1160,22 @@
         await openChat(conversation.id,p.name||p.username||"محادثة");
       }catch(_){}
     };
-    const {data:content}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",uid).order("created_at",{ascending:false}).limit(30);
-    $("#publicProfileContent").innerHTML=(content||[]).map(row=>`<article class="post">${row.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${row.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(row.caption||"")}</div></article>`).join("")||(p.is_private?'<div class="empty">هذا الحساب خاص.</div>':'<div class="empty">لا توجد منشورات بعد.</div>');
-    await hydrateMedia($("#publicProfileContent"));
+    const mayView=!p.is_private||followRow?.status==="accepted";
+    if(!mayView){
+      $("#publicProfileContent").innerHTML='<div class="empty">هذا الحساب خاص. تابع الحساب وانتظر الموافقة لعرض المحتوى.</div>';
+    }else{
+      const {data:content,error:contentError}=await client.from("posts")
+        .select("id,caption,post_media(media_id,sort_order)")
+        .eq("author_id",uid)
+        .order("created_at",{ascending:false})
+        .limit(30);
+      if(contentError){
+        $("#publicProfileContent").innerHTML=errorMarkup(contentError.message,"searchPage");
+      }else{
+        $("#publicProfileContent").innerHTML=(content||[]).map(row=>`<article class="post">${row.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${row.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(row.caption||"")}</div></article>`).join("")||'<div class="empty">لا توجد منشورات بعد.</div>';
+        await hydrateMedia($("#publicProfileContent"));
+      }
+    }
   }
   $("#closePublicProfile").onclick=()=>$("#publicProfileDialog").close();
 
@@ -1164,10 +1186,19 @@
   }
   $("#notificationsButton").onclick=async()=>{
     openDialog($("#notificationsDialog"));
-    const {data}=await client.from("notifications").select("*").eq("user_id",state.user.id).order("created_at",{ascending:false}).limit(100);
+    $("#notificationsList").innerHTML='<div class="empty">جارٍ تحميل الإشعارات...</div>';
+    const {data,error}=await client.from("notifications")
+      .select("*")
+      .eq("user_id",state.user.id)
+      .order("created_at",{ascending:false})
+      .limit(100);
+    if(error){
+      $("#notificationsList").innerHTML=errorMarkup(error.message,"homePage");
+      return;
+    }
     $("#notificationsList").innerHTML=(data||[]).map(n=>`<div class="list-card"><div class="grow"><b>${escapeHtml(n.title)}</b><div>${escapeHtml(n.body)}</div></div></div>`).join("")||'<div class="empty">لا توجد إشعارات.</div>';
     await client.from("notifications").update({read_at:new Date().toISOString()}).eq("user_id",state.user.id).is("read_at",null);
-    loadNotificationsBadge();
+    loadNotificationsBadge().catch(()=>{});
   };
   $("#closeNotifications").onclick=()=>$("#notificationsDialog").close();
 
@@ -1399,19 +1430,24 @@
   };
 
   async function openSettings(){
-    const {data}=await client.from("notification_preferences")
-      .select("*").eq("user_id",state.user.id).maybeSingle();
-    const p=data||{};
-    $("#notifyMessages").checked=p.messages!==false;
-    $("#notifyGroups").checked=p.groups!==false;
-    $("#notifyLikes").checked=p.likes!==false;
-    $("#notifyComments").checked=p.comments!==false;
-    $("#notifyFollows").checked=p.follows!==false;
-    $("#notifyStories").checked=p.stories!==false;
-    $("#notifySystem").checked=p.system!==false;
-    $("#notifyPreview").checked=p.preview_message!==false;
-    await loadFollowRequests();
     openDialog($("#settingsDialog"));
+    try{
+      const {data,error}=await client.from("notification_preferences")
+        .select("*").eq("user_id",state.user.id).maybeSingle();
+      if(error)throw error;
+      const p=data||{};
+      $("#notifyMessages").checked=p.messages!==false;
+      $("#notifyGroups").checked=p.groups!==false;
+      $("#notifyLikes").checked=p.likes!==false;
+      $("#notifyComments").checked=p.comments!==false;
+      $("#notifyFollows").checked=p.follows!==false;
+      $("#notifyStories").checked=p.stories!==false;
+      $("#notifySystem").checked=p.system!==false;
+      $("#notifyPreview").checked=p.preview_message!==false;
+      await loadFollowRequests();
+    }catch(error){
+      $("#followRequestsList").innerHTML='<div class="empty error">تعذر تحميل بعض الإعدادات.</div>';
+    }
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
   $("#settingsLogoutButton").onclick=async()=>{

@@ -678,3 +678,13 @@ dialog::backdrop{background:rgba(0,0,0,.72)}
 @media (min-width:700px){
   .network-banner{left:50%;right:auto;width:410px;transform:translateX(-50%)}
 }
+
+.error-state>div{display:grid;justify-items:center;gap:8px;max-width:280px}
+.error-state b{font-size:12px;color:#fff}
+.error-state p{margin:0;font-size:10px;line-height:1.6;color:#d7a3a7}
+.error-state button{
+  min-height:38px;border:1px solid var(--line);
+  border-radius:11px;padding:0 13px;
+  background:var(--surface-2);color:#fff;font-size:9px;font-weight:850
+}
+.explore-grid,.messages-head,.comments-sheet,.cover-picker,.avatar-picker,.settings-form{min-width:0}

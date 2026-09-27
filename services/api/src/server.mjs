@@ -1081,18 +1081,41 @@ async function socialDeleteAccount(req, res) {
 
 async function adminStats(req, res) {
   await requireAdmin(req, "analytics");
-  const [users, posts, reels, openReports, recent] = await Promise.all([
+  const since24h = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const since7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const [
+    users, posts, reels, stories, comments, openReports, openSupport, failedUploads, openErrors,
+    newUsers24h, posts24h, reels24h, comments24h, active7d, recent
+  ] = await Promise.all([
     count("profiles"),
     count("posts"),
     count("reels"),
-    count("reports", "status=eq.open"),
+    count("stories"),
+    count("comments"),
+    count("reports", "status=in.(open,review)"),
+    count("support_tickets", "status=in.(open,in_progress,answered)"),
+    count("upload_jobs", "status=eq.failed"),
+    count("system_errors", "status=eq.new"),
+    count("profiles", "created_at=gte." + encodeURIComponent(since24h)),
+    count("posts", "created_at=gte." + encodeURIComponent(since24h)),
+    count("reels", "created_at=gte." + encodeURIComponent(since24h)),
+    count("comments", "created_at=gte." + encodeURIComponent(since24h)),
+    count("profiles", "last_seen_at=gte." + encodeURIComponent(since7d)),
     select("reports", "select=id,reason,target_type,status,created_at&order=created_at.desc&limit=6"),
   ]);
   json(res, 200, {
-    users,
-    posts,
-    reels,
+    users, posts, reels, stories, comments,
     open_reports: openReports,
+    open_support: openSupport,
+    failed_uploads: failedUploads,
+    open_errors: openErrors,
+    today: {
+      new_users: newUsers24h,
+      posts: posts24h,
+      reels: reels24h,
+      comments: comments24h,
+    },
+    active_7d: active7d,
     recent_reports: recent || [],
   });
 }
@@ -1445,11 +1468,37 @@ async function adminContent(req, res, url) {
   const kind = url.searchParams.get("kind") || "posts";
   const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
   if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
-  const fields = table === "stories"
-    ? "id,author_id,caption,created_at,expires_at"
-    : "id,author_id,caption,created_at";
-  const items = await select(table, `select=${fields}&order=created_at.desc&limit=100`);
-  json(res, 200, { items: items || [] });
+  const status = String(url.searchParams.get("status") || "").trim();
+  const authorId = String(url.searchParams.get("author_id") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  let fields = "id,author_id,caption,created_at,moderation_status,deleted_at,hidden_by";
+  if (table === "stories") fields += ",expires_at,media_id";
+  if (table === "reels") fields += ",media_id,comments_enabled,explore_enabled,visibility";
+  if (table === "posts") fields += ",comments_enabled,visibility,updated_at";
+  let query = "select=" + fields + "&order=created_at.desc&limit=150";
+  if (status) query += "&moderation_status=eq." + encodeURIComponent(status);
+  if (authorId) query += "&author_id=eq." + encodeURIComponent(authorId);
+  if (q) query += "&caption=ilike.*" + encodeURIComponent(q) + "*";
+  const rows = await select(table, query);
+  const items = [];
+  for (const row of rows || []) {
+    const author = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1",
+    ).catch(() => []);
+    let media_ids = [];
+    if (kind === "posts") {
+      const media = await select(
+        "post_media",
+        "select=media_id,sort_order&post_id=eq." + encodeURIComponent(row.id) + "&order=sort_order.asc",
+      ).catch(() => []);
+      media_ids = (media || []).map((m) => m.media_id);
+    } else if (row.media_id) {
+      media_ids = [row.media_id];
+    }
+    items.push({ ...row, author: author?.[0] || null, media_ids });
+  }
+  json(res, 200, { items });
 }
 
 async function deleteContent(req, res, kind, id) {
@@ -1470,9 +1519,17 @@ async function adminReports(req, res) {
   await requireAdmin(req, "reports");
   const items = await select(
     "reports",
-    "select=id,reporter_id,target_type,target_id,reason,details,status,created_at,resolved_at&order=created_at.desc&limit=100",
+    "select=id,reporter_id,target_type,target_id,reason,details,status,admin_note,handled_by,action_taken,created_at,updated_at,resolved_at&order=created_at.desc&limit=200",
   );
-  json(res, 200, { items: items || [] });
+  const enriched = [];
+  for (const row of items || []) {
+    const reporter = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.reporter_id) + "&limit=1",
+    ).catch(() => []);
+    enriched.push({ ...row, reporter: reporter?.[0] || null });
+  }
+  json(res, 200, { items: enriched });
 }
 
 async function resolveReport(req, res, reportId) {
@@ -1529,7 +1586,7 @@ async function adminAdmins(req, res) {
   await requireAdmin(req, "admins");
   const rows = await select(
     "admins",
-    "select=user_id,role,permissions,active,created_at&order=created_at.asc",
+    "select=user_id,role,permissions,active,last_active_at,created_at,updated_at&order=created_at.asc",
   );
   const items = [];
   for (const row of rows || []) {

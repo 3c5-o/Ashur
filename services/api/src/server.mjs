@@ -218,6 +218,13 @@ async function canViewOwner(user, ownerId) {
 async function canReadMedia(user, media) {
   if (!media) return false;
   if (user?.id && media.owner_id === user.id) return true;
+  if (user?.id) {
+    const adminRows = await select(
+      "admins",
+      "select=user_id&user_id=eq." + encodeURIComponent(user.id) + "&active=eq.true&limit=1",
+    ).catch(() => []);
+    if (adminRows?.length) return true;
+  }
 
   if (media.kind === "profile" || media.kind === "profile_cover") {
     return canViewOwner(user, media.owner_id);

@@ -37,6 +37,7 @@ const CHANNELS = {
   chat_image: "chat_media",
   chat_video: "chat_media",
   chat_audio: "chat_media",
+  chat_file: "chat_media",
   group_media: "group_media",
   file: "general_files",
   backup: "backups",
@@ -52,6 +53,7 @@ const DEFAULT_LIMITS_MB = {
   chat_image: 10,
   chat_video: 50,
   chat_audio: 15,
+  chat_file: 50,
   group_media: 60,
   file: 60,
   backup: 60,
@@ -251,7 +253,7 @@ async function canReadMedia(user, media) {
     return canViewOwner(user, stories[0].author_id);
   }
 
-  if (["chat_image", "chat_video", "chat_audio", "group_media"].includes(media.kind)) {
+  if (["chat_image", "chat_video", "chat_audio", "chat_file", "group_media"].includes(media.kind)) {
     if (!user) return false;
     const messages = await select(
       "messages",
@@ -309,6 +311,7 @@ async function uploadLimitBytes(kind) {
       chat_image: limits.image_mb,
       chat_video: limits.chat_video_mb,
       chat_audio: limits.audio_mb,
+      chat_file: limits.chat_video_mb || limits.max_upload_mb,
       group_media: limits.max_upload_mb,
       file: limits.max_upload_mb,
       backup: limits.max_upload_mb,

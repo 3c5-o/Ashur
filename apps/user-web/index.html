@@ -117,7 +117,7 @@
         </div>
         <div class="messages-search">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-          <span>محادثاتك تظهر هنا</span>
+          <input id="messagesSearchInput" type="search" autocomplete="off" placeholder="ابحث في المحادثات">
         </div>
         <div id="conversationList" class="list conversation-list"></div>
       </section>
@@ -200,7 +200,7 @@
     <div id="chatAttachmentPreview" class="chat-attachment-preview hidden"></div>
     <form id="chatForm" class="chat-form">
       <label class="chat-attach-button" aria-label="إرفاق ملف">
-        <input id="chatFile" type="file" accept="image/*,video/*,audio/*">
+        <input id="chatFile" type="file" accept="image/*,video/*,audio/*,*/*">
         <svg viewBox="0 0 24 24"><path d="M8 12.5 14.5 6a3 3 0 1 1 4.2 4.2l-8.3 8.3a5 5 0 0 1-7.1-7.1l8.1-8.1"/><path d="m9.5 14 7-7"/></svg>
       </label>
       <input id="chatInput" maxlength="4000" placeholder="اكتب رسالة...">

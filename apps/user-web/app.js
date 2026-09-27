@@ -1395,6 +1395,27 @@
     $("#commentsDialog").close();
   };
 
+  async function openFollowList(profileId,mode,title){
+    openInfoDialog(title,'<div id="followListDialog" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
+    try{
+      const result=await api("/v1/social/follows/"+encodeURIComponent(profileId)+"?mode="+encodeURIComponent(mode));
+      const items=result.items||[];
+      $("#followListDialog").innerHTML=items.map(p=>`
+        <button class="list-card" data-open-follow-profile="${p.id}" type="button">
+          ${avatar(p)}
+          <span class="grow"><b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b><small>@${escapeHtml(p.username||"")}</small></span>
+        </button>`).join("")||'<div class="empty">لا توجد حسابات.</div>';
+      await hydrateMedia($("#followListDialog"));
+      $("#followListDialog").querySelectorAll("[data-open-follow-profile]").forEach(btn=>btn.onclick=()=>{
+        const uid=btn.dataset.openFollowProfile;
+        $("#infoDialog").close();
+        openPublicProfile(uid);
+      });
+    }catch(error){
+      $("#followListDialog").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+    }
+  }
+
   async function loadProfile(){
     try{
       await refreshProfile();
@@ -1419,8 +1440,8 @@
           ${link?`<a class="profile-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${icon("link")}<span>${escapeHtml(p.profile_link)}</span></a>`:""}
           <div class="profile-stats">
             <div><b>${posts||0}</b><span>منشور</span></div>
-            <div><b>${followers||0}</b><span>متابع</span></div>
-            <div><b>${following||0}</b><span>يتابع</span></div>
+            <button class="profile-stat-button" id="ownFollowersButton" type="button"><b>${followers||0}</b><span>متابع</span></button>
+            <button class="profile-stat-button" id="ownFollowingButton" type="button"><b>${following||0}</b><span>يتابع</span></button>
           </div>
           <div class="profile-buttons">
             <button id="editProfileButton" class="small-button">${icon("edit")} تعديل الحساب</button>
@@ -1433,6 +1454,8 @@
     $("#editProfileButton").onclick=openEditProfile;
     $("#settingsButton").onclick=openSettings;
     $("#profileSettingsFab").onclick=openSettings;
+    $("#ownFollowersButton").onclick=()=>openFollowList(state.user.id,"followers","المتابعون");
+    $("#ownFollowingButton").onclick=()=>openFollowList(state.user.id,"following","الحسابات التي تتابعها");
     await hydrateMedia($("#profileCard"));
     await loadProfileContent(state.profileTab);
     }catch(error){
@@ -1443,13 +1466,27 @@
 
   async function loadProfileContent(kind="posts"){
     state.profileTab=kind;
-    $$(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
+    $(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
     if(kind==="reels"){
-      const {data}=await client.from("reels").select("id,caption,media_id,created_at").eq("author_id",state.user.id).order("created_at",{ascending:false});
-      $("#profileContent").innerHTML=(data||[]).map(r=>`<article class="post"><video class="post-media" controls playsinline preload="metadata" data-media-id="${r.media_id}"></video><div class="post-body">${escapeHtml(r.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر ريلز بعد.</div>';
+      const {data,error}=await client.from("reels").select("id,caption,media_id,created_at,comments_enabled").eq("author_id",state.user.id).order("created_at",{ascending:false});
+      if(error){$("#profileContent").innerHTML=errorMarkup(error.message,"profilePage");return}
+      $("#profileContent").innerHTML=(data||[]).map(r=>`<article class="post">
+        <video class="post-media" playsinline preload="metadata" data-media-id="${r.media_id}"></video>
+        <div class="post-body">${escapeHtml(r.caption||"")}
+          <div class="content-owner-actions"><button data-manage-profile-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" type="button">إدارة</button></div>
+        </div>
+      </article>`).join("")||'<div class="empty">لم تنشر ريلز بعد.</div>';
+      $("#profileContent").querySelectorAll("[data-manage-profile-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.manageProfileReel,b.dataset.caption,b.dataset.comments==="true"));
     }else{
-      const {data}=await client.from("posts").select("id,caption,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
-      $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}<div class="post-body">${escapeHtml(p.caption||"")}</div></article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
+      const {data,error}=await client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
+      if(error){$("#profileContent").innerHTML=errorMarkup(error.message,"profilePage");return}
+      $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">
+        ${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}
+        <div class="post-body">${escapeHtml(p.caption||"")}
+          <div class="content-owner-actions"><button data-manage-profile-post="${p.id}" data-caption="${escapeHtml(p.caption||"")}" data-comments="${p.comments_enabled!==false}" type="button">إدارة</button></div>
+        </div>
+      </article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
+      $("#profileContent").querySelectorAll("[data-manage-profile-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.manageProfilePost,b.dataset.caption,b.dataset.comments==="true"));
     }
     await hydrateMedia($("#profileContent"));
   }

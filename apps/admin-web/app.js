@@ -10,11 +10,16 @@ const titles={
   dashboard:"الرئيسية",
   users:"المستخدمون",
   content:"المحتوى",
+  comments:"التعليقات",
   reports:"البلاغات",
+  support:"الدعم",
   storage:"التخزين",
+  uploads:"عمليات الرفع",
+  errors:"أخطاء النظام",
   notifications:"الإشعارات",
   admins:"المشرفون",
   audit:"سجل الإدارة",
+  releases:"الإصدارات",
   appSettings:"إعدادات التطبيق",
   siteSettings:"الموقع الرسمي",
   health:"حالة النظام"
@@ -33,7 +38,20 @@ const actionLabel={
   delete_content:"حذف محتوى",
   resolve_report:"حل بلاغ",
   link_storage_channel:"ربط قناة تخزين",
-  add_admin:"إضافة مشرف"
+  add_admin:"إضافة مشرف",
+  update_admin:"تعديل مشرف",
+  user_verify:"توثيق مستخدم",
+  user_unverify:"إلغاء توثيق مستخدم",
+  user_warn:"تحذير مستخدم",
+  hide_content:"إخفاء محتوى",
+  restore_content:"استعادة محتوى",
+  cancel_upload:"إلغاء رفع",
+  resolve_system_error:"حل خطأ",
+  reply_support:"رد على تذكرة دعم",
+  create_release:"إنشاء إصدار",
+  update_release:"تعديل إصدار",
+  send_notification:"إرسال إشعار",
+  schedule_notification:"جدولة إشعار"
 };
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
@@ -91,11 +109,17 @@ function navigate(page){
   const loader={
     dashboard:loadDashboard,
     users:loadUsers,
-    content:()=>loadContent("posts"),
+    content:()=>loadContent(currentContentKind),
+    comments:loadCommentsAdmin,
     reports:loadReports,
+    support:loadSupport,
     storage:loadStorage,
+    uploads:loadUploads,
+    errors:loadErrors,
+    notifications:loadNotificationHistory,
     admins:loadAdmins,
     audit:loadAudit,
+    releases:loadReleases,
     appSettings:loadAppSettings,
     siteSettings:loadSiteSettings,
     health:loadHealth

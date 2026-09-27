@@ -11,11 +11,36 @@
     profile:null,
     composerType:"post",
     activeConversation:null,
-    commentTarget:null
+    commentTarget:null,
+    stories:new Map(),
+    profileTab:"posts"
   };
 
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const initials = (name="آشور") => escapeHtml(name.trim().slice(0,1) || "آ");
+  const safeLink = (value="") => {
+    const raw=String(value||"").trim();
+    if(!raw)return "";
+    const normalized=/^https?:\/\//i.test(raw)?raw:"https://"+raw;
+    try{
+      const u=new URL(normalized);
+      return ["http:","https:"].includes(u.protocol)?u.href:"";
+    }catch{return ""}
+  };
+  const icon = (name) => {
+    const paths={
+      like:'<path d="M20.8 4.7a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.5 1-1a5.5 5.5 0 0 0 0-7.8Z"/>',
+      comment:'<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z"/>',
+      share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/>',
+      save:'<path d="M6 4h12v17l-6-4-6 4Z"/>',
+      settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1L7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
+      link:'<path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.1-1.1"/>',
+      edit:'<path d="m4 16-1 5 5-1L19 9l-4-4Z"/><path d="m13 7 4 4"/>',
+      logout:'<path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 4h6v16h-6"/>',
+      message:'<path d="M4 5h16v12H8l-4 4Z"/>'
+    };
+    return '<svg viewBox="0 0 24 24" aria-hidden="true">'+(paths[name]||'')+'</svg>';
+  };
   const nativeApiBase = () => {
     try { return window.AshurNative?.getApiBaseUrl?.() || ""; } catch { return ""; }
   };
@@ -26,18 +51,35 @@
     return `<div class="${cls}" style="display:grid;place-items:center;background:#2a231e;color:#d7b16f;font-weight:800">${initials(profile?.name)}</div>`;
   }
 
+  async function mediaAccess(mediaId){
+    const result=await api("/v1/media-ticket/"+encodeURIComponent(mediaId));
+    return {...result,url:apiUrl(result.path)};
+  }
+
   async function mediaUrl(mediaId){
-    const result = await api("/v1/media-ticket/" + encodeURIComponent(mediaId));
-    return apiUrl(result.path);
+    return (await mediaAccess(mediaId)).url;
   }
 
   async function hydrateMedia(root=document){
     const nodes=[...root.querySelectorAll("[data-media-id]")];
     await Promise.all(nodes.map(async node=>{
-      if(node.dataset.mediaReady==="1") return;
+      if(node.dataset.mediaReady==="1")return;
       try{
-        node.src=await mediaUrl(node.dataset.mediaId);
-        node.dataset.mediaReady="1";
+        const access=await mediaAccess(node.dataset.mediaId);
+        if(access.mime_type?.startsWith("video/") && node.tagName==="IMG"){
+          const video=document.createElement("video");
+          video.className=node.className;
+          video.dataset.mediaId=node.dataset.mediaId;
+          video.dataset.mediaReady="1";
+          video.src=access.url;
+          video.controls=true;
+          video.playsInline=true;
+          video.preload="metadata";
+          node.replaceWith(video);
+        }else{
+          node.src=access.url;
+          node.dataset.mediaReady="1";
+        }
       }catch(_){
         node.removeAttribute("src");
       }
@@ -213,14 +255,17 @@
     showAuthMessage(error?error.message:"تم إرسال رابط استعادة كلمة المرور",!error);
   };
 
-  $$(".nav-item").forEach(btn=>btn.onclick=()=>{
-    $$(".nav-item").forEach(x=>x.classList.remove("active")); btn.classList.add("active");
-    $$(".page").forEach(x=>x.classList.remove("active")); $("#"+btn.dataset.page).classList.add("active");
-    if(btn.dataset.page==="searchPage") loadExplore();
-    if(btn.dataset.page==="reelsPage") loadReels();
-    if(btn.dataset.page==="messagesPage") loadConversations();
-    if(btn.dataset.page==="profilePage") loadProfile();
-  });
+  function navigateTo(page){
+    $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    if(page==="searchPage")loadExplore();
+    if(page==="reelsPage")loadReels();
+    if(page==="messagesPage")loadConversations();
+    if(page==="profilePage")loadProfile();
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+  $(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){
     $("#homeStatus").textContent="جارٍ تحميل أحدث المحتوى...";
@@ -234,18 +279,45 @@
     if(error){$("#stories").innerHTML="";return}
     const ids=[...new Set((data||[]).map(x=>x.author_id))];
     const profiles=await profilesMap(ids);
+    state.stories=new Map();
     let html=`<button class="story" data-own-story="1"><div class="story-ring"><div class="fallback">+</div></div><span>قصتك</span></button>`;
     html+=(data||[]).map(s=>{
       const p=profiles[s.author_id]||{};
-      return `<button class="story" data-story="${s.id}" data-media="${s.media_id}"><div class="story-ring">${avatar(p,"avatar")}</div><span>${escapeHtml(p.username||p.name||"مستخدم")}</span></button>`
+      state.stories.set(s.id,{...s,profile:p});
+      return `<button class="story" data-story="${s.id}"><div class="story-ring">${avatar(p,"avatar")}</div><span>${escapeHtml(p.username||p.name||"مستخدم")}</span></button>`
     }).join("");
     $("#stories").innerHTML=html;
     await hydrateMedia($("#stories"));
     $("#stories").querySelector("[data-own-story]")?.addEventListener("click",()=>openComposer("story"));
-    $("#stories").querySelectorAll("[data-story]").forEach(b=>b.onclick=async()=>{
-      try{ window.open(await mediaUrl(b.dataset.media),"_blank"); }catch(_){}
-    });
+    $("#stories").querySelectorAll("[data-story]").forEach(b=>b.onclick=()=>openStoryViewer(b.dataset.story));
   }
+
+  async function openStoryViewer(id){
+    const story=state.stories.get(id);
+    if(!story)return;
+    const dialog=$("#storyViewerDialog");
+    const user=$("#storyViewerUser");
+    user.innerHTML=`${avatar(story.profile)}<span>${escapeHtml(story.profile?.name||story.profile?.username||"مستخدم")}</span>`;
+    $("#storyViewerCaption").textContent=story.caption||"";
+    $("#storyViewerMedia").innerHTML='<div class="empty">جارٍ تحميل القصة...</div>';
+    $("#storyProgressBar").style.width="0%";
+    dialog.showModal();
+    await hydrateMedia(user);
+    try{
+      const access=await mediaAccess(story.media_id);
+      const media=access.mime_type?.startsWith("video/")
+        ? `<video src="${access.url}" autoplay playsinline controls></video>`
+        : `<img src="${access.url}" alt="">`;
+      $("#storyViewerMedia").innerHTML=media;
+      requestAnimationFrame(()=>$("#storyProgressBar").style.width="100%");
+    }catch{
+      $("#storyViewerMedia").innerHTML='<div class="empty error">تعذر تحميل القصة.</div>';
+    }
+  }
+  $("#closeStoryViewer").onclick=()=>$("#storyViewerDialog").close();
+  $("#storyViewerDialog").addEventListener("click",e=>{
+    if(e.target===$("#storyViewerDialog"))$("#storyViewerDialog").close();
+  });
 
   async function profilesMap(ids){
     if(!ids.length) return {};

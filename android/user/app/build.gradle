@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-def apiUrl = System.getenv("ASHUR_API_URL") ?: ""
-def oneSignalAppId = System.getenv("ONESIGNAL_APP_ID") ?: ""
+def apiUrl = System.getenv("ASHUR_API_URL") ?: "https://exciting-miracle-production-b2cf.up.railway.app"
+def oneSignalAppId = System.getenv("ONESIGNAL_APP_ID") ?: "5248cf60-522b-48cd-b539-fdd631014c94"
 def keystoreFilePath = System.getenv("ASHUR_KEYSTORE_FILE") ?: ""
 def keystorePassword = System.getenv("ASHUR_KEYSTORE_PASSWORD") ?: ""
 def keyAliasName = System.getenv("ASHUR_KEY_ALIAS") ?: ""

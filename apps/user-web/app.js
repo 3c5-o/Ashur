@@ -69,6 +69,65 @@
     $("#app").classList.toggle("hidden", !loggedIn);
   }
 
+  function compareVersions(a,b){
+    const pa=String(a||"0").split(".").map(n=>Number(n)||0);
+    const pb=String(b||"0").split(".").map(n=>Number(n)||0);
+    const len=Math.max(pa.length,pb.length);
+    for(let i=0;i<len;i++){
+      const x=pa[i]||0,y=pb[i]||0;
+      if(x>y)return 1;
+      if(x<y)return -1;
+    }
+    return 0;
+  }
+
+  async function checkRuntimeSettings(){
+    const {data,error}=await client.from("app_settings")
+      .select("key,value")
+      .in("key",["maintenance","version"]);
+    if(error)return;
+    const settings=Object.fromEntries((data||[]).map(x=>[x.key,x.value]));
+    const maintenance=settings.maintenance||{};
+    const version=settings.version||{};
+    const current=cfg.appVersion||"1.0.0";
+    const required=Boolean(version.required) ||
+      (version.minimum && compareVersions(current,version.minimum)<0);
+
+    if(maintenance.enabled){
+      $("#systemTitle").textContent=maintenance.title||"آشور";
+      $("#systemMessage").textContent=maintenance.message||"نعمل على تحسين الخدمة، يرجى المحاولة لاحقًا.";
+      $("#systemPrimary").classList.add("hidden");
+      $("#systemLater").classList.add("hidden");
+      $("#systemDialog").dataset.blocking="1";
+      if(!$("#systemDialog").open)$("#systemDialog").showModal();
+      return;
+    }
+
+    if(version.latest && compareVersions(current,version.latest)<0){
+      $("#systemTitle").textContent="يتوفر تحديث جديد";
+      $("#systemMessage").textContent=version.message||`يتوفر الإصدار ${version.latest} من آشور.`;
+      const link=$("#systemPrimary");
+      if(version.download_url){
+        link.href=version.download_url;
+        link.classList.remove("hidden");
+      }else{
+        link.classList.add("hidden");
+      }
+      $("#systemLater").classList.toggle("hidden",required);
+      $("#systemDialog").dataset.blocking=required?"1":"0";
+      if(!$("#systemDialog").open)$("#systemDialog").showModal();
+      return;
+    }
+
+    $("#systemDialog").dataset.blocking="0";
+    if($("#systemDialog").open)$("#systemDialog").close();
+  }
+
+  $("#systemDialog").addEventListener("cancel",e=>{
+    if($("#systemDialog").dataset.blocking==="1")e.preventDefault();
+  });
+  $("#systemLater").onclick=()=>$("#systemDialog").close();
+
   async function refreshProfile(){
     if(!state.user) return;
     const { data, error } = await client.from("profiles").select("*").eq("id",state.user.id).single();
@@ -85,6 +144,7 @@
       await refreshProfile();
       await nativeLogin(state.user.id);
       showApp(true);
+      await checkRuntimeSettings();
       await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
     }else{
       showApp(false);
@@ -106,7 +166,7 @@
       await refreshProfile().catch(()=>{});
       await nativeLogin(state.user.id);
       showApp(true);
-      loadHome(); loadNotificationsBadge();
+      checkRuntimeSettings(); loadHome(); loadNotificationsBadge();
     }else{
       state.profile=null; nativeLogout(); showApp(false);
     }

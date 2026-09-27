@@ -563,6 +563,65 @@
     return status==="accepted"?"تتابعه":status==="pending"?"تم إرسال الطلب":"متابعة";
   }
 
+  function openOwnContentActions(kind,id,caption="",commentsEnabled=true){
+    const label=kind==="reels"?"الريلز":kind==="stories"?"القصة":"المنشور";
+    const commentsField=kind==="stories"?"":`
+      <label class="switch-row">
+        <span><b>السماح بالتعليقات</b><small>يمكن تغييرها بأي وقت</small></span>
+        <input id="ownContentComments" type="checkbox" ${commentsEnabled!==false?"checked":""}>
+      </label>`;
+    openInfoDialog("إدارة "+label,`
+      <div class="form settings-info">
+        <label><span>الوصف</span><textarea id="ownContentCaption" maxlength="2200">${escapeHtml(caption||"")}</textarea></label>
+        ${commentsField}
+        <button id="saveOwnContent" class="primary" type="button">حفظ التعديلات</button>
+        <button id="deleteOwnContent" class="danger-wide danger-outline" type="button">حذف ${label}</button>
+        <p id="ownContentMessage" class="message"></p>
+      </div>`);
+    $("#saveOwnContent").onclick=async()=>{
+      $("#saveOwnContent").disabled=true;
+      try{
+        const body={caption:$("#ownContentCaption").value.trim()};
+        if(kind!=="stories")body.comments_enabled=$("#ownContentComments").checked;
+        await api("/v1/social/content/"+kind+"/"+id,{method:"PATCH",body:JSON.stringify(body)});
+        $("#infoDialog").close();
+        if(state.activePage==="profilePage")await loadProfileContent(state.profileTab);
+        else if(kind==="reels")await loadReels();
+        else await loadFeed();
+      }catch(error){
+        $("#ownContentMessage").textContent=error.message;
+      }finally{$("#saveOwnContent").disabled=false}
+    };
+    $("#deleteOwnContent").onclick=async()=>{
+      if(!confirm("تأكيد حذف "+label+"؟ لا يمكن التراجع عن العملية."))return;
+      $("#deleteOwnContent").disabled=true;
+      try{
+        await api("/v1/social/content/"+kind+"/"+id,{method:"DELETE"});
+        $("#infoDialog").close();
+        if(state.activePage==="profilePage")await loadProfileContent(state.profileTab);
+        else if(kind==="reels")await loadReels();
+        else await loadFeed();
+      }catch(error){
+        $("#ownContentMessage").textContent=error.message;
+        $("#deleteOwnContent").disabled=false;
+      }
+    };
+  }
+
+  async function toggleSavedContent(kind,id,button){
+    const isSaved=button?.classList.contains("active");
+    const result=await api("/v1/social/save",{
+      method:"POST",
+      body:JSON.stringify({kind,id,saved:!isSaved})
+    });
+    button?.classList.toggle("active",result.saved);
+    if(button){
+      const label=kind==="reel"?(result.saved?"محفوظ":"حفظ"):(result.saved?"محفوظ":"حفظ");
+      if(kind==="reel")button.innerHTML=`<span class="reel-action-icon">${icon("save")}</span><span>${label}</span>`;
+      else button.innerHTML=icon("save")+`<span>${label}</span>`;
+    }
+  }
+
   async function loadFeed(){
     const {data,error}=await client.from("posts")
       .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
@@ -599,6 +658,7 @@
             <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
             <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
           </button>
+          ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
         </div>
         ${media?`<img class="post-media" loading="lazy" data-media-id="${media}" alt="">`:""}
         <div class="post-body">
@@ -619,7 +679,8 @@
     $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
     $("#feed").querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
     $("#feed").querySelectorAll("[data-share-post]").forEach(b=>b.onclick=()=>shareContent("post",b.dataset.sharePost));
-    $("#feed").querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSave(b.dataset.savePost,b));
+    $("#feed").querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSavedContent("post",b.dataset.savePost,b));
+    $("#feed").querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true"));
     $("#feed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
   }
 
@@ -639,18 +700,6 @@
     }
   }
 
-  async function toggleSave(postId,button){
-    const {data}=await client.from("saved_posts").select("*").eq("post_id",postId).eq("user_id",state.user.id).maybeSingle();
-    if(data){
-      await client.from("saved_posts").delete().eq("post_id",postId).eq("user_id",state.user.id);
-      button.classList.remove("active");
-      button.innerHTML=icon("save")+"<span>حفظ</span>";
-    }else{
-      await client.from("saved_posts").insert({post_id:postId,user_id:state.user.id});
-      button.classList.add("active");
-      button.innerHTML=icon("save")+"<span>محفوظ</span>";
-    }
-  }
 
   async function shareContent(type,id){
     const text=type==="reel"?"ريلز على آشور":"منشور على آشور";
@@ -833,16 +882,19 @@
     }
 
     const reelIds=data.map(x=>x.id);
-    const [ps,statuses,{data:liked}] = await Promise.all([
+    const [ps,statuses,{data:liked},{data:saved}] = await Promise.all([
       profilesMap([...new Set(data.map(x=>x.author_id))]),
       followStatusMap(data.map(x=>x.author_id)),
-      client.from("reel_likes").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds)
+      client.from("reel_likes").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
+      client.from("saved_reels").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds)
     ]);
     const likedSet=new Set((liked||[]).map(x=>x.reel_id));
+    const savedSet=new Set((saved||[]).map(x=>x.reel_id));
 
     $("#reelsFeed").innerHTML=data.map(r=>{
       const p=ps[r.author_id]||{};
       const likedNow=likedSet.has(r.id);
+      const savedNow=savedSet.has(r.id);
       return `<article class="reel" data-reel-id="${r.id}">
         <video playsinline muted loop preload="metadata" data-media-id="${r.media_id}"></video>
         <div class="reel-shade"></div>
@@ -872,6 +924,10 @@
           <button class="reel-action" data-share-reel="${r.id}" type="button">
             <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
           </button>
+          <button class="reel-action ${savedNow?"active":""}" data-save-reel="${r.id}" type="button">
+            <span class="reel-action-icon">${icon("save")}</span><span>${savedNow?"محفوظ":"حفظ"}</span>
+          </button>
+          ${r.author_id===state.user.id?`<button class="reel-action" data-own-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" type="button"><span class="reel-action-icon">${icon("more")}</span><span>إدارة</span></button>`:""}
         </div>
         <div class="reel-progress"><span></span></div>
       </article>`;
@@ -883,6 +939,8 @@
     $("#reelsFeed").querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
     $("#reelsFeed").querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
     $("#reelsFeed").querySelectorAll("[data-share-reel]").forEach(b=>b.onclick=()=>shareContent("reel",b.dataset.shareReel));
+    $("#reelsFeed").querySelectorAll("[data-save-reel]").forEach(b=>b.onclick=()=>toggleSavedContent("reel",b.dataset.saveReel,b));
+    $("#reelsFeed").querySelectorAll("[data-own-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.ownReel,b.dataset.caption,b.dataset.comments==="true"));
     $("#reelsFeed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
     $("#reelsFeed").querySelectorAll("[data-follow-reel]").forEach(b=>b.onclick=()=>followUser(b.dataset.followReel,b));
   }

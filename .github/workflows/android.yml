@@ -13,7 +13,7 @@ on:
 jobs:
   build:
     name: بناء ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -30,16 +30,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: إعداد جافا
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: إعداد أندرويد
-        uses: android-actions/setup-android@v3
-
-      - name: تثبيت حزمة أندرويد
-        run: yes | sdkmanager "platforms;android-36" "build-tools;35.0.0" >/dev/null
+      - name: تثبيت حزم أندرويد المطلوبة
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: إعداد أداة البناء
         uses: gradle/actions/setup-gradle@v4

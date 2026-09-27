@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e0c0b">
+<title>إدارة آشور</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div id="loginView" class="login-view">
+  <form id="loginForm" class="login-card">
+    <div class="seal">𒀸</div>
+    <h1>إدارة آشور</h1>
+    <p>لوحة الإدارة الرسمية</p>
+    <label>البريد الإلكتروني<input id="email" type="email" required></label>
+    <label>كلمة المرور<input id="password" type="password" required></label>
+    <button class="primary">دخول الإدارة</button>
+    <div id="loginMessage" class="message"></div>
+  </form>
+</div>
+
+<div id="adminApp" class="admin-app hidden">
+  <header class="header">
+    <button id="menuButton" class="icon">≡</button>
+    <div class="brand"><span>𒀸</span> إدارة آشور</div>
+    <button id="refreshButton" class="icon">↻</button>
+  </header>
+
+  <aside id="sidebar" class="sidebar">
+    <button class="nav active" data-page="dashboard">الرئيسية</button>
+    <button class="nav" data-page="users">المستخدمون</button>
+    <button class="nav" data-page="content">المحتوى</button>
+    <button class="nav" data-page="reports">البلاغات</button>
+    <button class="nav" data-page="storage">التخزين</button>
+    <button class="nav" data-page="notifications">الإشعارات</button>
+    <button class="nav" data-page="appSettings">إعدادات التطبيق</button>
+    <button class="nav" data-page="siteSettings">إدارة الموقع الرسمي</button>
+    <button class="nav" data-page="health">حالة النظام</button>
+    <button id="logoutButton" class="nav danger">تسجيل الخروج</button>
+  </aside>
+
+  <main class="content">
+    <section id="dashboard" class="page active">
+      <div class="page-title"><div><h2>الرئيسية</h2><p>ملخص منصة آشور</p></div></div>
+      <div id="stats" class="stats"></div>
+      <div class="grid2">
+        <article class="panel"><h3>آخر البلاغات</h3><div id="recentReports"></div></article>
+        <article class="panel"><h3>حالة الخدمات</h3><div id="serviceStatus"></div></article>
+      </div>
+    </section>
+
+    <section id="users" class="page">
+      <div class="page-title"><div><h2>المستخدمون</h2><p>البحث وإدارة الحسابات</p></div></div>
+      <input id="userSearch" class="search" placeholder="ابحث بالاسم أو اسم المستخدم أو المعرف">
+      <div id="usersList" class="table-list"></div>
+    </section>
+
+    <section id="content" class="page">
+      <div class="page-title"><div><h2>المحتوى</h2><p>المنشورات والريلز والقصص</p></div></div>
+      <div class="tabs">
+        <button class="tab active" data-content-kind="posts">المنشورات</button>
+        <button class="tab" data-content-kind="reels">الريلز</button>
+        <button class="tab" data-content-kind="stories">القصص</button>
+      </div>
+      <div id="contentList" class="table-list"></div>
+    </section>
+
+    <section id="reports" class="page">
+      <div class="page-title"><div><h2>البلاغات</h2><p>مراجعة واتخاذ القرار</p></div></div>
+      <div id="reportsList" class="table-list"></div>
+    </section>
+
+    <section id="storage" class="page">
+      <div class="page-title"><div><h2>التخزين</h2><p>القنوات مرتبطة من بوت التخزين</p></div></div>
+      <div id="channelsList" class="cards"></div>
+    </section>
+
+    <section id="notifications" class="page">
+      <div class="page-title"><div><h2>الإشعارات</h2><p>إرسال إشعارات للمستخدمين</p></div></div>
+      <form id="notificationForm" class="panel form">
+        <label>العنوان<input id="notificationTitle" maxlength="80" required></label>
+        <label>النص<textarea id="notificationBody" maxlength="500" required></textarea></label>
+        <label>المستلم
+          <select id="notificationAudience">
+            <option value="all">جميع المستخدمين</option>
+            <option value="user">مستخدم محدد</option>
+          </select>
+        </label>
+        <label id="targetUserRow" class="hidden">معرف المستخدم<input id="notificationUser"></label>
+        <button class="primary">إرسال</button>
+        <p id="notificationMessage" class="message"></p>
+      </form>
+    </section>
+
+    <section id="appSettings" class="page">
+      <div class="page-title"><div><h2>إعدادات التطبيق</h2><p>الحدود والمزايا والتحديث والصيانة</p></div></div>
+      <form id="appSettingsForm" class="panel form">
+        <h3>التحديث</h3>
+        <label>آخر إصدار<input id="latestVersion"></label>
+        <label>أقل إصدار مسموح<input id="minimumVersion"></label>
+        <label>رابط التحميل<input id="appDownloadUrl"></label>
+        <label class="check"><input id="requiredUpdate" type="checkbox"> تحديث إجباري</label>
+        <h3>الصيانة</h3>
+        <label class="check"><input id="maintenanceEnabled" type="checkbox"> تفعيل وضع الصيانة</label>
+        <label>رسالة الصيانة<textarea id="maintenanceMessage"></textarea></label>
+        <button class="primary">حفظ إعدادات التطبيق</button>
+      </form>
+    </section>
+
+    <section id="siteSettings" class="page">
+      <div class="page-title"><div><h2>إدارة الموقع الرسمي</h2><p>صفحة التحميل والتعريف</p></div></div>
+      <form id="siteSettingsForm" class="panel form">
+        <label>عنوان الصفحة<input id="siteTitle"></label>
+        <label>الوصف<input id="siteSubtitle"></label>
+        <label>رابط تحميل أندرويد<input id="siteAndroidUrl"></label>
+        <label>رابط استخدام نسخة الويب<input id="siteWebUrl"></label>
+        <label>رقم الإصدار<input id="siteVersion"></label>
+        <label>حجم التطبيق<input id="siteSize"></label>
+        <button class="primary">حفظ إعدادات الموقع</button>
+      </form>
+    </section>
+
+    <section id="health" class="page">
+      <div class="page-title"><div><h2>حالة النظام</h2><p>فحص الخدمات والربط</p></div></div>
+      <div id="healthCards" class="cards"></div>
+    </section>
+  </main>
+
+  <nav class="bottom">
+    <button class="mobile-nav active" data-page="dashboard">الرئيسية</button>
+    <button class="mobile-nav" data-page="content">المحتوى</button>
+    <button class="mobile-nav" data-page="users">المستخدمون</button>
+    <button class="mobile-nav" data-page="reports">البلاغات</button>
+    <button class="mobile-nav" data-page="siteSettings">المزيد</button>
+  </nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"></script>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

@@ -1277,43 +1277,95 @@
 
   async function openComments(type,id){
     state.commentTarget={type,id};
+    state.commentReply=null;
+    updateCommentReplyBar();
     if($("#chatDialog")?.open){
-      clearInterval(state.chatTimer);
-      state.chatTimer=null;
+      closeChatRealtime();
       state.activeConversation=null;
     }
     openDialog($("#commentsDialog"));
     await loadComments();
   }
 
+  function updateCommentReplyBar(){
+    const bar=$("#commentReplyBar");
+    if(!bar)return;
+    bar.classList.toggle("hidden",!state.commentReply);
+    $("#commentReplyText").textContent=state.commentReply
+      ?"رد على "+(state.commentReply.name||"التعليق")
+      :"";
+  }
+  $("#cancelCommentReply").onclick=()=>{
+    state.commentReply=null;
+    updateCommentReplyBar();
+  };
+
   async function loadComments(){
     if(!state.commentTarget)return;
     const field=state.commentTarget.type==="post"?"post_id":"reel_id";
     const {data,error}=await client.from("comments")
-      .select("id,author_id,body,created_at")
+      .select("id,author_id,parent_id,body,created_at,updated_at")
       .eq(field,state.commentTarget.id)
       .order("created_at",{ascending:true})
-      .limit(150);
+      .limit(200);
     if(error){
-      $("#commentsList").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+      $("#commentsList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
       return;
     }
     const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
+    const byId=new Map((data||[]).map(row=>[row.id,row]));
     $("#commentsList").innerHTML=(data||[]).map(row=>{
       const p=profiles[row.author_id]||{};
-      return `<div class="comment-item">
-        ${avatar(p)}
-        <div class="comment-bubble">
-          <div class="comment-bubble-head">
-            <b>${escapeHtml(p.name||p.username||"مستخدم")}</b>
-            ${p.is_verified?'<span class="verified-inline">✓</span>':""}
-          </div>
-          <p>${escapeHtml(row.body)}</p>
-          <div class="comment-meta">${new Date(row.created_at).toLocaleString("ar-IQ")}</div>
-        </div>
-      </div>`;
+      const parent=row.parent_id?byId.get(row.parent_id):null;
+      const parentProfile=parent?profiles[parent.author_id]||{}:null;
+      const parentHtml=parent
+        ?'<div class="comment-parent">رد على @'+escapeHtml(parentProfile?.username||parentProfile?.name||"مستخدم")+': '+escapeHtml(parent.body||"")+'</div>'
+        :"";
+      const edited=row.updated_at&&new Date(row.updated_at).getTime()>new Date(row.created_at).getTime()+1000
+        ?' · تم التعديل':"";
+      const own=row.author_id===state.user.id;
+      return '<div class="comment-item '+(row.parent_id?"reply":"")+'" data-comment-id="'+escapeHtml(row.id)+'">'+
+        avatar(p)+
+        '<div class="comment-bubble"><div class="comment-bubble-head"><b>'+escapeHtml(p.name||p.username||"مستخدم")+'</b>'+
+        (p.is_verified?'<span class="verified-inline">✓</span>':"")+'</div>'+
+        parentHtml+'<p>'+escapeHtml(row.body)+'</p>'+
+        '<div class="comment-meta">'+new Date(row.created_at).toLocaleString("ar-IQ")+edited+'</div>'+
+        '<div class="comment-actions">'+
+          '<button class="comment-action" data-reply-comment="'+escapeHtml(row.id)+'" data-reply-name="'+escapeHtml(p.username||p.name||"مستخدم")+'" type="button">رد</button>'+
+          (own
+            ?'<button class="comment-action" data-edit-comment="'+escapeHtml(row.id)+'" data-comment-body="'+escapeHtml(row.body)+'" type="button">تعديل</button>'+
+             '<button class="comment-action" data-delete-comment="'+escapeHtml(row.id)+'" type="button">حذف</button>'
+            :'<button class="comment-action" data-report-comment="'+escapeHtml(row.id)+'" type="button">إبلاغ</button>')+
+        '</div></div></div>';
     }).join("")||'<div class="empty">لا توجد تعليقات بعد. اكتب أول تعليق.</div>';
     await hydrateMedia($("#commentsList"));
+
+    $("#commentsList").querySelectorAll("[data-reply-comment]").forEach(btn=>btn.onclick=()=>{
+      state.commentReply={id:btn.dataset.replyComment,name:"@"+btn.dataset.replyName};
+      updateCommentReplyBar();
+      $("#commentInput").focus();
+    });
+    $("#commentsList").querySelectorAll("[data-edit-comment]").forEach(btn=>btn.onclick=async()=>{
+      const next=prompt("تعديل التعليق",btn.dataset.commentBody||"");
+      if(next===null)return;
+      const body=next.trim();
+      if(!body)return;
+      try{
+        await api("/v1/social/comments/"+btn.dataset.editComment,{method:"PATCH",body:JSON.stringify({body})});
+        await loadComments();
+      }catch(error){alert(error.message)}
+    });
+    $("#commentsList").querySelectorAll("[data-delete-comment]").forEach(btn=>btn.onclick=async()=>{
+      if(!confirm("حذف التعليق؟"))return;
+      try{
+        await api("/v1/social/comments/"+btn.dataset.deleteComment,{method:"DELETE"});
+        await loadComments();
+      }catch(error){alert(error.message)}
+    });
+    $("#commentsList").querySelectorAll("[data-report-comment]").forEach(btn=>btn.onclick=()=>{
+      $("#commentsDialog").close();
+      openReportDialog("comment",btn.dataset.reportComment);
+    });
     $("#commentsList").scrollTop=$("#commentsList").scrollHeight;
   }
 
@@ -1325,16 +1377,23 @@
     const payload={
       author_id:state.user.id,
       body,
+      parent_id:state.commentReply?.id||null,
       post_id:state.commentTarget.type==="post"?state.commentTarget.id:null,
       reel_id:state.commentTarget.type==="reel"?state.commentTarget.id:null
     };
     const {error}=await client.from("comments").insert(payload);
     if(!error){
       $("#commentInput").value="";
+      state.commentReply=null;
+      updateCommentReplyBar();
       await loadComments();
     }
   };
-  $("#closeComments").onclick=()=>$("#commentsDialog").close();
+  $("#closeComments").onclick=()=>{
+    state.commentReply=null;
+    updateCommentReplyBar();
+    $("#commentsDialog").close();
+  };
 
   async function loadProfile(){
     try{

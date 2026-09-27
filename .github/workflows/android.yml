@@ -37,8 +37,12 @@ jobs:
 
       - name: تثبيت حزم أندرويد المطلوبة
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          مدير_الحزم="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$مدير_الحزم" ]; then
+            مدير_الحزم="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$مدير_الحزم" --licenses >/dev/null || true
+          "$مدير_الحزم" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: إعداد أداة البناء
         uses: gradle/actions/setup-gradle@v4

@@ -98,6 +98,24 @@
             video.playsInline=true;
             video.preload="metadata";
             node.replaceWith(video);
+          }else if(access.mime_type?.startsWith("audio/") && node.tagName==="IMG"){
+            const audio=document.createElement("audio");
+            audio.className=(node.className+" chat-audio").trim();
+            audio.dataset.mediaId=node.dataset.mediaId;
+            audio.dataset.mediaReady="1";
+            audio.src=access.url;
+            audio.controls=true;
+            audio.preload="metadata";
+            node.replaceWith(audio);
+          }else if(node.tagName==="IMG" && access.mime_type && !access.mime_type.startsWith("image/")){
+            const link=document.createElement("a");
+            link.className="chat-file-link";
+            link.dataset.mediaReady="1";
+            link.href=access.url;
+            link.target="_blank";
+            link.rel="noopener";
+            link.textContent=access.original_name||"فتح الملف";
+            node.replaceWith(link);
           }else{
             node.src=access.url;
             node.dataset.mediaReady="1";

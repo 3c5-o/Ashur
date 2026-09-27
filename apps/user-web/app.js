@@ -194,18 +194,29 @@
   }
 
   async function boot(){
-    setTimeout(()=>$("#splash").style.opacity="0",900);
-    setTimeout(()=>$("#splash").remove(),1400);
-    const { data:{session} } = await client.auth.getSession();
-    state.user=session?.user || null;
-    if(state.user){
-      await refreshProfile();
-      await nativeLogin(state.user.id);
-      showApp(true);
-      await checkRuntimeSettings();
-      await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
-    }else{
-      showApp(false);
+    const splash=$("#splash");
+    const closeSplash=()=>{
+      if(!splash?.isConnected)return;
+      splash.style.opacity="0";
+      setTimeout(()=>splash.remove(),260);
+    };
+    const fallbackTimer=setTimeout(closeSplash,4500);
+    try{
+      const { data:{session}, error:sessionError } = await client.auth.getSession();
+      if(sessionError) throw sessionError;
+      state.user=session?.user || null;
+      if(state.user){
+        await refreshProfile();
+        await nativeLogin(state.user.id);
+        showApp(true);
+        await checkRuntimeSettings();
+        await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
+      }else{
+        showApp(false);
+      }
+    }finally{
+      clearTimeout(fallbackTimer);
+      setTimeout(closeSplash,500);
     }
   }
 
@@ -433,7 +444,7 @@
     $("#searchResults").innerHTML=(data||[]).map(r=>`
       <button class="explore-tile" data-open-reel="${r.id}" type="button">
         <video muted playsinline preload="metadata" data-media-id="${r.media_id}"></video>
-        <span class="explore-play">▶</span>
+        <span class="explore-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z"/></svg></span>
       </button>`).join("")||'<div class="empty">سيظهر المحتوى المقترح هنا.</div>';
     await hydrateMedia($("#searchResults"));
     $("#searchResults").querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=()=>{
@@ -1023,5 +1034,10 @@
     });
   }
 
-  boot().catch(e=>{console.error(e);showAuthMessage("حدث خطأ أثناء بدء التطبيق")});
+  boot().catch(e=>{
+    console.error("ASHUR_BOOT_ERROR",e);
+    $("#splash")?.remove();
+    showApp(false);
+    showAuthMessage("تعذر بدء التطبيق. تحقق من الإنترنت ثم حاول مرة أخرى.");
+  });
 })();

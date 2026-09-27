@@ -419,11 +419,29 @@
   }
 
   async function loadExplore(){
-    if($("#searchInput").value.trim()) return runSearch();
-    const {data}=await client.from("reels").select("id,media_id,caption,author_id").eq("explore_enabled",true).order("created_at",{ascending:false}).limit(24);
-    $("#searchResults").innerHTML=(data||[]).map(r=>`<div class="list-card"><div class="grow"><b>ريلز</b><div>${escapeHtml(r.caption||"")}</div></div><button class="small-button" data-open-media="${r.media_id}">فتح</button></div>`).join("")||'<div class="empty">سيظهر المحتوى المقترح هنا.</div>';
-    $("#searchResults").querySelectorAll("[data-open-media]").forEach(b=>b.onclick=async()=>{
-      try{ window.open(await mediaUrl(b.dataset.openMedia),"_blank"); }catch(_){}
+    if($("#searchInput").value.trim())return runSearch();
+    const {data,error}=await client.from("reels")
+      .select("id,media_id,caption,author_id,created_at")
+      .eq("explore_enabled",true)
+      .order("created_at",{ascending:false})
+      .limit(24);
+    if(error){
+      $("#searchResults").innerHTML='<div class="empty error">تعذر تحميل صفحة الاستكشاف.</div>';
+      return;
+    }
+    $("#searchResults").classList.add("explore-media-grid");
+    $("#searchResults").innerHTML=(data||[]).map(r=>`
+      <button class="explore-tile" data-open-reel="${r.id}" type="button">
+        <video muted playsinline preload="metadata" data-media-id="${r.media_id}"></video>
+        <span class="explore-play">▶</span>
+      </button>`).join("")||'<div class="empty">سيظهر المحتوى المقترح هنا.</div>';
+    await hydrateMedia($("#searchResults"));
+    $("#searchResults").querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=()=>{
+      navigateTo("reelsPage");
+      setTimeout(()=>{
+        const target=$(`.reel[data-reel-id="${b.dataset.openReel}"]`);
+        target?.scrollIntoView({block:"start"});
+      },300);
     });
   }
 
@@ -455,32 +473,152 @@
   }
 
   async function loadReels(){
-    const {data,error}=await client.from("reels").select("id,author_id,media_id,caption").order("created_at",{ascending:false}).limit(20);
-    if(error){$("#reelsFeed").innerHTML='<div class="empty error">تعذر تحميل الريلز.</div>';return}
+    const {data,error}=await client.from("reels")
+      .select("id,author_id,media_id,caption,created_at")
+      .order("created_at",{ascending:false})
+      .limit(30);
+    if(error){
+      $("#reelsFeed").innerHTML='<div class="empty error">تعذر تحميل الريلز.</div>';
+      return;
+    }
     const ps=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
     $("#reelsFeed").innerHTML=(data||[]).map(r=>{
       const p=ps[r.author_id]||{};
-      return `<article class="reel"><video playsinline controls preload="metadata" data-media-id="${r.media_id}"></video>
-      <div class="reel-overlay"><button class="reel-user" data-open-profile="${r.author_id}"><b>${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b></button><p>${escapeHtml(r.caption||"")}</p></div>
-      <div class="reel-actions">
-        <button class="action icon-action" data-like-reel="${r.id}">${icon("like")}<span>إعجاب</span></button>
-        <button class="action icon-action" data-comment-reel="${r.id}">${icon("comment")}<span>تعليق</span></button>
-        <button class="action icon-action" data-share-reel="${r.id}">${icon("share")}<span>مشاركة</span></button>
-      </div></article>`
+      return `<article class="reel" data-reel-id="${r.id}">
+        <video playsinline muted loop preload="metadata" data-media-id="${r.media_id}"></video>
+        <div class="reel-shade"></div>
+        <button class="reel-center-play" type="button" aria-label="تشغيل">
+          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>
+        </button>
+        <button class="reel-mute" type="button" aria-label="الصوت">
+          <svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="m18 9 3 3-3 3"/></svg>
+        </button>
+        <div class="reel-overlay">
+          <div class="reel-owner">
+            ${avatar(p,"reel-owner-avatar")}
+            <button class="reel-user" data-open-profile="${r.author_id}" type="button">
+              ${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}
+            </button>
+            ${r.author_id!==state.user.id?`<button class="reel-follow" data-follow-reel="${r.author_id}" type="button">متابعة</button>`:""}
+          </div>
+          <p>${escapeHtml(r.caption||"")}</p>
+        </div>
+        <div class="reel-actions">
+          <button class="reel-action" data-like-reel="${r.id}" type="button">
+            <span class="reel-action-icon">${icon("like")}</span><span>إعجاب</span>
+          </button>
+          <button class="reel-action" data-comment-reel="${r.id}" type="button">
+            <span class="reel-action-icon">${icon("comment")}</span><span>تعليق</span>
+          </button>
+          <button class="reel-action" data-share-reel="${r.id}" type="button">
+            <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
+          </button>
+        </div>
+        <div class="reel-progress"><span></span></div>
+      </article>`
     }).join("")||'<div class="empty">لا توجد ريلز بعد.</div>';
+
     await hydrateMedia($("#reelsFeed"));
+    initReelPlayers();
+
     $("#reelsFeed").querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
     $("#reelsFeed").querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
     $("#reelsFeed").querySelectorAll("[data-share-reel]").forEach(b=>b.onclick=()=>shareContent("reel",b.dataset.shareReel));
     $("#reelsFeed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+    $("#reelsFeed").querySelectorAll("[data-follow-reel]").forEach(b=>b.onclick=()=>followUser(b.dataset.followReel,b));
+  }
+
+  function initReelPlayers(){
+    const reels=[...$("#reelsFeed").querySelectorAll(".reel")];
+    if(!reels.length)return;
+
+    const observer=new IntersectionObserver(entries=>{
+      entries.forEach(entry=>{
+        const reel=entry.target;
+        const video=reel.querySelector("video");
+        if(!video)return;
+        if(entry.isIntersecting && entry.intersectionRatio>.72){
+          reels.forEach(other=>{
+            const ov=other.querySelector("video");
+            if(other!==reel && ov && !ov.paused)ov.pause();
+          });
+          video.play().catch(()=>{});
+        }else{
+          video.pause();
+        }
+      });
+    },{root:$("#reelsFeed"),threshold:[.2,.72,.95]});
+
+    reels.forEach(reel=>{
+      const video=reel.querySelector("video");
+      const play=reel.querySelector(".reel-center-play");
+      const mute=reel.querySelector(".reel-mute");
+      const progress=reel.querySelector(".reel-progress span");
+      if(!video)return;
+
+      observer.observe(reel);
+
+      const togglePlay=()=>{
+        if(video.paused){
+          video.play().catch(()=>{});
+          play?.classList.remove("show");
+        }else{
+          video.pause();
+          play?.classList.add("show");
+        }
+      };
+      video.addEventListener("click",togglePlay);
+      play?.addEventListener("click",togglePlay);
+
+      mute?.addEventListener("click",e=>{
+        e.stopPropagation();
+        video.muted=!video.muted;
+        mute.innerHTML=video.muted
+          ? '<svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="m18 9 3 3-3 3"/></svg>'
+          : '<svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="M18 9c1 1 1 5 0 6M20 7c3 3 3 7 0 10"/></svg>';
+      });
+
+      video.addEventListener("timeupdate",()=>{
+        if(progress && Number.isFinite(video.duration) && video.duration>0){
+          progress.style.width=((video.currentTime/video.duration)*100)+"%";
+        }
+      });
+
+      let lastTap=0;
+      video.addEventListener("pointerup",()=>{
+        const now=Date.now();
+        if(now-lastTap<280){
+          const like=reel.querySelector("[data-like-reel]");
+          like?.click();
+        }
+        lastTap=now;
+      });
+    });
   }
 
   async function loadConversations(){
     try{
       const list=await api("/v1/conversations");
-      $("#conversationList").innerHTML=(list.items||[]).map(c=>`<button class="list-card" data-conversation="${c.id}" data-title="${escapeHtml(c.title||"محادثة")}"><div class="grow"><b>${escapeHtml(c.title||"محادثة")}</b><div>${escapeHtml(c.last_message||"")}</div></div></button>`).join("")||'<div class="empty">لا توجد محادثات بعد.</div>';
+      $("#conversationList").innerHTML=(list.items||[]).map(row=>{
+        const p=row.peer_profile||{};
+        return `<button class="conversation-item" data-conversation="${row.id}" data-title="${escapeHtml(row.title||"محادثة")}" type="button">
+          ${p.avatar_media_id
+            ? `<img class="conversation-avatar" data-media-id="${p.avatar_media_id}" alt="">`
+            : `<div class="conversation-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">${initials(row.title||"م")}</div>`}
+          <div class="conversation-main">
+            <div class="conversation-title-row">
+              <b>${escapeHtml(row.title||"محادثة")}</b>
+              <time>${row.updated_at?new Date(row.updated_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"}):""}</time>
+            </div>
+            <div class="conversation-preview">${escapeHtml(row.last_message||"ابدأ المحادثة")}</div>
+          </div>
+        </button>`
+      }).join("")||'<div class="empty">لا توجد محادثات بعد.</div>';
+      await hydrateMedia($("#conversationList"));
       $("#conversationList").querySelectorAll("[data-conversation]").forEach(b=>b.onclick=()=>openChat(b.dataset.conversation,b.dataset.title));
-    }catch(e){$("#conversationList").innerHTML=`<div class="empty error">${escapeHtml(e.message)}</div>`}
+    }catch(e){
+      $("#conversationList").innerHTML=`<div class="empty error">${escapeHtml(e.message)}</div>`;
+    }
   }
 
   async function openChat(id,title){
@@ -520,8 +658,18 @@
     const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
     $("#commentsList").innerHTML=(data||[]).map(row=>{
       const p=profiles[row.author_id]||{};
-      return `<div class="list-card">${avatar(p)}<div class="grow"><div class="comment-author">${escapeHtml(p.name||p.username||"مستخدم")}</div><div>${escapeHtml(row.body)}</div><div class="comment-time">${new Date(row.created_at).toLocaleString("ar-IQ")}</div></div></div>`;
-    }).join("")||'<div class="empty">لا توجد تعليقات بعد.</div>';
+      return `<div class="comment-item">
+        ${avatar(p)}
+        <div class="comment-bubble">
+          <div class="comment-bubble-head">
+            <b>${escapeHtml(p.name||p.username||"مستخدم")}</b>
+            ${p.is_verified?'<span class="verified-inline">✓</span>':""}
+          </div>
+          <p>${escapeHtml(row.body)}</p>
+          <div class="comment-meta">${new Date(row.created_at).toLocaleString("ar-IQ")}</div>
+        </div>
+      </div>`;
+    }).join("")||'<div class="empty">لا توجد تعليقات بعد. اكتب أول تعليق.</div>';
     await hydrateMedia($("#commentsList"));
     $("#commentsList").scrollTop=$("#commentsList").scrollHeight;
   }

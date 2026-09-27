@@ -329,19 +329,36 @@
     const {data,error}=await client.from("posts").select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)").order("created_at",{ascending:false}).limit(30);
     if(error){$("#feed").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;return}
     const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
-    if(!data?.length){$("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد.</div>';return}
+    if(!data?.length){$("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';return}
     $("#feed").innerHTML=data.map(post=>{
       const p=profiles[post.author_id]||{}, media=(post.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
+      const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
       return `<article class="post">
-        <div class="post-head">${avatar(p)}<div class="post-user"><b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?" ✓":""}</b><small>@${escapeHtml(p.username||"")}</small></div></div>
+        <div class="post-head">
+          ${avatar(p)}
+          <button class="post-user" data-open-profile="${post.author_id}">
+            <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
+            <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
+          </button>
+        </div>
         ${media?`<img class="post-media" loading="lazy" data-media-id="${media}" alt="">`:""}
-        <div class="post-body"><div class="post-actions"><button class="action" data-like-post="${post.id}">إعجاب</button><button class="action" data-comment-post="${post.id}">تعليق</button><button class="action">حفظ</button></div>
-        ${post.caption?`<p class="caption">${escapeHtml(post.caption)}</p>`:""}</div>
+        <div class="post-body">
+          <div class="post-actions">
+            <button class="action icon-action" data-like-post="${post.id}">${icon("like")}<span>إعجاب</span></button>
+            <button class="action icon-action" data-comment-post="${post.id}">${icon("comment")}<span>تعليق</span></button>
+            <button class="action icon-action" data-share-post="${post.id}">${icon("share")}<span>مشاركة</span></button>
+            <button class="action icon-action" data-save-post="${post.id}">${icon("save")}<span>حفظ</span></button>
+          </div>
+          ${post.caption?`<p class="caption">${escapeHtml(post.caption)}</p>`:""}
+        </div>
       </article>`
     }).join("");
     await hydrateMedia($("#feed"));
     $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
     $("#feed").querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
+    $("#feed").querySelectorAll("[data-share-post]").forEach(b=>b.onclick=()=>shareContent("post",b.dataset.sharePost));
+    $("#feed").querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSave(b.dataset.savePost,b));
+    $("#feed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
   }
 
   async function toggleLike(type,id,button){
@@ -349,8 +366,37 @@
     const table=type==="post"?"post_likes":"reel_likes";
     const target=type==="post"?"post_id":"reel_id";
     const {data}=await client.from(table).select("*").eq(target,id).eq("user_id",state.user.id).maybeSingle();
-    if(data){await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);button.textContent="إعجاب"}
-    else{await client.from(table).insert({[target]:id,user_id:state.user.id});button.textContent="تم الإعجاب"}
+    if(data){
+      await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);
+      button.classList.remove("active");
+      button.innerHTML=icon("like")+"<span>إعجاب</span>";
+    }else{
+      await client.from(table).insert({[target]:id,user_id:state.user.id});
+      button.classList.add("active");
+      button.innerHTML=icon("like")+"<span>معجب</span>";
+    }
+  }
+
+  async function toggleSave(postId,button){
+    const {data}=await client.from("saved_posts").select("*").eq("post_id",postId).eq("user_id",state.user.id).maybeSingle();
+    if(data){
+      await client.from("saved_posts").delete().eq("post_id",postId).eq("user_id",state.user.id);
+      button.classList.remove("active");
+      button.innerHTML=icon("save")+"<span>حفظ</span>";
+    }else{
+      await client.from("saved_posts").insert({post_id:postId,user_id:state.user.id});
+      button.classList.add("active");
+      button.innerHTML=icon("save")+"<span>محفوظ</span>";
+    }
+  }
+
+  async function shareContent(type,id){
+    const text=type==="reel"?"ريلز على آشور":"منشور على آشور";
+    const url=location.origin+location.pathname+"#"+type+"-"+id;
+    try{
+      if(navigator.share)await navigator.share({title:"آشور",text,url});
+      else await navigator.clipboard.writeText(url);
+    }catch(_){}
   }
 
   async function loadExplore(){
@@ -367,11 +413,19 @@
   async function runSearch(){
     const q=$("#searchInput").value.trim();
     if(!q)return loadExplore();
-    const {data,error}=await client.from("profiles").select("id,name,username,avatar_media_id,is_verified").or(`name.ilike.%${q.replace(/[,%]/g,"")}%,username.ilike.%${q.replace(/[,%]/g,"")}%`).limit(30);
+    const {data,error}=await client.from("profiles").select("id,name,username,avatar_media_id,is_verified,is_private").or(`name.ilike.%${q.replace(/[,%]/g,"")}%,username.ilike.%${q.replace(/[,%]/g,"")}%`).limit(30);
     if(error){$("#searchResults").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;return}
-    $("#searchResults").innerHTML=(data||[]).map(p=>`<div class="list-card">${avatar(p)}<div class="grow"><b>${escapeHtml(p.name)}${p.is_verified?" ✓":""}</b><div>@${escapeHtml(p.username||"")}</div></div><button class="small-button" data-follow="${p.id}">متابعة</button></div>`).join("")||'<div class="empty">لا توجد نتائج.</div>';
+    $("#searchResults").innerHTML=(data||[]).map(p=>`<div class="list-card">
+      ${avatar(p)}
+      <button class="grow profile-result" data-open-profile="${p.id}">
+        <b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b>
+        <div>@${escapeHtml(p.username||"")}${p.is_private?" · حساب خاص":""}</div>
+      </button>
+      ${p.id===state.user.id?"":`<button class="small-button" data-follow="${p.id}">متابعة</button>`}
+    </div>`).join("")||'<div class="empty">لا توجد نتائج.</div>';
     await hydrateMedia($("#searchResults"));
-    $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=()=>followUser(b.dataset.follow,b));
+    $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=e=>{e.stopPropagation();followUser(b.dataset.follow,b)});
+    $("#searchResults").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
   }
 
   async function followUser(uid,btn){
@@ -388,12 +442,18 @@
     $("#reelsFeed").innerHTML=(data||[]).map(r=>{
       const p=ps[r.author_id]||{};
       return `<article class="reel"><video playsinline controls preload="metadata" data-media-id="${r.media_id}"></video>
-      <div class="reel-overlay"><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><p>${escapeHtml(r.caption||"")}</p></div>
-      <div class="reel-actions"><button class="action" data-like-reel="${r.id}">إعجاب</button><button class="action" data-comment-reel="${r.id}">تعليق</button></div></article>`
+      <div class="reel-overlay"><button class="reel-user" data-open-profile="${r.author_id}"><b>${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b></button><p>${escapeHtml(r.caption||"")}</p></div>
+      <div class="reel-actions">
+        <button class="action icon-action" data-like-reel="${r.id}">${icon("like")}<span>إعجاب</span></button>
+        <button class="action icon-action" data-comment-reel="${r.id}">${icon("comment")}<span>تعليق</span></button>
+        <button class="action icon-action" data-share-reel="${r.id}">${icon("share")}<span>مشاركة</span></button>
+      </div></article>`
     }).join("")||'<div class="empty">لا توجد ريلز بعد.</div>';
     await hydrateMedia($("#reelsFeed"));
     $("#reelsFeed").querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
     $("#reelsFeed").querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
+    $("#reelsFeed").querySelectorAll("[data-share-reel]").forEach(b=>b.onclick=()=>shareContent("reel",b.dataset.shareReel));
+    $("#reelsFeed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
   }
 
   async function loadConversations(){

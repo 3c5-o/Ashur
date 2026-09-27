@@ -765,6 +765,11 @@ async function createConversation(req, res) {
 
   if (kind === "direct") {
     const targetUserId = memberIds.find((id) => id !== user.id);
+    if (await isBlockedBetween(user.id, targetUserId)) {
+      const error = new Error("لا يمكن بدء محادثة مع هذا الحساب");
+      error.statusCode = 403;
+      throw error;
+    }
     const mine = await select(
       "conversation_members",
       `select=conversation_id&user_id=eq.${encodeURIComponent(user.id)}&limit=200`,
@@ -1096,8 +1101,8 @@ async function adminUsers(req, res, url) {
   await requireAdmin(req, "users");
   const q = (url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
   const query = q
-    ? `select=id,name,username,is_banned,is_verified,is_private,created_at&or=(name.ilike.*${encodeURIComponent(q)}*,username.ilike.*${encodeURIComponent(q)}*,id.eq.${encodeURIComponent(q)})&order=created_at.desc&limit=50`
-    : "select=id,name,username,is_banned,is_verified,is_private,created_at&order=created_at.desc&limit=50";
+    ? `select=id,name,username,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,created_at&or=(name.ilike.*${encodeURIComponent(q)}*,username.ilike.*${encodeURIComponent(q)}*,id.eq.${encodeURIComponent(q)})&order=created_at.desc&limit=50`
+    : "select=id,name,username,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,created_at&order=created_at.desc&limit=50";
   const items = await select("profiles", query);
   json(res, 200, { items: items || [] });
 }
@@ -1106,15 +1111,333 @@ async function setBan(req, res, userId) {
   const actor = await requireAdmin(req, "users");
   const body = await readJson(req);
   const banned = Boolean(body.banned);
-  await update("profiles", `id=eq.${encodeURIComponent(userId)}`, { is_banned: banned }, { returning: false });
-  await insert("audit_logs", {
-    actor_user_id: actor.user.id,
-    action: banned ? "ban_user" : "unban_user",
-    target_type: "profile",
-    target_id: userId,
-    details: { reason: String(body.reason || "") },
-  }, { returning: false });
+  const hours = Number(body.duration_hours || 0);
+  const bannedUntil = banned && Number.isFinite(hours) && hours > 0
+    ? new Date(Date.now() + Math.min(hours, 24 * 365) * 3600_000).toISOString()
+    : null;
+  const reason = String(body.reason || "").trim().slice(0, 500);
+  await update(
+    "profiles",
+    "id=eq." + encodeURIComponent(userId),
+    {
+      is_banned: banned,
+      banned_until: bannedUntil,
+      ban_reason: banned ? reason : "",
+    },
+    { returning: false },
+  );
+  await writeAudit(actor.user.id, banned ? "ban_user" : "unban_user", "profile", userId, {
+    reason,
+    duration_hours: hours > 0 ? hours : null,
+    banned_until: bannedUntil,
+  });
+  json(res, 200, { ok: true, banned, banned_until: bannedUntil });
+}
+
+
+async function adminUserDetail(req, res, userId) {
+  await requireAdmin(req, "users");
+  const profiles = await select(
+    "profiles",
+    "select=id,name,username,bio,profile_link,avatar_media_id,cover_media_id,is_private,is_verified,is_banned,banned_until,ban_reason,warning_count,last_seen_at,created_at,updated_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
+  );
+  const profile = profiles?.[0];
+  if (!profile) return json(res, 404, { error: "الحساب غير موجود" });
+  const [posts, reels, stories, followers, following, reports] = await Promise.all([
+    count("posts", "author_id=eq." + encodeURIComponent(userId)),
+    count("reels", "author_id=eq." + encodeURIComponent(userId)),
+    count("stories", "author_id=eq." + encodeURIComponent(userId)),
+    count("follows", "following_id=eq." + encodeURIComponent(userId) + "&status=eq.accepted"),
+    count("follows", "follower_id=eq." + encodeURIComponent(userId) + "&status=eq.accepted"),
+    count("reports", "target_type=eq.profile&target_id=eq." + encodeURIComponent(userId)),
+  ]);
+  json(res, 200, { profile, stats: { posts, reels, stories, followers, following, reports } });
+}
+
+async function adminUserAction(req, res, userId) {
+  const actor = await requireAdmin(req, "users");
+  const body = await readJson(req);
+  const action = String(body.action || "");
+  if (action === "verify" || action === "unverify") {
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      is_verified: action === "verify",
+    }, { returning: false });
+  } else if (action === "warn") {
+    const rows = await select("profiles", "select=warning_count&id=eq." + encodeURIComponent(userId) + "&limit=1");
+    if (!rows?.[0]) return json(res, 404, { error: "الحساب غير موجود" });
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      warning_count: Number(rows[0].warning_count || 0) + 1,
+    }, { returning: false });
+    const title = "تنبيه من إدارة آشور";
+    const message = String(body.reason || "يرجى مراجعة استخدامك للمنصة.").slice(0, 500);
+    await insert("notifications", {
+      user_id: userId,
+      actor_id: actor.user.id,
+      kind: "system",
+      title,
+      body: message,
+    }, { returning: false }).catch(() => {});
+    await sendPush({ userIds: [userId], title, body: message, data: { kind: "system" } }).catch(() => {});
+  } else if (action === "unban") {
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      is_banned: false,
+      banned_until: null,
+      ban_reason: "",
+    }, { returning: false });
+  } else {
+    return json(res, 400, { error: "الإجراء غير مدعوم" });
+  }
+  await writeAudit(actor.user.id, "user_" + action, "profile", userId, {
+    reason: String(body.reason || "").slice(0, 500),
+  });
   json(res, 200, { ok: true });
+}
+
+async function adminComments(req, res, url) {
+  await requireAdmin(req, "content");
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,author_id,post_id,reel_id,parent_id,body,moderation_status,deleted_at,created_at,updated_at&order=created_at.desc&limit=150";
+  if (q) query += "&body=ilike.*" + encodeURIComponent(q) + "*";
+  if (status) query += "&moderation_status=eq." + encodeURIComponent(status);
+  const rows = await select("comments", query);
+  const items = [];
+  for (const row of rows || []) {
+    const p = await select("profiles", "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1").catch(() => []);
+    items.push({ ...row, author: p?.[0] || null });
+  }
+  json(res, 200, { items });
+}
+
+async function moderateContent(req, res, kind, id) {
+  const actor = await requireAdmin(req, "content");
+  const table = ({ posts: "posts", reels: "reels", stories: "stories", comments: "comments" })[kind];
+  if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+  const body = await readJson(req);
+  const status = ["active", "hidden"].includes(body.status) ? body.status : "active";
+  const patch = {
+    moderation_status: status,
+    hidden_by: status === "hidden" ? actor.user.id : null,
+    deleted_at: null,
+  };
+  if (body.comments_enabled !== undefined && ["posts", "reels"].includes(kind)) {
+    patch.comments_enabled = Boolean(body.comments_enabled);
+  }
+  await update(table, "id=eq." + encodeURIComponent(id), patch, { returning: false });
+  await writeAudit(actor.user.id, status === "hidden" ? "hide_content" : "restore_content", kind, id, {
+    reason: String(body.reason || "").slice(0, 500),
+  });
+  json(res, 200, { ok: true, status });
+}
+
+async function reportAction(req, res, reportId) {
+  const actor = await requireAdmin(req, "reports");
+  const body = await readJson(req);
+  const rows = await select(
+    "reports",
+    "select=id,target_type,target_id,status&id=eq." + encodeURIComponent(reportId) + "&limit=1",
+  );
+  const report = rows?.[0];
+  if (!report) return json(res, 404, { error: "البلاغ غير موجود" });
+  const status = ["open", "review", "resolved", "rejected"].includes(body.status) ? body.status : "resolved";
+  const action = String(body.action || "").slice(0, 80);
+  await update("reports", "id=eq." + encodeURIComponent(reportId), {
+    status,
+    admin_note: String(body.admin_note || "").slice(0, 1500),
+    action_taken: action,
+    handled_by: actor.user.id,
+    resolved_at: ["resolved", "rejected"].includes(status) ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+
+  if (action === "hide_content" && ["post", "reel", "story", "comment"].includes(report.target_type)) {
+    const table = ({ post: "posts", reel: "reels", story: "stories", comment: "comments" })[report.target_type];
+    await update(table, "id=eq." + encodeURIComponent(report.target_id), {
+      moderation_status: "hidden",
+      hidden_by: actor.user.id,
+    }, { returning: false }).catch(() => {});
+  }
+  await writeAudit(actor.user.id, "report_" + status, "report", reportId, {
+    action,
+    target_type: report.target_type,
+    target_id: report.target_id,
+  });
+  json(res, 200, { ok: true });
+}
+
+async function updateAdminRecord(req, res, adminUserId) {
+  const actor = await requireAdmin(req, "admins");
+  if (actor.admin.role !== "owner" && actor.admin.role !== "secondary_admin") {
+    return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
+  }
+  const body = await readJson(req);
+  const allowed = ["secondary_admin", "moderator", "content_moderator", "support", "analyst"];
+  const patch = { updated_at: new Date().toISOString() };
+  if (body.role !== undefined) {
+    if (!allowed.includes(body.role)) return json(res, 400, { error: "الدور غير صالح" });
+    patch.role = body.role;
+  }
+  if (body.permissions !== undefined) patch.permissions = body.permissions || {};
+  if (body.active !== undefined) patch.active = Boolean(body.active);
+  await update("admins", "user_id=eq." + encodeURIComponent(adminUserId), patch, { returning: false });
+  await writeAudit(actor.user.id, "update_admin", "admin", adminUserId, patch);
+  json(res, 200, { ok: true });
+}
+
+async function adminUploads(req, res, url) {
+  await requireAdmin(req, "storage");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,client_upload_id,user_id,kind,original_name,size_bytes,received_bytes,status,error,media_id,cancel_requested,created_at,updated_at,completed_at&order=created_at.desc&limit=200";
+  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const rows = await select("upload_jobs", query);
+  json(res, 200, { items: rows || [] });
+}
+
+async function adminCancelUpload(req, res, jobId) {
+  const actor = await requireAdmin(req, "storage");
+  await update("upload_jobs", "id=eq." + encodeURIComponent(jobId), {
+    cancel_requested: true,
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "cancel_upload", "upload_job", jobId, {});
+  json(res, 200, { ok: true });
+}
+
+async function adminErrors(req, res, url) {
+  await requireAdmin(req, "storage");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,service,code,message,context,user_id,status,created_at,resolved_at&order=created_at.desc&limit=200";
+  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const rows = await select("system_errors", query);
+  json(res, 200, { items: rows || [] });
+}
+
+async function resolveSystemError(req, res, errorId) {
+  const actor = await requireAdmin(req, "storage");
+  await update("system_errors", "id=eq." + encodeURIComponent(errorId), {
+    status: "resolved",
+    resolved_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "resolve_system_error", "system_error", errorId, {});
+  json(res, 200, { ok: true });
+}
+
+async function adminSupport(req, res, url) {
+  await requireAdmin(req, "support");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,user_id,category,subject,body,status,priority,admin_reply,assigned_to,app_version,device_info,created_at,updated_at,closed_at&order=created_at.desc&limit=200";
+  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const rows = await select("support_tickets", query);
+  json(res, 200, { items: rows || [] });
+}
+
+async function replySupport(req, res, ticketId) {
+  const actor = await requireAdmin(req, "support");
+  const body = await readJson(req);
+  const rows = await select("support_tickets", "select=id,user_id,status&id=eq." + encodeURIComponent(ticketId) + "&limit=1");
+  const ticket = rows?.[0];
+  if (!ticket) return json(res, 404, { error: "التذكرة غير موجودة" });
+  const reply = String(body.reply || "").trim().slice(0, 4000);
+  const status = ["open", "in_progress", "answered", "closed"].includes(body.status) ? body.status : "answered";
+  await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), {
+    admin_reply: reply,
+    status,
+    assigned_to: actor.user.id,
+    updated_at: new Date().toISOString(),
+    closed_at: status === "closed" ? new Date().toISOString() : null,
+  }, { returning: false });
+  if (reply) {
+    const title = "رد من دعم آشور";
+    await insert("notifications", {
+      user_id: ticket.user_id,
+      actor_id: actor.user.id,
+      kind: "support",
+      title,
+      body: reply.slice(0, 500),
+      entity_type: "support_ticket",
+      entity_id: ticketId,
+    }, { returning: false }).catch(() => {});
+    await sendPush({
+      userIds: [ticket.user_id],
+      title,
+      body: reply.slice(0, 200),
+      data: { kind: "support", ticket_id: ticketId },
+    }).catch(() => {});
+  }
+  await writeAudit(actor.user.id, "reply_support", "support_ticket", ticketId, { status });
+  json(res, 200, { ok: true });
+}
+
+async function adminReleases(req, res) {
+  const actor = await requireAdmin(req, "settings");
+  if (req.method === "GET") {
+    const rows = await select(
+      "app_releases",
+      "select=id,version,version_code,download_url,notes,required,minimum_version,status,created_by,created_at,published_at&order=created_at.desc&limit=100",
+    );
+    return json(res, 200, { items: rows || [] });
+  }
+  const body = await readJson(req);
+  const version = String(body.version || "").trim().slice(0, 40);
+  const code = Number(body.version_code || 0);
+  if (!version || !Number.isInteger(code) || code < 1) return json(res, 400, { error: "رقم الإصدار غير صالح" });
+  const rows = await insert("app_releases", {
+    version,
+    version_code: code,
+    download_url: String(body.download_url || "").slice(0, 500),
+    notes: String(body.notes || "").slice(0, 4000),
+    required: Boolean(body.required),
+    minimum_version: String(body.minimum_version || "").slice(0, 40),
+    status: ["draft", "testing", "published", "retired"].includes(body.status) ? body.status : "draft",
+    created_by: actor.user.id,
+    published_at: body.status === "published" ? new Date().toISOString() : null,
+  });
+  await writeAudit(actor.user.id, "create_release", "app_release", rows?.[0]?.id || null, { version, version_code: code });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function updateRelease(req, res, releaseId) {
+  const actor = await requireAdmin(req, "settings");
+  const body = await readJson(req);
+  const patch = {};
+  for (const key of ["download_url", "notes", "minimum_version"]) {
+    if (body[key] !== undefined) patch[key] = String(body[key] || "").slice(0, key === "notes" ? 4000 : 500);
+  }
+  if (body.required !== undefined) patch.required = Boolean(body.required);
+  if (body.status !== undefined && ["draft", "testing", "published", "retired"].includes(body.status)) {
+    patch.status = body.status;
+    patch.published_at = body.status === "published" ? new Date().toISOString() : null;
+  }
+  await update("app_releases", "id=eq." + encodeURIComponent(releaseId), patch, { returning: false });
+  await writeAudit(actor.user.id, "update_release", "app_release", releaseId, patch);
+  json(res, 200, { ok: true });
+}
+
+async function testAdminChannel(req, res, channelKey) {
+  const actor = await requireAdmin(req, "storage");
+  const rows = await select(
+    "storage_channels",
+    "select=channel_key,channel_id,title&channel_key=eq." + encodeURIComponent(channelKey) + "&limit=1",
+  );
+  const channel = rows?.[0];
+  if (!channel) return json(res, 404, { error: "القناة غير موجودة" });
+  const result = await testTelegramConnection().catch((error) => ({ ok: false, detail: error.message }));
+  await update("storage_channels", "channel_key=eq." + encodeURIComponent(channelKey), {
+    status: result.ok ? "connected" : "error",
+    last_test_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "test_storage_channel", "storage_channel", channelKey, result);
+  json(res, result.ok ? 200 : 503, result);
+}
+
+async function adminNotificationHistory(req, res) {
+  await requireAdmin(req, "notifications");
+  const rows = await select(
+    "admin_notification_history",
+    "select=id,actor_user_id,title,body,audience,target_user_id,deep_link,scheduled_at,sent_at,status,push_result,created_at&order=created_at.desc&limit=200",
+  );
+  json(res, 200, { items: rows || [] });
 }
 
 async function adminContent(req, res, url) {

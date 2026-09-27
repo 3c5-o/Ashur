@@ -166,8 +166,13 @@
       <b>اختر صورة أو فيديو</b>
       <small>الحد الأقصى حسب نوع المحتوى</small>
     </label>
+    <div id="composerPreview" class="composer-preview hidden"></div>
+    <div id="composerFileMeta" class="composer-file-meta hidden"></div>
     <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا للمحتوى..."></textarea>
-    <div id="uploadProgress" class="progress hidden"><div></div></div>
+    <div id="uploadProgress" class="upload-progress-wrap hidden">
+      <div class="progress"><div></div></div>
+      <span id="uploadProgressText">0%</span>
+    </div>
     <button id="submitComposer" class="primary" type="button">نشر الآن</button>
     <button id="cancelComposer" class="secondary-wide" type="button">إلغاء</button>
     <p id="composerMessage" class="message"></p>

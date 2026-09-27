@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+def apiUrl = System.getenv("ASHUR_API_URL") ?: ""
+def oneSignalAppId = System.getenv("ONESIGNAL_APP_ID") ?: ""
+
+android {
+    namespace 'app.ashur.social'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'app.ashur.social'
+        minSdk 24
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+
+        buildConfigField "String", "ASHUR_API_URL", '"' + apiUrl + '"'
+        buildConfigField "String", "ONESIGNAL_APP_ID", '"' + oneSignalAppId + '"'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.14.0'
+    implementation 'com.onesignal:OneSignal:5.10.2'
+}
+
+tasks.register("syncWebAssets", Copy) {
+    from "../../../apps/user-web"
+    into "src/main/assets/www"
+}
+tasks.named("preBuild").configure {
+    dependsOn("syncWebAssets")
+}
+
+if (file("google-services.json").exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}

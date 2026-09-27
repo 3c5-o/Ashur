@@ -652,6 +652,17 @@
     closeStoryViewer();
   });
 
+  function postMediaMarkup(rows=[],className="post-media"){
+    const sorted=[...(rows||[])].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0));
+    if(!sorted.length)return "";
+    if(sorted.length===1){
+      return `<img class="${className}" loading="lazy" data-media-id="${escapeHtml(sorted[0].media_id)}" alt="">`;
+    }
+    return `<div class="post-media-strip" aria-label="${sorted.length} وسائط">${sorted.map((row,index)=>
+      `<div class="post-media-slide"><img class="${className}" loading="lazy" data-media-id="${escapeHtml(row.media_id)}" alt=""><span class="media-counter">${index+1}/${sorted.length}</span></div>`
+    ).join("")}</div>`;
+  }
+
   async function profilesMap(ids){
     if(!ids.length) return {};
     const {data}=await client.from("profiles").select("id,name,username,avatar_media_id,is_verified,is_private").in("id",ids);
@@ -806,7 +817,7 @@
 
     const chunk=data.map(post=>{
       const p=profiles[post.author_id]||{};
-      const media=(post.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
+      const mediaHtml=postMediaMarkup(post.post_media||[]);
       const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
       const likedNow=likedSet.has(post.id);
       const savedNow=savedSet.has(post.id);
@@ -819,7 +830,7 @@
           </button>
           ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
         </div>
-        ${media?`<img class="post-media" loading="lazy" data-media-id="${media}" alt="">`:""}
+        ${mediaHtml}
         <div class="post-body">
           <div class="post-actions">
             <button class="action icon-action ${likedNow?"active":""}" data-like-post="${post.id}" type="button">${icon("like")}<span>${likedNow?"معجب":"إعجاب"}</span></button>

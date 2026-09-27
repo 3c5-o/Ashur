@@ -26,6 +26,9 @@
     currentPublicProfile:null,
     activeUpload:null,
     activeUploadId:null,
+    feedOffset:0,
+    feedLoading:false,
+    feedDone:false,
     features:{},
     limits:{}
   };
@@ -764,19 +767,32 @@
     }
   }
 
-  async function loadFeed(){
+  async function loadFeed({append=false}={}){
+    if(state.feedLoading)return;
+    state.feedLoading=true;
+    if(!append){
+      state.feedOffset=0;
+      state.feedDone=false;
+    }
+    const start=append?state.feedOffset:0;
+    const pageSize=20;
     const {data,error}=await client.from("posts")
       .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
       .order("created_at",{ascending:false})
-      .limit(20);
+      .range(start,start+pageSize-1);
     if(error){
-      $("#feed").innerHTML=errorMarkup(error.message,"homePage");
+      if(!append)$("#feed").innerHTML=errorMarkup(error.message,"homePage");
+      state.feedLoading=false;
       return;
     }
     if(!data?.length){
-      $("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';
+      if(!append)$("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';
+      state.feedDone=true;
+      state.feedLoading=false;
       return;
     }
+    state.feedOffset=start+data.length;
+    state.feedDone=data.length<pageSize;
 
     const postIds=data.map(x=>x.id);
     const [profiles,{data:liked},{data:saved}] = await Promise.all([
@@ -787,7 +803,7 @@
     const likedSet=new Set((liked||[]).map(x=>x.post_id));
     const savedSet=new Set((saved||[]).map(x=>x.post_id));
 
-    $("#feed").innerHTML=data.map(post=>{
+    const chunk=data.map(post=>{
       const p=profiles[post.author_id]||{};
       const media=(post.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
       const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
@@ -816,6 +832,16 @@
         </div>
       </article>`;
     }).join("");
+    if(append){
+      $("#feedLoadMore")?.remove();
+      $("#feed").insertAdjacentHTML("beforeend",chunk);
+    }else{
+      $("#feed").innerHTML=chunk;
+    }
+    if(!state.feedDone){
+      $("#feed").insertAdjacentHTML("beforeend",'<button id="feedLoadMore" class="secondary-wide feed-load-more" type="button">تحميل المزيد</button>');
+      $("#feedLoadMore").onclick=()=>loadFeed({append:true});
+    }
 
     await hydrateMedia($("#feed"));
     $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
@@ -824,6 +850,7 @@
     $("#feed").querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSavedContent("post",b.dataset.savePost,b));
     $("#feed").querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true"));
     $("#feed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+    state.feedLoading=false;
   }
 
   async function toggleLike(type,id,button){

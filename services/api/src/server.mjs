@@ -14,6 +14,7 @@ import {
   remove,
   upsert,
   count,
+  serviceRequest,
 } from "./supabase.mjs";
 import {
   uploadToChannel,
@@ -57,7 +58,7 @@ const DEFAULT_LIMITS_MB = {
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-File-Name, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-File-Name, X-Upload-Id, X-Requested-With");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
 }
@@ -175,14 +176,32 @@ async function requireAdmin(req, permission = null) {
 async function profileFor(userId) {
   const rows = await select(
     "profiles",
-    `select=id,name,username,is_private,is_banned&limit=1&id=eq.${encodeURIComponent(userId)}`,
+    `select=id,name,username,is_private,is_banned,banned_until,ban_reason,warning_count,deleted_at&limit=1&id=eq.${encodeURIComponent(userId)}`,
   );
   return rows?.[0] || null;
 }
 
+async function isBlockedBetween(userId, otherId) {
+  if (!userId || !otherId || userId === otherId) return false;
+  const rows = await select(
+    "blocks",
+    "select=blocker_id&or=(and(blocker_id.eq." + encodeURIComponent(userId) + ",blocked_id.eq." + encodeURIComponent(otherId) + "),and(blocker_id.eq." + encodeURIComponent(otherId) + ",blocked_id.eq." + encodeURIComponent(userId) + "))&limit=1",
+  ).catch(() => []);
+  return Boolean(rows?.length);
+}
+
+function profileIsBanned(profile) {
+  if (!profile) return true;
+  if (profile.deleted_at) return true;
+  if (profile.is_banned) return true;
+  if (profile.banned_until && new Date(profile.banned_until) > new Date()) return true;
+  return false;
+}
+
 async function canViewOwner(user, ownerId) {
   const owner = await profileFor(ownerId);
-  if (!owner || owner.is_banned) return false;
+  if (profileIsBanned(owner)) return false;
+  if (user?.id && await isBlockedBetween(user.id, ownerId)) return false;
   if (!owner.is_private) return true;
   if (!user) return false;
   if (user.id === ownerId) return true;
@@ -254,6 +273,26 @@ async function setting(key) {
     `select=value&key=eq.${encodeURIComponent(key)}&limit=1`,
   );
   return rows?.[0]?.value || {};
+}
+
+async function writeAudit(actorUserId, action, targetType = null, targetId = null, details = {}) {
+  return insert("audit_logs", {
+    actor_user_id: actorUserId || null,
+    action,
+    target_type: targetType,
+    target_id: targetId == null ? null : String(targetId),
+    details: details || {},
+  }, { returning: false }).catch(() => {});
+}
+
+async function logSystemError(service, error, context = {}, userId = null) {
+  return insert("system_errors", {
+    service: String(service || "api").slice(0, 80),
+    code: String(error?.code || error?.statusCode || "").slice(0, 80),
+    message: String(error?.message || error || "Unknown error").slice(0, 1500),
+    context: context || {},
+    user_id: userId || null,
+  }, { returning: false }).catch(() => {});
 }
 
 async function uploadLimitBytes(kind) {

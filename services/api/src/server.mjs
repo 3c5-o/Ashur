@@ -698,11 +698,19 @@ async function addAdmin(req, res) {
 
 async function adminAdmins(req, res) {
   await requireAdmin(req, "admins");
-  const items = await select(
+  const rows = await select(
     "admins",
-    "select=user_id,role,permissions,active,created_at,profiles(name,username)&order=created_at.asc",
+    "select=user_id,role,permissions,active,created_at&order=created_at.asc",
   );
-  json(res, 200, { items: items || [] });
+  const items = [];
+  for (const row of rows || []) {
+    const profiles = await select(
+      "profiles",
+      `select=id,name,username&id=eq.${encodeURIComponent(row.user_id)}&limit=1`,
+    );
+    items.push({ ...row, profiles: profiles?.[0] || null });
+  }
+  json(res, 200, { items });
 }
 
 async function adminAudit(req, res) {

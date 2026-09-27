@@ -385,14 +385,14 @@
     const table=type==="post"?"post_likes":"reel_likes";
     const target=type==="post"?"post_id":"reel_id";
     const {data}=await client.from(table).select("*").eq(target,id).eq("user_id",state.user.id).maybeSingle();
-    if(data){
-      await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);
-      button.classList.remove("active");
-      button.innerHTML=icon("like")+"<span>إعجاب</span>";
+    const active=!data;
+    if(data) await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);
+    else await client.from(table).insert({[target]:id,user_id:state.user.id});
+    button.classList.toggle("active",active);
+    if(type==="reel"){
+      button.innerHTML=`<span class="reel-action-icon">${icon("like")}</span><span>${active?"معجب":"إعجاب"}</span>`;
     }else{
-      await client.from(table).insert({[target]:id,user_id:state.user.id});
-      button.classList.add("active");
-      button.innerHTML=icon("like")+"<span>معجب</span>";
+      button.innerHTML=icon("like")+`<span>${active?"معجب":"إعجاب"}</span>`;
     }
   }
 

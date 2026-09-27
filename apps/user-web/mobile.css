@@ -251,3 +251,22 @@ button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 @media(max-width:699px){
   .main-shell{padding-top:0}
 }
+
+.explore-media-grid{
+  display:grid!important;
+  grid-template-columns:repeat(3,1fr);
+  gap:2px!important;
+  padding:2px!important;
+}
+.explore-tile{
+  position:relative;aspect-ratio:9/14;border:0;padding:0;background:#070907;
+  overflow:hidden;color:#fff
+}
+.explore-tile video{width:100%;height:100%;object-fit:cover;background:#000;pointer-events:none}
+.explore-tile:after{
+  content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 55%,rgba(0,0,0,.42))
+}
+.explore-play{
+  position:absolute;z-index:2;bottom:7px;left:7px;width:24px;height:24px;border-radius:50%;
+  display:grid;place-items:center;background:rgba(0,0,0,.45);font-size:9px
+}

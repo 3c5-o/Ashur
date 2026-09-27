@@ -4,5 +4,5 @@ window.ASHUR_CONFIG = {
   apiBaseUrl: "https://exciting-miracle-production-b2cf.up.railway.app",
   shareBaseUrl: "https://ashur-alpha.vercel.app",
   maxUploadMb: 60,
-  appVersion: "1.0.2"
+  appVersion: "1.0.3"
 };

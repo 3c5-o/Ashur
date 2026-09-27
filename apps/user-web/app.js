@@ -1008,7 +1008,7 @@
 
   async function loadNotificationsBadge(){
     if(!state.user)return;
-    const {count}=await client.from("notifications").select("*",{count:"exact",head:true).eq("user_id",state.user.id).is("read_at",null);
+    const {count}=await client.from("notifications").select("*",{count:"exact",head:true}).eq("user_id",state.user.id).is("read_at",null);
     const badge=$("#notificationBadge"); badge.textContent=count||0; badge.classList.toggle("hidden",!count);
   }
   $("#notificationsButton").onclick=async()=>{

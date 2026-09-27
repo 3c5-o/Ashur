@@ -663,6 +663,24 @@ async function resolveReport(req, res, reportId) {
   json(res, 200, { ok: true });
 }
 
+async function adminAdmins(req, res) {
+  await requireAdmin(req, "admins");
+  const items = await select(
+    "admins",
+    "select=user_id,role,permissions,active,created_at,profiles(name,username)&order=created_at.asc",
+  );
+  json(res, 200, { items: items || [] });
+}
+
+async function adminAudit(req, res) {
+  await requireAdmin(req, "admins");
+  const items = await select(
+    "audit_logs",
+    "select=id,actor_user_id,actor_telegram_id,action,target_type,target_id,details,created_at&order=created_at.desc&limit=200",
+  );
+  json(res, 200, { items: items || [] });
+}
+
 async function adminChannels(req, res) {
   await requireAdmin(req, "storage");
   const items = await select(
@@ -917,6 +935,12 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/v1/admin/channels") {
       return adminChannels(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/admins") {
+      return adminAdmins(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/audit") {
+      return adminAudit(req, res);
     }
     if (url.pathname === "/v1/admin/settings/app" && ["GET", "PUT"].includes(req.method)) {
       return appSettings(req, res);

@@ -17,8 +17,8 @@ android {
         applicationId 'app.ashur.admin'
         minSdk 24
         targetSdk 36
-        versionCode 2
-        versionName '1.0.1'
+        versionCode 3
+        versionName '1.2.0'
         buildConfigField "String", "ASHUR_API_URL", '"' + apiUrl + '"'
     }
 
@@ -54,9 +54,29 @@ dependencies {
     implementation 'androidx.webkit:webkit:1.17.1'
 }
 
+tasks.register("prepareSupabaseVendor") {
+    doLast {
+        def vendorFile = file("../../../apps/admin-web/vendor/supabase.min.js")
+        if (!vendorFile.exists() || vendorFile.length() < 50000) {
+            vendorFile.parentFile.mkdirs()
+            ant.get(
+                src: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
+                dest: vendorFile,
+                verbose: true
+            )
+        }
+        if (!vendorFile.exists() || vendorFile.length() < 50000) {
+            throw new GradleException("تعذر تجهيز Supabase JS المحلي")
+        }
+    }
+}
+
 tasks.register("syncWebAssets", Copy) {
     from "../../../apps/admin-web"
     into "src/main/assets/www"
+}
+tasks.named("syncWebAssets").configure {
+    dependsOn("prepareSupabaseVendor")
 }
 tasks.named("preBuild").configure {
     dependsOn("syncWebAssets")

@@ -236,7 +236,7 @@
     return body;
   }
 
-  const authRedirect = (flow) => authUtil.buildRedirect(AUTH_REDIRECT_BASE, flow);
+  const authRedirect = (flow) => flow==="recovery" ? AUTH_REDIRECT_BASE : authUtil.buildRedirect(AUTH_REDIRECT_BASE, flow);
 
   function setAuthBusy(form,busy){
     if(!form)return;

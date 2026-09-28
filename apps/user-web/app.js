@@ -1643,8 +1643,9 @@
         items=result.items||[];
       }catch(apiError){
         const targetIsOwn=profileId===state.user.id;
-        const knownPublic=state.currentPublicProfile?.id===profileId && state.currentPublicProfile?.is_private===false;
-        if(!targetIsOwn&&!knownPublic)throw apiError;
+        const knownVisible=state.currentPublicProfile?.id===profileId &&
+          (state.currentPublicProfile?.is_private===false || state.currentPublicProfile?.mayView===true);
+        if(!targetIsOwn&&!knownVisible)throw apiError;
         const isFollowing=mode==="following";
         const idField=isFollowing?"following_id":"follower_id";
         const filterField=isFollowing?"follower_id":"following_id";

@@ -966,15 +966,14 @@
     if(!state.user)return;
     const table=type==="post"?"post_likes":"reel_likes";
     const target=type==="post"?"post_id":"reel_id";
-    const {data}=await client.from(table).select("*").eq(target,id).eq("user_id",state.user.id).maybeSingle();
+    const {data}=await client.from(table).select(target).eq(target,id).eq("user_id",state.user.id).maybeSingle();
     const active=!data;
     if(data) await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);
     else await client.from(table).insert({[target]:id,user_id:state.user.id});
     button.classList.toggle("active",active);
-    if(type==="reel"){
-      button.innerHTML=`<span class="reel-action-icon">${icon("like")}</span><span>${active?"معجب":"إعجاب"}</span>`;
-    }else{
-      button.innerHTML=icon("like")+`<span>${active?"معجب":"إعجاب"}</span>`;
+    const count=button.querySelector("[data-like-count]");
+    if(count){
+      count.textContent=String(Math.max(0,Number(count.textContent||0)+(active?1:-1)));
     }
   }
 
@@ -1160,11 +1159,12 @@
     }
 
     const reelIds=data.map(x=>x.id);
-    const [ps,statuses,{data:liked},{data:saved}] = await Promise.all([
+    const [ps,statuses,{data:liked},{data:saved},counts] = await Promise.all([
       profilesMap([...new Set(data.map(x=>x.author_id))]),
       followStatusMap(data.map(x=>x.author_id)),
       client.from("reel_likes").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
-      client.from("saved_reels").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds)
+      client.from("saved_reels").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
+      interactionCounts("reel",reelIds)
     ]);
     const likedSet=new Set((liked||[]).map(x=>x.reel_id));
     const savedSet=new Set((saved||[]).map(x=>x.reel_id));
@@ -1173,6 +1173,7 @@
       const p=ps[r.author_id]||{};
       const likedNow=likedSet.has(r.id);
       const savedNow=savedSet.has(r.id);
+      const metric=counts[r.id]||{likes:0,comments:0};
       return `<article class="reel is-loading" data-reel-id="${r.id}">
         <video playsinline muted loop preload="metadata" data-media-id="${r.media_id}"></video>
         <div class="reel-loader" aria-hidden="true"></div>
@@ -1195,11 +1196,11 @@
         </div>
         <div class="reel-actions">
           <button class="reel-action ${likedNow?"active":""}" data-like-reel="${r.id}" type="button">
-            <span class="reel-action-icon">${icon("like")}</span><span>${likedNow?"معجب":"إعجاب"}</span>
+            <span class="reel-action-icon">${icon("like")}</span><span data-like-count>${metric.likes}</span>
           </button>
           ${r.comments_enabled===false
-            ? `<button class="reel-action" type="button" disabled><span class="reel-action-icon">${icon("comment")}</span><span>مغلقة</span></button>`
-            : `<button class="reel-action" data-comment-reel="${r.id}" type="button"><span class="reel-action-icon">${icon("comment")}</span><span>تعليق</span></button>`}
+            ? `<button class="reel-action" type="button" disabled><span class="reel-action-icon">${icon("comment")}</span><span>—</span></button>`
+            : `<button class="reel-action" data-comment-reel="${r.id}" type="button"><span class="reel-action-icon">${icon("comment")}</span><span>${metric.comments}</span></button>`}
           <button class="reel-action" data-share-reel="${r.id}" type="button">
             <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
           </button>

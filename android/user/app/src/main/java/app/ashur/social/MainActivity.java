@@ -255,6 +255,28 @@ public class MainActivity extends Activity {
         public String getApiBaseUrl() {
             return BuildConfig.ASHUR_API_URL == null ? "" : BuildConfig.ASHUR_API_URL;
         }
+
+        @JavascriptInterface
+        public boolean hasAudioPermission() {
+            return ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void requestAudioPermission() {
+            runOnUiThread(() -> {
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+                ActivityCompat.requestPermissions(
+                        MainActivity.this,
+                        new String[]{Manifest.permission.RECORD_AUDIO},
+                        AUDIO_PERMISSION_REQUEST
+                );
+            });
+        }
+
         @JavascriptInterface
         public void openExternal(String url) {
             if (url == null || url.isBlank()) return;

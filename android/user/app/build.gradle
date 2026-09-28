@@ -61,16 +61,16 @@ dependencies {
 tasks.register("prepareSupabaseVendor") {
     doLast {
         def vendorFile = file("../../../apps/user-web/vendor/supabase.min.js")
-        if (!vendorFile.exists() || vendorFile.length() < 50000) {
+        def packageVendor = file("../../../node_modules/@supabase/supabase-js/dist/umd/supabase.min.js")
+        if ((!vendorFile.exists() || vendorFile.length() < 50000) && packageVendor.exists()) {
             vendorFile.parentFile.mkdirs()
-            ant.get(
-                src: "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
-                dest: vendorFile,
-                verbose: true
-            )
+            copy {
+                from packageVendor
+                into vendorFile.parentFile
+            }
         }
         if (!vendorFile.exists() || vendorFile.length() < 50000) {
-            throw new GradleException("تعذر تجهيز Supabase JS المحلي")
+            throw new GradleException("ملف Supabase المحلي مفقود. نفّذ npm install قبل بناء التطبيق.")
         }
     }
 }

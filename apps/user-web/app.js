@@ -2583,7 +2583,9 @@
   function scheduleInboxRefresh(){
     clearTimeout(state.inboxRefreshTimer);
     state.inboxRefreshTimer=setTimeout(()=>{
-      if(state.activePage==="messagesPage")loadConversations().catch(()=>{});
+      if(state.activePage!=="messagesPage")return;
+      if($("#chatDialog")?.open)return;
+      loadConversations().catch(()=>{});
     },280);
   }
 
@@ -3136,10 +3138,12 @@
     if(state.chatPreviewUrl)URL.revokeObjectURL(state.chatPreviewUrl);
     state.chatPreviewUrl=URL.createObjectURL(file);
     $("#chatAttachmentPreview").innerHTML=
-      '<div class="voice-preview"><audio src="'+state.chatPreviewUrl+'" controls preload="metadata"></audio>'+
-      '<div class="grow"><b>رسالة صوتية</b><small>'+(file.size/1024/1024).toFixed(1)+' MB</small></div>'+
-      '<button id="removeChatAttachment" class="small-button" type="button">إزالة</button></div>';
+      '<div class="voice-preview stage6-voice-preview"><audio src="'+state.chatPreviewUrl+'" preload="metadata"></audio>'+
+      '<div class="chat-preview-copy"><b>رسالة صوتية جاهزة</b><small>راجع التسجيل ثم أرسله</small></div>'+
+      '<button id="removeChatAttachment" class="chat-preview-remove" type="button" aria-label="إزالة">×</button></div>';
     $("#chatAttachmentPreview").classList.remove("hidden");
+    const audio=$("#chatAttachmentPreview").querySelector("audio");
+    if(audio)enhanceAudioPlayer(audio,{original_name:"رسالة صوتية"});
     $("#removeChatAttachment").onclick=clearChatAttachment;
   }
 
@@ -3157,23 +3161,42 @@
     }
     $("#chatAttachmentPreview").innerHTML="";
     $("#chatAttachmentPreview").classList.add("hidden");
+
     const max=Number(state.limits.chat_video_mb||50)*1024*1024;
     if(file.size>max){
-      $("#chatAttachmentPreview").textContent="الملف أكبر من الحد المسموح.";
+      $("#chatAttachmentPreview").innerHTML='<div class="chat-preview-error">حجم المرفق يتجاوز الحد المسموح.</div>';
       $("#chatAttachmentPreview").classList.remove("hidden");
       $("#chatFile").value="";
       return;
     }
+
     state.chatPreviewUrl=URL.createObjectURL(file);
-    const preview=file.type.startsWith("image/")
-      ?'<img src="'+state.chatPreviewUrl+'" alt="">'
+    const kind=file.type.startsWith("image/")
+      ?"صورة"
       :file.type.startsWith("video/")
-        ?'<video src="'+state.chatPreviewUrl+'" muted playsinline></video>'
+        ?"فيديو"
         :file.type.startsWith("audio/")
-          ?'<audio src="'+state.chatPreviewUrl+'" controls></audio>'
-          :'<span>'+escapeHtml(file.name)+'</span>';
-    $("#chatAttachmentPreview").innerHTML=preview+'<div class="grow"><b>'+escapeHtml(file.name)+'</b><small>'+((file.size/1024/1024).toFixed(1))+' MB</small></div><button id="removeChatAttachment" class="small-button" type="button">إزالة</button>';
+          ?"ملف صوتي"
+          :"ملف";
+
+    const preview=file.type.startsWith("image/")
+      ?'<img class="chat-preview-image" src="'+state.chatPreviewUrl+'" alt="">'
+      :file.type.startsWith("video/")
+        ?'<video class="chat-preview-video" src="'+state.chatPreviewUrl+'" playsinline preload="metadata"></video>'
+        :file.type.startsWith("audio/")
+          ?'<audio class="chat-preview-audio" src="'+state.chatPreviewUrl+'" preload="metadata"></audio>'
+          :'<span class="chat-preview-file-icon">'+icon("link")+'</span>';
+
+    $("#chatAttachmentPreview").innerHTML=
+      '<div class="chat-preview-card">'+preview+
+      '<div class="chat-preview-copy"><b>'+kind+' جاهز للإرسال</b><small>يمكنك إضافة وصف من حقل الرسالة</small></div>'+
+      '<button id="removeChatAttachment" class="chat-preview-remove" type="button" aria-label="إزالة">×</button></div>';
     $("#chatAttachmentPreview").classList.remove("hidden");
+
+    const video=$("#chatAttachmentPreview").querySelector("video");
+    const audio=$("#chatAttachmentPreview").querySelector("audio");
+    if(video)enhanceVideoPlayer(video);
+    if(audio)enhanceAudioPlayer(audio,{original_name:"ملف صوتي"});
     $("#removeChatAttachment").onclick=clearChatAttachment;
   };
 
@@ -3347,7 +3370,8 @@
       }
 
       message.textContent="جارٍ إرسال الرسالة...";
-      await api("/v1/conversations/"+encodeURIComponent(state.activeConversation)+"/messages",{
+      const conversationId=state.activeConversation;
+      const sent=await api("/v1/conversations/"+encodeURIComponent(conversationId)+"/messages",{
         method:"POST",
         body:JSON.stringify({
           body,
@@ -3359,7 +3383,9 @@
       $("#chatInput").value="";
       clearChatAttachment();
       message.textContent="";
-      await loadChat({quiet:true});
+      if(sent?.id&&conversationId===state.activeConversation){
+        await appendRealtimeMessage({...sent,conversation_id:sent.conversation_id||conversationId});
+      }
       scheduleInboxRefresh();
     }catch(error){
       message.textContent=(error?.message||"تعذر إرسال الرسالة.")+" يمكنك إعادة المحاولة دون تكرار الرسالة.";
@@ -5050,7 +5076,7 @@
             }
             if(silent&&$("#chatAttachmentPreview")&&!$("#chatAttachmentPreview").classList.contains("hidden")){
               const small=$("#chatAttachmentPreview").querySelector("small");
-              if(small)small.textContent=percent+"% · "+(file.size/1024/1024).toFixed(1)+" MB";
+              if(small)small.textContent="جارٍ الرفع "+percent+"%";
             }
           }
         };

@@ -6,7 +6,7 @@
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => [...document.querySelectorAll(s)];
-  const state = {
+  const store = window.AshurCore.createStore({
     user:null,
     profile:null,
     composerType:"post",
@@ -44,7 +44,14 @@
     feedDone:false,
     features:{},
     limits:{}
-  };
+  });
+  const state = store.state;
+  const router = window.AshurCore.createRouter({
+    initialRoute:"homePage",
+    history:state.pageHistory,
+    maxHistory:20,
+    isValid:(page)=>Boolean(document.getElementById(page))
+  });
 
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const initials = (name="آشور") => escapeHtml(name.trim().slice(0,1) || "آ");
@@ -264,8 +271,10 @@
     $("#app").classList.toggle("hidden",!loggedIn);
     if(!loggedIn){
       closeTransientDialogs();
+      router.reset("homePage");
       state.activePage="homePage";
-      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      store.emit("session:reset",{activePage:"homePage"});
+      $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
       $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
@@ -587,14 +596,11 @@
   }
 
   async function navigateTo(page,{fromBack=false,replace=false}={}){
-    if(!document.getElementById(page))page="homePage";
     const previous=state.activePage||$(".page.active")?.id||"homePage";
-    if(!fromBack && !replace && previous!==page){
-      state.pageHistory.push(previous);
-      if(state.pageHistory.length>20)state.pageHistory.shift();
-    }
+    page=router.navigate(page,{current:previous,fromBack,replace});
     closeTransientDialogs();
     state.activePage=page;
+    store.emit("route:change",{page,previous,fromBack,replace});
     updateTopbarContext(page);
     $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
     $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));

@@ -249,8 +249,8 @@
     if(!loggedIn){
       closeTransientDialogs();
       state.activePage="homePage";
-      $$$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
-      $$$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
 
@@ -1891,12 +1891,12 @@
     }
   }
 
-  $("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.onclick=()=>loadProfileContent(btn.dataset.profileTab));
+  $$("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.onclick=()=>loadProfileContent(btn.dataset.profileTab));
 
   async function loadPublicProfileContent(uid,kind="posts",mayView=true){
     if(!["posts","reels"].includes(kind))kind="posts";
     state.publicProfileTab=kind;
-    $("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
+    $$("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
       btn.classList.toggle("active",btn.dataset.publicProfileTab===kind);
     });
     $("#publicProfileContent").className="profile-media-grid";

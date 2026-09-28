@@ -2496,9 +2496,11 @@
         post_id:state.commentTarget.type==="post"?state.commentTarget.id:null,
         reel_id:state.commentTarget.type==="reel"?state.commentTarget.id:null
       };
-      const {error}=await client.from("comments").insert(payload);
+      const {data:created,error}=await client.from("comments").insert(payload).select("id").single();
       if(error)throw error;
+      if(created?.id)await notifyMentions(body,"comment",created.id);
       input.value="";
+      input.style.height="";
       state.commentReply=null;
       updateCommentReplyBar();
       if(message)message.textContent="";
@@ -2949,6 +2951,85 @@
     badge.classList.toggle("hidden",!count);
   }
 
+  let mentionLookupTimer=null;
+  let mentionActiveInput=null;
+
+  function closeMentionSuggestions(){
+    const panel=$("#mentionSuggestions");
+    if(!panel)return;
+    panel.classList.add("hidden");
+    panel.innerHTML="";
+    mentionActiveInput=null;
+  }
+
+  function currentMentionToken(input){
+    const value=input?.value||"";
+    const caret=input?.selectionStart??value.length;
+    const before=value.slice(0,caret);
+    const match=before.match(/(^|\s)@([A-Za-z0-9_.]{0,24})$/);
+    if(!match)return null;
+    const query=match[2]||"";
+    const start=caret-query.length-1;
+    return {query,start,end:caret};
+  }
+
+  function placeMentionPanel(input){
+    const panel=$("#mentionSuggestions");
+    if(!panel||!input)return;
+    const rect=input.getBoundingClientRect();
+    const width=Math.min(340,Math.max(220,rect.width));
+    panel.style.width=width+"px";
+    panel.style.left=Math.max(12,Math.min(window.innerWidth-width-12,rect.left))+"px";
+    const preferred=rect.top-270;
+    panel.style.top=(preferred>12?preferred:Math.min(window.innerHeight-280,rect.bottom+8))+"px";
+  }
+
+  async function updateMentionSuggestions(input){
+    const token=currentMentionToken(input);
+    if(!token)return closeMentionSuggestions();
+    mentionActiveInput=input;
+    clearTimeout(mentionLookupTimer);
+    mentionLookupTimer=setTimeout(async()=>{
+      const panel=$("#mentionSuggestions");
+      if(!panel||mentionActiveInput!==input)return;
+      let request=client.from("profiles").select("id,name,username,avatar_media_id,is_verified").neq("id",state.user.id).eq("is_banned",false).order("username").limit(8);
+      if(token.query)request=request.ilike("username",token.query+"%");
+      const {data,error}=await request;
+      if(error||mentionActiveInput!==input)return closeMentionSuggestions();
+      const rows=data||[];
+      panel.innerHTML=rows.map(p=>`<button type="button" class="mention-suggestion" data-mention-username="${escapeHtml(p.username||"")}">${avatar(p)}<span><b>${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b><small>@${escapeHtml(p.username||"")}</small></span></button>`).join("");
+      if(!rows.length)return closeMentionSuggestions();
+      placeMentionPanel(input);
+      panel.classList.remove("hidden");
+      await hydrateMedia(panel).catch(()=>{});
+      panel.querySelectorAll("[data-mention-username]").forEach(btn=>btn.onclick=()=>{
+        const latest=currentMentionToken(input);
+        if(!latest)return closeMentionSuggestions();
+        const username=btn.dataset.mentionUsername;
+        input.value=input.value.slice(0,latest.start)+"@"+username+" "+input.value.slice(latest.end);
+        const caret=latest.start+username.length+2;
+        input.focus();
+        input.setSelectionRange?.(caret,caret);
+        input.dispatchEvent(new Event("input",{bubbles:true}));
+        closeMentionSuggestions();
+      });
+    },120);
+  }
+
+  function bindMentionAutocomplete(input){
+    if(!input||input.dataset.mentionBound==="1")return;
+    input.dataset.mentionBound="1";
+    input.addEventListener("input",()=>updateMentionSuggestions(input));
+    input.addEventListener("focus",()=>updateMentionSuggestions(input));
+    input.addEventListener("blur",()=>setTimeout(()=>{if(mentionActiveInput===input)closeMentionSuggestions()},180));
+  }
+
+  [$("#composerCaption"),$("#storyOverlayInput"),$("#commentInput")].forEach(bindMentionAutocomplete);
+  $("#commentInput")?.addEventListener("input",e=>{
+    const el=e.currentTarget;
+    el.style.height="auto";
+    el.style.height=Math.min(132,Math.max(44,el.scrollHeight))+"px";
+  });
   async function handleNotificationTarget(notification){
     const type=notification.entity_type||notification.kind||"";
     const id=notification.entity_id||"";
@@ -2965,6 +3046,18 @@
     if(type==="reel"&&id){
       await navigateTo("reelsPage");
       document.querySelector('[data-reel-id="'+CSS.escape(id)+'"]')?.scrollIntoView({behavior:"smooth",block:"center"});
+      return;
+    }
+    if(type==="story"&&id){
+      await navigateTo("homePage");
+      await loadStories();
+      if(state.stories?.has(id))return openStoryViewer(id);
+      return;
+    }
+    if(type==="comment"&&id){
+      const {data}=await client.from("comments").select("post_id,reel_id").eq("id",id).maybeSingle();
+      if(data?.post_id)return openComments("post",data.post_id);
+      if(data?.reel_id)return openComments("reel",data.reel_id);
       return;
     }
     if((type==="conversation"||type==="message")&&id){

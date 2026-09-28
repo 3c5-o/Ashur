@@ -335,16 +335,36 @@
     <div class="dialog-head"><div><span class="eyebrow">حسابك</span><h3>تعديل الملف الشخصي</h3></div><button id="closeEditProfile" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <form id="editProfileForm" class="dialog-body form">
       <div class="edit-media-grid">
-        <label class="media-picker cover-picker"><input id="editCoverFile" type="file" accept="image/*"><span>تغيير الغلاف</span></label>
-        <label class="media-picker avatar-picker"><input id="editAvatarFile" type="file" accept="image/*"><span>تغيير الصورة</span></label>
+        <div class="profile-media-editor cover-editor">
+          <div class="profile-media-preview cover-preview">
+            <img id="editCoverPreview" class="hidden" alt="معاينة الغلاف">
+            <span id="editCoverFallback">لا يوجد غلاف</span>
+          </div>
+          <div class="profile-media-actions">
+            <label class="media-picker"><input id="editCoverFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"><span>تغيير الغلاف</span></label>
+            <button id="removeCoverImage" class="media-remove-button" type="button">إزالة</button>
+          </div>
+        </div>
+        <div class="profile-media-editor avatar-editor">
+          <div class="profile-media-preview avatar-preview">
+            <img id="editAvatarPreview" class="hidden" alt="معاينة صورة الحساب">
+            <span id="editAvatarFallback">لا توجد صورة</span>
+          </div>
+          <div class="profile-media-actions">
+            <label class="media-picker"><input id="editAvatarFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"><span>تغيير الصورة</span></label>
+            <button id="removeAvatarImage" class="media-remove-button" type="button">إزالة</button>
+          </div>
+        </div>
       </div>
-      <label><span>الاسم</span><input id="editName" maxlength="80" required></label>
-      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="24" required autocapitalize="none"></label>
+      <label><span>الاسم</span><input id="editName" maxlength="80" required autocomplete="name"></label>
+      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="24" required autocapitalize="none" autocomplete="username"></label>
+      <small id="editUsernameStatus" class="field-hint"></small>
       <label><span>نبذة</span><textarea id="editBio" maxlength="300" placeholder="اكتب نبذة قصيرة عنك"></textarea></label>
-      <label><span>الرابط</span><input id="editProfileLink" maxlength="220" placeholder="رابط موقعك أو حسابك"></label>
+      <div class="field-counter"><span id="editBioCount">0</span><span>/ 300</span></div>
+      <label><span>الرابط</span><input id="editProfileLink" maxlength="220" inputmode="url" autocomplete="url" placeholder="example.com/yourname"></label>
       <label class="switch-row"><span><b>حساب خاص</b><small>المتابعة تحتاج موافقتك</small></span><input id="editPrivate" type="checkbox"></label>
-      <button class="primary" type="submit">حفظ التعديلات</button>
-      <p id="editProfileMessage" class="message"></p>
+      <button id="saveProfileButton" class="primary" type="submit">حفظ التعديلات</button>
+      <p id="editProfileMessage" class="message" aria-live="polite"></p>
     </form>
   </dialog>
 
@@ -411,6 +431,7 @@
   <script src="./config.js"></script>
   <script src="./core.js"></script>
   <script src="./auth-core.js"></script>
+  <script src="./profile-core.js"></script>
   <script>
     (() => {
       let finished = false;
@@ -432,6 +453,7 @@
         if (!window.supabase?.createClient) return fail();
         if (!window.AshurCore?.createStore || !window.AshurCore?.createRouter) return fail();
         if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
+        if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
         script.src = "./app.js?v=1.2.0";
         script.onload = () => { finished = true; };

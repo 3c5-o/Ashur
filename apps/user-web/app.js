@@ -1036,17 +1036,99 @@
   }
 
 
+
+  async function openSharedContent(type,id){
+    if(type==="reel"){
+      const result=await client.from("reels")
+        .select("id,caption,media_id,comments_enabled")
+        .eq("id",id).maybeSingle();
+      if(result.error)throw result.error;
+      if(!result.data)throw new Error("الريلز غير متاح");
+      return openProfileContentPreview("reels",result.data.id,result.data.media_id,result.data.caption,result.data.comments_enabled!==false);
+    }
+    const result=await client.from("posts")
+      .select("id,caption,comments_enabled,post_media(media_id,sort_order)")
+      .eq("id",id).maybeSingle();
+    if(result.error)throw result.error;
+    if(!result.data)throw new Error("المنشور غير متاح");
+    const media=[...(result.data.post_media||[])].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))[0]?.media_id||"";
+    return openProfileContentPreview("posts",result.data.id,media,result.data.caption,result.data.comments_enabled!==false);
+  }
+
   async function shareContent(type,id){
-    const text=type==="reel"?"ريلز على آشور":"منشور على آشور";
-    const base=(cfg.shareBaseUrl||"").replace(/\/$/,"");
-    const url=base?base+"/#"+type+"-"+id:"";
+    const label=type==="reel"?"ريلز":"منشور";
+    state.returnPublicProfileId=$("#publicProfileDialog")?.open&&state.currentPublicProfile?.id
+      ?state.currentPublicProfile.id
+      :state.returnPublicProfileId;
+    openInfoDialog("مشاركة "+label,
+      '<div class="share-sheet">'+
+        '<div class="share-quick-actions">'+
+          '<button id="shareToStoryButton" type="button"><span class="share-round">'+icon("play")+'</span><b>إضافة للقصة</b></button>'+
+          '<button id="shareExternalButton" type="button"><span class="share-round">'+icon("share")+'</span><b>مشاركة خارجية</b></button>'+
+        '</div>'+
+        '<div class="settings-group"><div class="settings-group-title"><div><span class="eyebrow">الخاص</span><h4>إرسال لصديق</h4></div></div>'+
+          '<div id="shareConversationsList" class="list compact"><div class="empty">جارٍ تحميل المحادثات...</div></div>'+
+        '</div>'+
+        '<p id="shareMessage" class="message"></p>'+
+      '</div>');
+
+    $("#shareToStoryButton").onclick=async()=>{
+      $("#shareToStoryButton").disabled=true;
+      try{
+        await api("/v1/social/share-story",{
+          method:"POST",
+          body:JSON.stringify({type,id})
+        });
+        $("#shareMessage").textContent="تمت إضافة "+label+" إلى قصتك.";
+      }catch(error){
+        $("#shareMessage").textContent=error.message;
+      }finally{$("#shareToStoryButton").disabled=false}
+    };
+
+    $("#shareExternalButton").onclick=async()=>{
+      const text=label+" على آشور";
+      const base=(cfg.shareBaseUrl||"").replace(/\/$/,"");
+      const url=base?base+"/#"+type+"-"+id:"";
+      try{
+        if(navigator.share){
+          await navigator.share({title:"آشور",text,...(url?{url}:{})});
+        }else if(url){
+          await navigator.clipboard.writeText(url);
+          $("#shareMessage").textContent="تم نسخ الرابط.";
+        }
+      }catch(_){}
+    };
+
     try{
-      if(navigator.share){
-        await navigator.share({title:"آشور",text,...(url?{url}:{})});
-      }else if(url){
-        await navigator.clipboard.writeText(url);
-      }
-    }catch(_){}
+      const result=await api("/v1/conversations");
+      const direct=(result.items||[]).filter(row=>row.kind==="direct").slice(0,60);
+      $("#shareConversationsList").innerHTML=direct.map(row=>{
+        const p=row.peer_profile||{};
+        return '<button class="list-card" data-share-conversation="'+escapeHtml(row.id)+'" type="button">'+
+          avatar(p)+'<span class="grow"><b>'+escapeHtml(row.title||p.name||"محادثة")+'</b><small>@'+escapeHtml(p.username||"")+'</small></span>'+
+          '<span class="share-send-label">إرسال</span></button>';
+      }).join("")||'<div class="empty">ابدأ محادثة مع صديق أولًا حتى يظهر هنا.</div>';
+      await hydrateMedia($("#shareConversationsList"));
+      $("#shareConversationsList").querySelectorAll("[data-share-conversation]").forEach(btn=>btn.onclick=async()=>{
+        btn.disabled=true;
+        try{
+          await api("/v1/conversations/"+encodeURIComponent(btn.dataset.shareConversation)+"/messages",{
+            method:"POST",
+            body:JSON.stringify({
+              body:"",
+              shared_type:type,
+              shared_id:id
+            })
+          });
+          btn.querySelector(".share-send-label").textContent="تم";
+        }catch(error){
+          $("#shareMessage").textContent=error.message;
+          btn.disabled=false;
+        }
+      });
+    }catch(error){
+      $("#shareConversationsList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+    }
   }
 
   function setSearchType(type){

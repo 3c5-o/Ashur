@@ -1716,13 +1716,14 @@
     const audienceField=kind==="stories"?"":`
       <label><span>من يشاهد المحتوى؟</span>
         <select id="ownContentVisibility">
-          <option value="public" ${visibility!=="followers"?"selected":""}>الجميع</option>
+          <option value="public" ${visibility!=="followers"?"selected":""} ${state.profile?.is_private?"disabled":""}>الجميع</option>
           <option value="followers" ${visibility==="followers"?"selected":""}>المتابعون فقط</option>
         </select>
       </label>`;
     const pinAction=kind==="posts"
       ?`<button id="pinOwnContent" class="secondary-wide content-pin-action ${pinned?"active":""}" type="button">${icon("pin")}<span>${pinned?"إلغاء تثبيت المنشور":"تثبيت في الملف الشخصي"}</span></button>`
       :"";
+    if(kind!=="stories" && state.profile?.is_private) visibility="followers";
     openInfoDialog("إدارة "+label,`
       <div class="form settings-info content-manage-sheet">
         <label><span>الوصف</span><textarea id="ownContentCaption" maxlength="2200">${escapeHtml(caption||"")}</textarea></label>
@@ -3803,6 +3804,7 @@
     const caption=String(item.caption||"");
     const ownerId=String(item.author_id||"");
     const pinned=Boolean(item.pinned_at);
+    const visibility=String(item.visibility||"public");
     const viewCount=Number(item.view_count||0);
     let media="";
     if(kind==="reels"){
@@ -3828,13 +3830,14 @@
       ' data-preview-comments="'+String(item.comments_enabled!==false)+'"'+
       ' data-preview-owner="'+escapeHtml(ownerId)+'"'+
       ' data-preview-pinned="'+String(pinned)+'"'+
+      ' data-preview-visibility="'+escapeHtml(visibility)+'"'+
       ' data-preview-views="'+String(viewCount)+'">'+
       media+
       (saved?'<span class="profile-grid-saved">'+icon("save")+'</span>':"")+
       '</button>';
   }
 
-  async function openProfileContentPreview(kind,id,mediaId,caption="",commentsEnabled=true,ownerId="",pinned=false,viewCount=0){
+  async function openProfileContentPreview(kind,id,mediaId,caption="",commentsEnabled=true,ownerId="",pinned=false,viewCount=0,visibility="public"){
     const reel=kind==="reels";
     const likeTable=reel?"reel_likes":"post_likes";
     const targetField=reel?"reel_id":"post_id";
@@ -3889,7 +3892,7 @@
     };
     if($("#previewManageButton"))$("#previewManageButton").onclick=()=>{
       $("#infoDialog").close();
-      openOwnContentActions(kind,id,caption,commentsEnabled,pinned);
+      openOwnContentActions(kind,id,caption,commentsEnabled,pinned,visibility);
     };
   }
 
@@ -3907,7 +3910,8 @@
         btn.dataset.previewComments==="true",
         btn.dataset.previewOwner||"",
         btn.dataset.previewPinned==="true",
-        Number(btn.dataset.previewViews||0)
+        Number(btn.dataset.previewViews||0),
+        btn.dataset.previewVisibility||"public"
       ).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
       };
     });
@@ -3922,7 +3926,7 @@
     try{
       if(kind==="reels"){
         const result=await client.from("reels")
-          .select("id,author_id,caption,media_id,cover_media_id,created_at,comments_enabled,view_count")
+          .select("id,author_id,caption,media_id,cover_media_id,created_at,comments_enabled,visibility,view_count")
           .eq("author_id",state.user.id)
           .order("created_at",{ascending:false});
         if(result.error)throw result.error;
@@ -3941,10 +3945,10 @@
         const reelIds=savedReels.map(x=>x.reel_id);
         const contentResults=await Promise.all([
           postIds.length
-            ?client.from("posts").select("id,author_id,caption,comments_enabled,pinned_at,post_media(media_id,sort_order)").in("id",postIds)
+            ?client.from("posts").select("id,author_id,caption,comments_enabled,visibility,pinned_at,post_media(media_id,sort_order)").in("id",postIds)
             :Promise.resolve({data:[],error:null}),
           reelIds.length
-            ?client.from("reels").select("id,author_id,caption,media_id,cover_media_id,comments_enabled,view_count").in("id",reelIds)
+            ?client.from("reels").select("id,author_id,caption,media_id,cover_media_id,comments_enabled,visibility,view_count").in("id",reelIds)
             :Promise.resolve({data:[],error:null})
         ]);
         if(contentResults[0].error)throw contentResults[0].error;
@@ -3959,7 +3963,7 @@
           '<div class="empty profile-grid-empty">لا توجد محفوظات بعد.</div>';
       }else{
         const result=await client.from("posts")
-          .select("id,author_id,caption,comments_enabled,pinned_at,created_at,post_media(media_id,sort_order)")
+          .select("id,author_id,caption,comments_enabled,visibility,pinned_at,created_at,post_media(media_id,sort_order)")
           .eq("author_id",state.user.id)
           .order("created_at",{ascending:false});
         if(result.error)throw result.error;
@@ -3997,7 +4001,7 @@
     try{
       if(kind==="reels"){
         const result=await client.from("reels")
-          .select("id,author_id,caption,media_id,cover_media_id,comments_enabled,created_at,view_count")
+          .select("id,author_id,caption,media_id,cover_media_id,comments_enabled,visibility,created_at,view_count")
           .eq("author_id",uid)
           .order("created_at",{ascending:false})
           .limit(90);
@@ -4012,8 +4016,8 @@
         const postIds=(postSaved.items||[]).map(x=>x.post_id).filter(Boolean);
         const reelIds=(reelSaved.items||[]).map(x=>x.reel_id).filter(Boolean);
         const [postsResult,reelsResult]=await Promise.all([
-          postIds.length?client.from("posts").select("id,author_id,caption,comments_enabled,pinned_at,post_media(media_id,sort_order)").in("id",postIds):Promise.resolve({data:[],error:null}),
-          reelIds.length?client.from("reels").select("id,author_id,caption,media_id,cover_media_id,comments_enabled,view_count").in("id",reelIds):Promise.resolve({data:[],error:null})
+          postIds.length?client.from("posts").select("id,author_id,caption,comments_enabled,visibility,pinned_at,post_media(media_id,sort_order)").in("id",postIds):Promise.resolve({data:[],error:null}),
+          reelIds.length?client.from("reels").select("id,author_id,caption,media_id,cover_media_id,comments_enabled,visibility,view_count").in("id",reelIds):Promise.resolve({data:[],error:null})
         ]);
         if(postsResult.error)throw postsResult.error;
         if(reelsResult.error)throw reelsResult.error;

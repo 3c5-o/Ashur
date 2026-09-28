@@ -3036,18 +3036,35 @@
   async function loadComments(){
     if(!state.commentTarget)return;
     const field=state.commentTarget.type==="post"?"post_id":"reel_id";
-    const {data,error}=await client.from("comments")
-      .select("id,author_id,parent_id,body,created_at,updated_at")
-      .eq(field,state.commentTarget.id)
-      .order("created_at",{ascending:true})
-      .limit(200);
-    if(error){
-      $("#commentsList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+    const targetTable=state.commentTarget.type==="post"?"posts":"reels";
+
+    const [commentsResult,targetResult]=await Promise.all([
+      client.from("comments")
+        .select("id,author_id,parent_id,body,created_at,updated_at,pinned_at")
+        .eq(field,state.commentTarget.id)
+        .order("created_at",{ascending:true})
+        .limit(200),
+      client.from(targetTable)
+        .select("author_id")
+        .eq("id",state.commentTarget.id)
+        .maybeSingle()
+    ]);
+
+    if(commentsResult.error){
+      $("#commentsList").innerHTML='<div class="empty error">'+escapeHtml(commentsResult.error.message)+'</div>';
       return;
     }
-    const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
-    const byId=new Map((data||[]).map(row=>[row.id,row]));
-    $("#commentsList").innerHTML=(data||[]).map(row=>{
+
+    const data=[...(commentsResult.data||[])].sort((a,b)=>{
+      const pin=Number(Boolean(b.pinned_at))-Number(Boolean(a.pinned_at));
+      if(pin)return pin;
+      return new Date(a.created_at)-new Date(b.created_at);
+    });
+    const canPinComments=targetResult.data?.author_id===state.user.id;
+    const profiles=await profilesMap([...new Set(data.map(x=>x.author_id))]);
+    const byId=new Map(data.map(row=>[row.id,row]));
+
+    $("#commentsList").innerHTML=data.map(row=>{
       const p=profiles[row.author_id]||{};
       const parent=row.parent_id?byId.get(row.parent_id):null;
       const parentProfile=parent?profiles[parent.author_id]||{}:null;
@@ -3057,20 +3074,28 @@
       const edited=row.updated_at&&new Date(row.updated_at).getTime()>new Date(row.created_at).getTime()+1000
         ?' · تم التعديل':"";
       const own=row.author_id===state.user.id;
-      return '<div class="comment-item '+(row.parent_id?"reply":"")+'" data-comment-id="'+escapeHtml(row.id)+'">'+
+      const pinned=Boolean(row.pinned_at);
+      const pinButton=canPinComments&&!row.parent_id
+        ?'<button class="comment-action '+(pinned?"active":"")+'" data-pin-comment="'+escapeHtml(row.id)+'" data-pinned="'+String(pinned)+'" type="button">'+(pinned?"إلغاء التثبيت":"تثبيت")+'</button>'
+        :"";
+      return '<div class="comment-item '+(row.parent_id?"reply ":"")+(pinned?"pinned-comment":"")+'" data-comment-id="'+escapeHtml(row.id)+'">'+
         avatar(p)+
         '<div class="comment-bubble"><div class="comment-bubble-head"><b>'+escapeHtml(p.name||p.username||"مستخدم")+'</b>'+
-        (p.is_verified?'<span class="verified-inline">✓</span>':"")+'</div>'+
-        parentHtml+'<p>'+richText(row.body)+'</p>'+
+        (p.is_verified?'<span class="verified-inline">✓</span>':"")+
+        (pinned?'<span class="comment-pinned-badge">'+icon("pin")+'مثبت</span>':"")+
+        '</div>'+
+        parentHtml+'<p class="comment-body-text">'+richText(row.body)+'</p>'+
         '<div class="comment-meta">'+new Date(row.created_at).toLocaleString("ar-IQ")+edited+'</div>'+
         '<div class="comment-actions">'+
           '<button class="comment-action" data-reply-comment="'+escapeHtml(row.id)+'" data-reply-name="'+escapeHtml(p.username||p.name||"مستخدم")+'" type="button">رد</button>'+
+          pinButton+
           (own
             ?'<button class="comment-action" data-edit-comment="'+escapeHtml(row.id)+'" data-comment-body="'+escapeHtml(row.body)+'" type="button">تعديل</button>'+
-             '<button class="comment-action" data-delete-comment="'+escapeHtml(row.id)+'" type="button">حذف</button>'
+             '<button class="comment-action danger" data-delete-comment="'+escapeHtml(row.id)+'" type="button">حذف</button>'
             :'<button class="comment-action" data-report-comment="'+escapeHtml(row.id)+'" type="button">إبلاغ</button>')+
         '</div></div></div>';
     }).join("")||'<div class="empty">لا توجد تعليقات بعد. اكتب أول تعليق.</div>';
+
     await hydrateMedia($("#commentsList"));
 
     $("#commentsList").querySelectorAll("[data-reply-comment]").forEach(btn=>btn.onclick=()=>{
@@ -3078,28 +3103,83 @@
       updateCommentReplyBar();
       $("#commentInput").focus();
     });
-    $("#commentsList").querySelectorAll("[data-edit-comment]").forEach(btn=>btn.onclick=async()=>{
-      const next=prompt("تعديل التعليق",btn.dataset.commentBody||"");
-      if(next===null)return;
-      const body=next.trim();
-      if(!body)return;
+
+    $("#commentsList").querySelectorAll("[data-pin-comment]").forEach(btn=>btn.onclick=async()=>{
+      btn.disabled=true;
       try{
-        await api("/v1/social/comments/"+btn.dataset.editComment,{method:"PATCH",body:JSON.stringify({body})});
+        const next=btn.dataset.pinned!=="true";
+        await api("/v1/social/comments/"+btn.dataset.pinComment+"/pin",{
+          method:"PATCH",
+          body:JSON.stringify({pinned:next})
+        });
         await loadComments();
-      }catch(error){alert(error.message)}
+      }catch(error){
+        $("#commentMessage").textContent=error.message;
+        btn.disabled=false;
+      }
     });
+
+    $("#commentsList").querySelectorAll("[data-edit-comment]").forEach(btn=>btn.onclick=()=>{
+      const item=btn.closest(".comment-item");
+      const bubble=item?.querySelector(".comment-bubble");
+      const text=item?.querySelector(".comment-body-text");
+      const actions=item?.querySelector(".comment-actions");
+      if(!bubble||!text||!actions||bubble.querySelector(".comment-inline-editor"))return;
+
+      text.classList.add("hidden");
+      actions.classList.add("hidden");
+      const editor=document.createElement("div");
+      editor.className="comment-inline-editor";
+      editor.innerHTML='<textarea maxlength="2000"></textarea><div><button class="small-button" data-save-edit type="button">حفظ</button><button class="comment-action" data-cancel-edit type="button">إلغاء</button></div><p class="message"></p>';
+      const textarea=editor.querySelector("textarea");
+      textarea.value=btn.dataset.commentBody||"";
+      bubble.insertBefore(editor,actions);
+      bindMentionAutocomplete(textarea);
+      textarea.focus();
+      textarea.setSelectionRange?.(textarea.value.length,textarea.value.length);
+
+      editor.querySelector("[data-cancel-edit]").onclick=()=>{
+        editor.remove();
+        text.classList.remove("hidden");
+        actions.classList.remove("hidden");
+      };
+      editor.querySelector("[data-save-edit]").onclick=async()=>{
+        const save=editor.querySelector("[data-save-edit]");
+        const body=textarea.value.trim().slice(0,2000);
+        if(!body)return editor.querySelector(".message").textContent="التعليق فارغ.";
+        save.disabled=true;
+        try{
+          await api("/v1/social/comments/"+btn.dataset.editComment,{
+            method:"PATCH",
+            body:JSON.stringify({body})
+          });
+          await notifyMentions(body,"comment",btn.dataset.editComment);
+          await loadComments();
+        }catch(error){
+          editor.querySelector(".message").textContent=error.message;
+          save.disabled=false;
+        }
+      };
+    });
+
     $("#commentsList").querySelectorAll("[data-delete-comment]").forEach(btn=>btn.onclick=async()=>{
       if(!confirm("حذف التعليق؟"))return;
+      btn.disabled=true;
       try{
         await api("/v1/social/comments/"+btn.dataset.deleteComment,{method:"DELETE"});
         await loadComments();
-      }catch(error){alert(error.message)}
+      }catch(error){
+        $("#commentMessage").textContent=error.message;
+        btn.disabled=false;
+      }
     });
+
     $("#commentsList").querySelectorAll("[data-report-comment]").forEach(btn=>btn.onclick=()=>{
       $("#commentsDialog").close();
       openReportDialog("comment",btn.dataset.reportComment);
     });
-    $("#commentsList").scrollTop=$("#commentsList").scrollHeight;
+
+    $("#commentsList").scrollTop=0;
   }
 
   $("#commentForm").onsubmit=async(e)=>{

@@ -234,6 +234,18 @@ async function canViewOwner(user, ownerId) {
   return Boolean(follows?.length);
 }
 
+async function isAcceptedFollower(userId, ownerId) {
+  if (!userId || !ownerId) return false;
+  if (userId === ownerId) return true;
+  const rows = await select(
+    "follows",
+    "select=status&follower_id=eq." + encodeURIComponent(userId) +
+      "&following_id=eq." + encodeURIComponent(ownerId) +
+      "&status=eq.accepted&limit=1",
+  ).catch(() => []);
+  return Boolean(rows?.length);
+}
+
 async function canViewContentOwner(user, ownerId, visibility = "public") {
   if (!ownerId) return false;
   if (user?.id === ownerId) return true;
@@ -316,7 +328,7 @@ async function canReadMedia(user, media) {
     for (const story of stories || []) {
       if (!story || story.deleted_at || story.moderation_status !== "active") continue;
       if (new Date(story.expires_at) <= new Date()) continue;
-      if (await canViewOwner(user, story.author_id)) return true;
+      if (user?.id === story.author_id || await isAcceptedFollower(user?.id, story.author_id)) return true;
     }
     return false;
   }
@@ -1261,8 +1273,8 @@ async function socialPublicSaved(req, res, profileId, url) {
 async function socialMentions(req, res) {
   const user = await currentUser(req);
   const body = await readJson(req);
-  const caption = String(body.caption || "").slice(0, 2200);
-  const type = ["post","reel","story"].includes(body.type) ? body.type : "post";
+  const caption = String(body.caption || "").slice(0, 4000);
+  const type = ["post","reel","story","comment"].includes(body.type) ? body.type : "post";
   const id = String(body.id || "");
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "معرف المحتوى غير صالح" });
 
@@ -1279,11 +1291,23 @@ async function socialMentions(req, res) {
     "select=id,name,username&username=in.(" + usernames.map((x) => '"' + x.replace(/"/g, "") + '"').join(",") + ")&is_banned=eq.false",
   ).catch(() => []);
   const sender = await profileFor(user.id).catch(() => null);
+  const label = type === "reel" ? "ريلز" : type === "story" ? "قصة" : type === "comment" ? "تعليق" : "منشور";
   let countNotified = 0;
+
   for (const profile of profiles || []) {
     if (profile.id === user.id || await isBlockedBetween(user.id, profile.id)) continue;
+
+    if (type === "story") {
+      await upsert("story_mentions", {
+        story_id: id,
+        user_id: profile.id,
+        mentioned_by: user.id,
+        created_at: new Date().toISOString(),
+      }, "story_id,user_id").catch(() => {});
+    }
+
     const title = "تمت الإشارة إليك";
-    const message = (sender?.name || sender?.username || "مستخدم") + " أشار إليك في " + (type === "reel" ? "ريلز" : type === "story" ? "قصة" : "منشور");
+    const message = (sender?.name || sender?.username || "مستخدم") + " أشار إليك في " + label;
     await insert("notifications", {
       user_id: profile.id,
       actor_id: user.id,
@@ -1302,6 +1326,48 @@ async function socialMentions(req, res) {
     countNotified++;
   }
   json(res, 200, { ok: true, mentions: countNotified, hashtags });
+}
+
+async function socialReshareMentionedStory(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const storyId = String(body.story_id || "");
+  if (!/^[0-9a-f-]{36}$/i.test(storyId)) return json(res, 400, { error: "معرف القصة غير صالح" });
+
+  const stories = await select(
+    "stories",
+    "select=id,author_id,media_id,caption,expires_at,moderation_status,deleted_at&id=eq." + encodeURIComponent(storyId) + "&limit=1",
+  );
+  const source = stories?.[0];
+  if (!source || source.deleted_at || source.moderation_status !== "active" || new Date(source.expires_at) <= new Date()) {
+    return json(res, 404, { error: "القصة غير متاحة" });
+  }
+
+  const mentions = await select(
+    "story_mentions",
+    "select=story_id&story_id=eq." + encodeURIComponent(storyId) +
+      "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  if (!mentions?.length) return json(res, 403, { error: "يمكن إعادة مشاركة القصة فقط إذا تمت الإشارة إليك فيها" });
+  if (await isBlockedBetween(user.id, source.author_id)) return json(res, 403, { error: "لا يمكن مشاركة هذه القصة" });
+
+  const existing = await select(
+    "stories",
+    "select=id&author_id=eq." + encodeURIComponent(user.id) +
+      "&reshared_from_story_id=eq." + encodeURIComponent(storyId) +
+      "&expires_at=gt." + encodeURIComponent(new Date().toISOString()) + "&limit=1",
+  ).catch(() => []);
+  if (existing?.length) return json(res, 200, { ...existing[0], already_shared: true });
+
+  const rows = await insert("stories", {
+    author_id: user.id,
+    media_id: source.media_id,
+    caption: String(body.caption || "").trim().slice(0, 300),
+    shared_type: "story",
+    shared_id: source.id,
+    reshared_from_story_id: source.id,
+  });
+  json(res, 201, rows?.[0] || { ok: true });
 }
 
 async function socialBlock(req, res, targetUserId) {
@@ -1442,7 +1508,9 @@ async function socialStoryView(req, res, storyId) {
   );
   const story = stories?.[0];
   if (!story || new Date(story.expires_at) <= new Date()) return json(res, 404, { error: "القصة غير موجودة" });
-  if (!(await canViewOwner(user, story.author_id))) return json(res, 403, { error: "لا يمكنك مشاهدة هذه القصة" });
+  if (story.author_id !== user.id && !(await isAcceptedFollower(user.id, story.author_id))) {
+    return json(res, 403, { error: "هذه القصة متاحة للمتابعين المقبولين فقط" });
+  }
   if (story.author_id !== user.id) {
     await upsert("story_views", {
       story_id: storyId,
@@ -2427,8 +2495,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, {
         ok: true,
-        api_version: "1.2.0",
+        api_version: "1.3.0",
         messaging_revision: "E2",
+        stories_revision: "S3",
         commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
         readiness: readiness()
       });
@@ -2487,6 +2556,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/v1/social/mentions") {
       return socialMentions(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/reshare-mentioned-story") {
+      return socialReshareMentionedStory(req, res);
     }
     const publicSavedMatch = /^\/v1\/social\/saved\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "GET" && publicSavedMatch) {

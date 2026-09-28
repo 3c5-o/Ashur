@@ -1424,7 +1424,7 @@ async function socialMentions(req, res) {
   }
 
   const usernames = [...new Set(
-    [...caption.matchAll(/@([A-Za-z0-9_.]{2,24})/g)].map((m) => m[1].toLowerCase())
+    [...caption.matchAll(/@([A-Za-z0-9_.]{2,10})/g)].map((m) => m[1].toLowerCase())
   )].slice(0, 20);
   const hashtags = [...new Set(
     [...caption.matchAll(/#([\p{L}\p{N}_]{2,50})/gu)].map((m) => m[1].toLowerCase())

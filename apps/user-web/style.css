@@ -1589,3 +1589,75 @@ html,body,.app,.main-shell,.page{max-width:100vw;overflow-x:hidden}
   .chat-attach-button,.chat-voice-button{width:40px;height:40px;min-height:40px}
   .send-button{width:42px;height:42px;min-height:42px}
 }
+
+
+/* Rich captions, chat readability, refined mobile touch */
+.inline-tag{
+  display:inline;
+  min-height:0!important;
+  padding:0!important;
+  margin:0!important;
+  border:0!important;
+  background:transparent!important;
+  color:var(--brand)!important;
+  font:inherit!important;
+  font-weight:850!important;
+  line-height:inherit!important;
+  vertical-align:baseline;
+}
+.inline-tag:active{opacity:.72}
+.message-text{
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  unicode-bidi:plaintext;
+  line-height:1.55;
+}
+.chat-messages .bubble{
+  max-width:min(78vw,390px);
+  overflow:hidden;
+}
+.chat-messages .mine .bubble{background:rgba(64,227,120,.12)}
+.chat-messages .other .bubble{background:var(--surface-2)}
+.explore-cover{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  object-fit:cover;background:#080b09;
+}
+.share-sheet{display:grid;gap:12px}
+.share-quick-actions{
+  display:grid;grid-template-columns:1fr 1fr;gap:8px
+}
+.share-quick-actions>button{
+  min-height:76px;border:1px solid var(--line);border-radius:16px;
+  background:linear-gradient(160deg,#111712,#090c0a);color:var(--text);
+  display:grid;place-items:center;align-content:center;gap:6px
+}
+.share-round{
+  width:38px;height:38px;border-radius:50%;
+  display:grid;place-items:center;background:rgba(64,227,120,.09);color:var(--brand)
+}
+.share-round svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.9}
+.share-quick-actions b{font-size:11px}
+.share-send-label{
+  min-width:46px;min-height:32px;padding:0 8px;border-radius:10px;
+  display:grid;place-items:center;background:var(--brand);color:#031006;font-size:10px;font-weight:900
+}
+.save-error{border-color:rgba(255,112,122,.45)!important}
+
+/* Keep the profile compact on real phone screens */
+.profile-buttons{
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+}
+.profile-buttons .small-button{
+  width:100%!important;
+  height:44px!important;
+  min-height:44px!important;
+  justify-content:center;
+}
+.profile-settings-fab svg,
+.profile-buttons svg,
+.profile-actions-public svg{
+  display:block;
+  flex:0 0 auto;
+}

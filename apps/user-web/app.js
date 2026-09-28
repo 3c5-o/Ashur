@@ -5174,6 +5174,23 @@
       return;
     }
 
+    const privacyChanged=validation.value.is_private!==Boolean(state.profile?.is_private);
+    if(privacyChanged){
+      const next=validation.value.is_private;
+      const ok=await confirmAction({
+        title:next?"تحويل الحساب إلى خاص":"تحويل الحساب إلى عام",
+        text:next
+          ?"سيحتاج المتابعون الجدد إلى موافقتك قبل رؤية المحتوى المخصص للمتابعين."
+          :"سيصبح حسابك قابلًا للاكتشاف، وسيظهر المحتوى العام للآخرين حسب إعدادات النشر.",
+        acceptLabel:next?"جعله خاصًا":"جعله عامًا"
+      });
+      if(!ok){
+        $("#editPrivate").checked=!!state.profile?.is_private;
+        return;
+      }
+      if(!$("#editProfileDialog").open)openDialog($("#editProfileDialog"));
+    }
+
     const avatarFile=$("#editAvatarFile").files[0]||null;
     const coverFile=$("#editCoverFile").files[0]||null;
     const avatarCheck=profileUtil.validateImageFile(avatarFile);

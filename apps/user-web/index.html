@@ -408,54 +408,44 @@
   </dialog>
 
   <script src="./config.js"></script>
+  <script src="./core.js"></script>
   <script>
     (() => {
-      const sources = [
-        "./vendor/supabase.min.js",
-        "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
-        "https://unpkg.com/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"
-      ];
-      let sourceIndex = 0;
       let finished = false;
-
-      const fail = () => {
+      const fail = (message = "تعذر تشغيل مكونات التطبيق المحلية. أعد فتح التطبيق بعد تثبيت آخر تحديث.") => {
         if (finished) return;
         finished = true;
         const splash = document.getElementById("splash");
         if (splash) splash.remove();
         const auth = document.getElementById("auth");
         if (auth) auth.classList.remove("hidden");
-        const message = document.getElementById("authMessage");
-        if (message) {
-          message.textContent = "تعذر تحميل مكونات التطبيق. تحقق من اتصال الإنترنت ثم افتح التطبيق من جديد.";
-          message.className = "message error";
+        const target = document.getElementById("authMessage");
+        if (target) {
+          target.textContent = message;
+          target.className = "message error";
         }
       };
 
       const loadApp = () => {
         if (!window.supabase?.createClient) return fail();
+        if (!window.AshurCore?.createStore || !window.AshurCore?.createRouter) return fail();
         const script = document.createElement("script");
         script.src = "./app.js?v=1.2.0";
         script.onload = () => { finished = true; };
-        script.onerror = fail;
+        script.onerror = () => fail("تعذر تشغيل واجهة آشور المحلية.");
         document.body.appendChild(script);
       };
 
-      const loadSupabase = () => {
-        if (sourceIndex >= sources.length) return fail();
-        const script = document.createElement("script");
-        script.src = sources[sourceIndex++];
-        script.async = false;
-        script.onload = loadApp;
-        script.onerror = loadSupabase;
-        document.head.appendChild(script);
-      };
+      const vendor = document.createElement("script");
+      vendor.src = "./vendor/supabase.min.js";
+      vendor.async = false;
+      vendor.onload = loadApp;
+      vendor.onerror = () => fail("ملف التشغيل المحلي غير مكتمل. ثبّت أحدث نسخة من التطبيق.");
+      document.head.appendChild(vendor);
 
       setTimeout(() => {
         if (!finished && !window.supabase?.createClient) fail();
-      }, 12000);
-
-      loadSupabase();
+      }, 8000);
     })();
   </script>
 </body>

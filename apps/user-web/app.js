@@ -97,7 +97,7 @@
   const richText = (value="") => {
     const escaped=escapeHtml(value);
     return escaped
-      .replace(/(^|\s)@([A-Za-z0-9_.]{2,24})/g,'$1<button class="inline-tag mention-tag" type="button" data-inline-mention="$2">@$2</button>')
+      .replace(/(^|\s)@([A-Za-z0-9_.]{2,10})/g,'$1<button class="inline-tag mention-tag" type="button" data-inline-mention="$2">@$2</button>')
       .replace(/(^|\s)#([\p{L}\p{N}_]{2,50})/gu,'$1<button class="inline-tag hashtag-tag" type="button" data-inline-hashtag="$2">#$2</button>')
       .replace(/\n/g,"<br>");
   };
@@ -938,7 +938,6 @@
       accept.onclick=()=>finish(true);
       cancel.onclick=()=>finish(false);
       dialog.oncancel=e=>{e.preventDefault();finish(false)};
-      closeTransientDialogs(dialog);
       if(!dialog.open)dialog.showModal();
     });
   }
@@ -2075,11 +2074,11 @@
       const media=[...(row.post_media||[])].sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id||"";
       return `<article class="search-post-card stage4-search-post">
         <button class="search-post-owner" data-open-profile="${row.author_id}" type="button">${avatar(p)}<span><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><small>@${escapeHtml(p.username||"")} · ${new Date(row.created_at).toLocaleDateString("ar-IQ")}</small></span></button>
-        <button class="search-post-open" data-search-open-post="${row.id}" data-media="${escapeHtml(media)}" data-caption="${escapeHtml(row.caption||"")}" data-owner="${escapeHtml(row.author_id)}" data-comments="${row.comments_enabled!==false}" type="button">
+        <div class="search-post-open" data-search-open-post="${row.id}" data-media="${escapeHtml(media)}" data-caption="${escapeHtml(row.caption||"")}" data-owner="${escapeHtml(row.author_id)}" data-comments="${row.comments_enabled!==false}" role="button" tabindex="0">
           ${media?`<img class="search-post-media" data-media-id="${media}" alt="">`:'<span class="search-post-text-placeholder">'+icon("comment")+'</span>'}
           ${row.caption?`<p>${richText(row.caption)}</p>`:""}
           <span class="search-open-label">عرض المنشور</span>
-        </button>
+        </div>
       </article>`;
     }).join("");
   }
@@ -3953,7 +3952,7 @@
     const value=input?.value||"";
     const caret=input?.selectionStart??value.length;
     const before=value.slice(0,caret);
-    const match=before.match(/(^|\s)@([A-Za-z0-9_.]{0,24})$/);
+    const match=before.match(/(^|\s)@([A-Za-z0-9_.]{0,10})$/);
     if(!match)return null;
     const query=match[2]||"";
     const start=caret-query.length-1;

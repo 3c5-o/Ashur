@@ -30,6 +30,15 @@
     currentPublicProfile:null,
     activeUpload:null,
     activeUploadId:null,
+    composerFiles:[],
+    reelCoverFile:null,
+    reelCoverUrl:null,
+    recordedVoiceFile:null,
+    voiceRecorder:null,
+    voiceStream:null,
+    voiceChunks:[],
+    voiceStartedAt:0,
+    voiceTimer:null,
     feedOffset:0,
     feedLoading:false,
     feedDone:false,
@@ -858,17 +867,40 @@
     };
   }
 
-  async function toggleSavedContent(kind,id,button){
-    const isSaved=button?.classList.contains("active");
-    const result=await api("/v1/social/save",{
-      method:"POST",
-      body:JSON.stringify({kind,id,saved:!isSaved})
-    });
-    button?.classList.toggle("active",result.saved);
-    if(button){
-      const label=kind==="reel"?(result.saved?"محفوظ":"حفظ"):(result.saved?"محفوظ":"حفظ");
-      if(kind==="reel")button.innerHTML=`<span class="reel-action-icon">${icon("save")}</span><span>${label}</span>`;
-      else button.innerHTML=icon("save")+`<span>${label}</span>`;
+
+  async function toggleSavedContent(kind,id,button,forceState=null){
+    const table=kind==="reel"?"saved_reels":"saved_posts";
+    const field=kind==="reel"?"reel_id":"post_id";
+    const current=button?.classList.contains("active")||false;
+    const next=forceState===null?!current:Boolean(forceState);
+    if(button)button.disabled=true;
+    try{
+      if(next){
+        const result=await client.from(table).upsert({
+          user_id:state.user.id,
+          [field]:id
+        },{onConflict:"user_id,"+field});
+        if(result.error)throw result.error;
+      }else{
+        const result=await client.from(table).delete()
+          .eq("user_id",state.user.id)
+          .eq(field,id);
+        if(result.error)throw result.error;
+      }
+      if(button){
+        button.classList.toggle("active",next);
+        if(kind==="reel"){
+          button.innerHTML='<span class="reel-action-icon">'+icon("save")+'</span><span>'+(next?"محفوظ":"حفظ")+'</span>';
+        }else{
+          button.innerHTML=icon("save")+'<span>'+(next?"محفوظ":"حفظ")+'</span>';
+        }
+      }
+      return next;
+    }catch(error){
+      if(button)button.classList.toggle("save-error",true);
+      throw error;
+    }finally{
+      if(button)button.disabled=false;
     }
   }
 
@@ -1894,8 +1926,10 @@
 
   $$("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.onclick=()=>loadProfileContent(btn.dataset.profileTab));
 
+
   async function loadPublicProfileContent(uid,kind="posts",mayView=true){
-    if(!["posts","reels"].includes(kind))kind="posts";
+    if(!["posts","reels","saved"].includes(kind))kind="posts";
+    if(kind==="saved"&&state.currentPublicProfile?.saved_visibility!=="public")kind="posts";
     state.publicProfileTab=kind;
     $$("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
       btn.classList.toggle("active",btn.dataset.publicProfileTab===kind);
@@ -1909,13 +1943,34 @@
     try{
       if(kind==="reels"){
         const result=await client.from("reels")
-          .select("id,caption,media_id,comments_enabled,created_at")
+          .select("id,caption,media_id,cover_media_id,comments_enabled,created_at")
           .eq("author_id",uid)
           .order("created_at",{ascending:false})
           .limit(90);
         if(result.error)throw result.error;
         $("#publicProfileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"reels")).join("")||
           '<div class="empty profile-grid-empty">لا توجد ريلز بعد.</div>';
+      }else if(kind==="saved"){
+        const [postSaved,reelSaved]=await Promise.all([
+          api("/v1/social/saved/"+encodeURIComponent(uid)+"?kind=posts"),
+          api("/v1/social/saved/"+encodeURIComponent(uid)+"?kind=reels")
+        ]);
+        const postIds=(postSaved.items||[]).map(x=>x.post_id).filter(Boolean);
+        const reelIds=(reelSaved.items||[]).map(x=>x.reel_id).filter(Boolean);
+        const [postsResult,reelsResult]=await Promise.all([
+          postIds.length?client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").in("id",postIds):Promise.resolve({data:[],error:null}),
+          reelIds.length?client.from("reels").select("id,caption,media_id,cover_media_id,comments_enabled").in("id",reelIds):Promise.resolve({data:[],error:null})
+        ]);
+        if(postsResult.error)throw postsResult.error;
+        if(reelsResult.error)throw reelsResult.error;
+        const postMap=new Map((postsResult.data||[]).map(x=>[x.id,x]));
+        const reelMap=new Map((reelsResult.data||[]).map(x=>[x.id,x]));
+        const ordered=[
+          ...(postSaved.items||[]).map(x=>({at:x.created_at,kind:"posts",item:postMap.get(x.post_id)})),
+          ...(reelSaved.items||[]).map(x=>({at:x.created_at,kind:"reels",item:reelMap.get(x.reel_id)}))
+        ].filter(x=>x.item).sort((a,b)=>new Date(b.at)-new Date(a.at));
+        $("#publicProfileContent").innerHTML=ordered.map(x=>profileGridTile(x.item,x.kind,true)).join("")||
+          '<div class="empty profile-grid-empty">لا توجد محفوظات عامة.</div>';
       }else{
         const result=await client.from("posts")
           .select("id,caption,comments_enabled,created_at,post_media(media_id,sort_order)")
@@ -1942,7 +1997,7 @@
     }
     $("#publicProfileContent").innerHTML='<div class="empty">جارٍ التحميل...</div>';
     const {data:p,error}=await client.from("profiles")
-      .select("id,name,username,bio,avatar_media_id,cover_media_id,profile_link,is_verified,is_private")
+      .select("id,name,username,bio,avatar_media_id,cover_media_id,profile_link,is_verified,is_private,saved_visibility")
       .eq("id",uid).single();
     if(error||!p){
       openInfoDialog("الحساب غير متاح",'<div class="empty">تعذر فتح هذا الحساب. قد يكون محظورًا أو غير متاح.</div>');
@@ -2019,9 +2074,12 @@
 
     const mayView=!p.is_private||followRow?.status==="accepted";
     state.currentPublicProfile={...p,mayView};
+    const savedPublic=p.saved_visibility==="public";
+    $("#publicSavedTab").classList.toggle("hidden",!savedPublic);
+    $("#publicProfileTabs").classList.toggle("show-saved",savedPublic);
     state.publicProfileTab="posts";
     await loadPublicProfileContent(uid,"posts",mayView);
-    $$("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
+    $("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
       btn.onclick=()=>loadPublicProfileContent(uid,btn.dataset.publicProfileTab,mayView);
     });
   }
@@ -2444,6 +2502,7 @@
       $("#notifySystem").checked=p.system!==false;
       $("#notifyPreview").checked=p.preview_message!==false;
       $("#settingsPrivateToggle").checked=!!state.profile?.is_private;
+      $("#savedVisibilityToggle").checked=state.profile?.saved_visibility==="public";
       await loadFollowRequests();
     }catch(error){
       $("#followRequestsList").innerHTML='<div class="empty error">تعذر تحميل بعض الإعدادات.</div>';
@@ -2466,6 +2525,22 @@
     toggle.disabled=true;
     const {error}=await client.from("profiles").update({
       is_private:next,
+      updated_at:new Date().toISOString()
+    }).eq("id",state.user.id);
+    toggle.disabled=false;
+    if(error){
+      toggle.checked=!next;
+      alert(error.message);
+      return;
+    }
+    await refreshProfile();
+  };
+  $("#savedVisibilityToggle").onchange=async()=>{
+    const toggle=$("#savedVisibilityToggle");
+    const next=toggle.checked;
+    toggle.disabled=true;
+    const {error}=await client.from("profiles").update({
+      saved_visibility:next?"public":"private",
       updated_at:new Date().toISOString()
     }).eq("id",state.user.id);
     toggle.disabled=false;
@@ -2690,7 +2765,11 @@
   };
 
   $("#supportTicketsButton").onclick=()=>openSupportCenter();
-  $("#savedContentButton").onclick=()=>openSavedContent();
+  $("#savedContentButton").onclick=async()=>{
+    $("#settingsDialog").close();
+    await navigateTo("profilePage");
+    await loadProfileContent("saved");
+  };
   $("#deleteAccountButton").onclick=async()=>{
     const confirmText=prompt("اكتب كلمة حذف لتأكيد حذف الحساب نهائيًا.");
     if(confirmText!=="حذف")return;

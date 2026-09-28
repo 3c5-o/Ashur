@@ -736,47 +736,70 @@ async function listConversations(req, res) {
   const user = await currentUser(req);
   const memberships = await select(
     "conversation_members",
-    `select=conversation_id,role,muted&user_id=eq.${encodeURIComponent(user.id)}&order=joined_at.desc&limit=100`,
+    \`select=conversation_id,role,muted&user_id=eq.\${encodeURIComponent(user.id)}&order=joined_at.desc&limit=100\`,
   );
   if (!memberships?.length) return json(res, 200, { items: [] });
 
   const ids = memberships.map((x) => x.conversation_id);
-  const idFilter = ids.join(",");
   const conversations = await select(
     "conversations",
-    `select=id,kind,title,image_media_id,updated_at&id=in.(${idFilter})&order=updated_at.desc`,
+    \`select=id,kind,title,image_media_id,updated_at&id=in.(\${ids.join(",")})&order=updated_at.desc\`,
   );
 
   const items = [];
   for (const conversation of conversations || []) {
     const messages = await select(
       "messages",
-      `select=body,created_at&conversation_id=eq.${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=1`,
+      \`select=id,sender_id,body,media_id,shared_type,shared_id,created_at&conversation_id=eq.\${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=100\`,
     );
+    const latest = messages?.[0] || null;
+    const incomingIds = (messages || []).filter((m) => m.sender_id !== user.id).map((m) => m.id);
+    let unreadCount = 0;
+    if (incomingIds.length) {
+      const reads = await select(
+        "message_reads",
+        \`select=message_id&user_id=eq.\${encodeURIComponent(user.id)}&message_id=in.(\${incomingIds.join(",")})\`,
+      ).catch(() => []);
+      const readSet = new Set((reads || []).map((r) => r.message_id));
+      unreadCount = incomingIds.filter((id) => !readSet.has(id)).length;
+    }
+
     let title = conversation.title || "";
     let peerProfile = null;
     if (conversation.kind === "direct") {
       const members = await select(
         "conversation_members",
-        `select=user_id&conversation_id=eq.${encodeURIComponent(conversation.id)}&user_id=neq.${encodeURIComponent(user.id)}&limit=1`,
+        \`select=user_id&conversation_id=eq.\${encodeURIComponent(conversation.id)}&user_id=neq.\${encodeURIComponent(user.id)}&limit=1\`,
       );
       if (members?.[0]) {
         const profiles = await select(
           "profiles",
-          `select=id,name,username,avatar_media_id,is_verified&id=eq.${encodeURIComponent(members[0].user_id)}&limit=1`,
+          \`select=id,name,username,avatar_media_id,is_verified&id=eq.\${encodeURIComponent(members[0].user_id)}&limit=1\`,
         );
         peerProfile = profiles?.[0] || null;
         if (!title) title = peerProfile?.name || peerProfile?.username || "محادثة";
       }
     }
+
+    const sharedLabel = latest?.shared_type === "post"
+      ? "شارك منشورًا"
+      : latest?.shared_type === "reel"
+        ? "شارك ريلز"
+        : latest?.shared_type === "story"
+          ? "شارك قصة"
+          : "";
+    const lastMessage = latest?.body || sharedLabel || (latest?.media_id ? "مرفق" : "");
+
     items.push({
       ...conversation,
       title: title || "محادثة",
       peer_profile: peerProfile,
-      last_message: messages?.[0]?.body || "",
-      updated_at: messages?.[0]?.created_at || conversation.updated_at,
+      last_message: lastMessage,
+      unread_count: unreadCount,
+      updated_at: latest?.created_at || conversation.updated_at,
     });
   }
+  items.sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at));
   json(res, 200, { items });
 }
 
@@ -846,6 +869,211 @@ async function createConversation(req, res) {
   json(res, 201, conversation);
 }
 
+
+
+async function sendConversationMessage(req, res, conversationId) {
+  const user = await currentUser(req);
+  const memberships = await select(
+    "conversation_members",
+    "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  if (!memberships?.length) return json(res, 403, { error: "لست عضوًا في هذه المحادثة" });
+
+  const conversations = await select(
+    "conversations",
+    "select=id,kind&is_deleted=eq.false&id=eq." + encodeURIComponent(conversationId) + "&limit=1",
+  );
+  const conversation = conversations?.[0];
+  if (!conversation) return json(res, 404, { error: "المحادثة غير موجودة" });
+
+  if (conversation.kind === "direct") {
+    const peers = await select(
+      "conversation_members",
+      "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=neq." + encodeURIComponent(user.id) + "&limit=1",
+    );
+    const peerId = peers?.[0]?.user_id;
+    if (peerId && await isBlockedBetween(user.id, peerId)) {
+      return json(res, 403, { error: "لا يمكن إرسال رسائل إلى هذا الحساب" });
+    }
+  }
+
+  const body = await readJson(req);
+  const text = String(body.body || "").trim().slice(0, 4000);
+  const mediaId = /^[0-9a-f-]{36}$/i.test(String(body.media_id || "")) ? String(body.media_id) : null;
+  const replyTo = /^[0-9a-f-]{36}$/i.test(String(body.reply_to || "")) ? String(body.reply_to) : null;
+  const sharedType = ["post","reel","story","profile"].includes(body.shared_type) ? body.shared_type : null;
+  const sharedId = /^[0-9a-f-]{36}$/i.test(String(body.shared_id || "")) ? String(body.shared_id) : null;
+
+  if (!text && !mediaId && !(sharedType && sharedId)) {
+    return json(res, 400, { error: "الرسالة فارغة" });
+  }
+
+  if (mediaId) {
+    const owned = await select(
+      "media_objects",
+      "select=id&owner_id=eq." + encodeURIComponent(user.id) + "&id=eq." + encodeURIComponent(mediaId) + "&status=eq.ready&limit=1",
+    );
+    if (!owned?.length) return json(res, 403, { error: "المرفق غير صالح" });
+  }
+
+  const rows = await insert("messages", {
+    conversation_id: conversationId,
+    sender_id: user.id,
+    body: text,
+    media_id: mediaId,
+    reply_to: replyTo,
+    shared_type: sharedType,
+    shared_id: sharedType ? sharedId : null,
+  });
+  const message = rows?.[0];
+
+  await update("conversations", "id=eq." + encodeURIComponent(conversationId), {
+    updated_at: new Date().toISOString(),
+  }, { returning: false }).catch(() => {});
+
+  const others = await select(
+    "conversation_members",
+    "select=user_id,muted&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=neq." + encodeURIComponent(user.id),
+  ).catch(() => []);
+  const senderProfiles = await select(
+    "profiles",
+    "select=name,username&id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  ).catch(() => []);
+  const sender = senderProfiles?.[0];
+  const title = sender?.name || sender?.username || "رسالة جديدة";
+  const preview = text || (sharedType ? (sharedType === "post" ? "شارك منشورًا" : sharedType === "reel" ? "شارك ريلز" : "شارك محتوى") : "أرسل مرفقًا");
+
+  for (const member of others || []) {
+    await insert("notifications", {
+      user_id: member.user_id,
+      actor_id: user.id,
+      kind: "message",
+      title,
+      body: preview.slice(0, 200),
+      entity_type: "conversation",
+      entity_id: conversationId,
+    }, { returning: false }).catch(() => {});
+  }
+  const pushIds = (others || []).filter((m) => !m.muted).map((m) => m.user_id);
+  if (pushIds.length) {
+    await sendPush({
+      userIds: pushIds,
+      title,
+      body: preview.slice(0, 180),
+      data: { kind: "message", conversation_id: conversationId },
+    }).catch(() => {});
+  }
+
+  json(res, 201, message || { ok: true });
+}
+
+async function socialShareToStory(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const type = body.type === "reel" ? "reel" : body.type === "post" ? "post" : "";
+  const id = String(body.id || "");
+  if (!type || !/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "المحتوى غير صالح" });
+
+  let source = null;
+  let mediaId = null;
+  if (type === "post") {
+    const rows = await select("posts", "select=id,author_id,caption,visibility&id=eq." + encodeURIComponent(id) + "&limit=1");
+    source = rows?.[0];
+    const media = await select("post_media", "select=media_id&post_id=eq." + encodeURIComponent(id) + "&order=sort_order.asc&limit=1");
+    mediaId = media?.[0]?.media_id || null;
+  } else {
+    const rows = await select("reels", "select=id,author_id,caption,visibility,media_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+    source = rows?.[0];
+    mediaId = source?.media_id || null;
+  }
+  if (!source || !mediaId) return json(res, 404, { error: "تعذر العثور على وسائط المحتوى" });
+
+  if (source.author_id !== user.id) {
+    if (!(await canViewOwner(user, source.author_id))) return json(res, 403, { error: "لا يمكنك مشاركة هذا المحتوى" });
+    if (source.visibility === "followers") {
+      const relation = await select(
+        "follows",
+        "select=status&follower_id=eq." + encodeURIComponent(user.id) + "&following_id=eq." + encodeURIComponent(source.author_id) + "&status=eq.accepted&limit=1",
+      );
+      if (!relation?.length) return json(res, 403, { error: "هذا المحتوى للمتابعين فقط" });
+    }
+  }
+
+  const rows = await insert("stories", {
+    author_id: user.id,
+    media_id: mediaId,
+    caption: String(body.caption || "").slice(0, 300),
+    shared_type: type,
+    shared_id: id,
+  });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function socialPublicSaved(req, res, profileId, url) {
+  const user = await currentUser(req);
+  const profile = await profileFor(profileId);
+  if (!profile || profileIsBanned(profile)) return json(res, 404, { error: "الحساب غير موجود" });
+  if (profileId !== user.id && profile.saved_visibility !== "public") {
+    return json(res, 403, { error: "المحفوظات خاصة" });
+  }
+  if (profileId !== user.id && !(await canViewOwner(user, profileId))) {
+    return json(res, 403, { error: "الحساب خاص" });
+  }
+  const kind = url.searchParams.get("kind") === "reels" ? "reels" : "posts";
+  const table = kind === "reels" ? "saved_reels" : "saved_posts";
+  const idField = kind === "reels" ? "reel_id" : "post_id";
+  const rows = await select(
+    table,
+    "select=" + idField + ",created_at&user_id=eq." + encodeURIComponent(profileId) + "&order=created_at.desc&limit=100",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function socialMentions(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const caption = String(body.caption || "").slice(0, 2200);
+  const type = ["post","reel","story"].includes(body.type) ? body.type : "post";
+  const id = String(body.id || "");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "معرف المحتوى غير صالح" });
+
+  const usernames = [...new Set(
+    [...caption.matchAll(/@([A-Za-z0-9_.]{2,24})/g)].map((m) => m[1].toLowerCase())
+  )].slice(0, 20);
+  const hashtags = [...new Set(
+    [...caption.matchAll(/#([\p{L}\p{N}_]{2,50})/gu)].map((m) => m[1].toLowerCase())
+  )].slice(0, 30);
+
+  if (!usernames.length) return json(res, 200, { ok: true, mentions: 0, hashtags });
+  const profiles = await select(
+    "profiles",
+    "select=id,name,username&username=in.(" + usernames.map((x) => '"' + x.replace(/"/g, "") + '"').join(",") + ")&is_banned=eq.false",
+  ).catch(() => []);
+  const sender = await profileFor(user.id).catch(() => null);
+  let countNotified = 0;
+  for (const profile of profiles || []) {
+    if (profile.id === user.id || await isBlockedBetween(user.id, profile.id)) continue;
+    const title = "تمت الإشارة إليك";
+    const message = (sender?.name || sender?.username || "مستخدم") + " أشار إليك في " + (type === "reel" ? "ريلز" : type === "story" ? "قصة" : "منشور");
+    await insert("notifications", {
+      user_id: profile.id,
+      actor_id: user.id,
+      kind: "mention",
+      title,
+      body: message,
+      entity_type: type,
+      entity_id: id,
+    }, { returning: false }).catch(() => {});
+    await sendPush({
+      userIds: [profile.id],
+      title,
+      body: message,
+      data: { kind: "mention", entity_type: type, entity_id: id },
+    }).catch(() => {});
+    countNotified++;
+  }
+  json(res, 200, { ok: true, mentions: countNotified, hashtags });
+}
 
 async function socialBlock(req, res, targetUserId) {
   const user = await currentUser(req);

@@ -94,3 +94,5 @@ jobs:
           fi
           git commit -m "Publish signed Ashur user 1.5.0 and admin 1.2.0 [skip ci]"
           git push
+
+# retry-line-safe

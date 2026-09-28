@@ -62,7 +62,10 @@
       more:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
       trash:'<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
       reply:'<path d="M10 8 5 12l5 4"/><path d="M6 12h7a5 5 0 0 1 5 5v1"/>',
-      report:'<path d="M5 21V4m0 1h12l-2 4 2 4H5"/>'
+      report:'<path d="M5 21V4m0 1h12l-2 4 2 4H5"/>',
+      lock:'<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+      globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+      play:'<path d="M8 5v14l11-7Z"/>'
     };
     return '<svg viewBox="0 0 24 24" aria-hidden="true">'+(paths[name]||'')+'</svg>';
   };
@@ -1575,6 +1578,7 @@
   };
 
   async function openFollowList(profileId,mode,title){
+    if($("#publicProfileDialog")?.open)state.returnPublicProfileId=profileId;
     openInfoDialog(title,'<div id="followListDialog" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
     try{
       let items=[];
@@ -2246,7 +2250,12 @@
     $("#settingsDialog").close();
     openDialog($("#infoDialog"));
   }
-  $("#closeInfoDialog").onclick=()=>$("#infoDialog").close();
+  $("#closeInfoDialog").onclick=()=>{
+    $("#infoDialog").close();
+    const returnProfile=state.returnPublicProfileId;
+    state.returnPublicProfileId=null;
+    if(returnProfile)setTimeout(()=>openPublicProfile(returnProfile).catch(()=>{}),0);
+  };
 
   async function openSupportCenter(){
     openInfoDialog("الدعم الفني",`

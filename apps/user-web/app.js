@@ -26,6 +26,15 @@
     searchType:"all",
     chatTimer:null,
     chatChannel:null,
+    chatRefreshTimer:null,
+    chatReconnectTimer:null,
+    chatMessageIds:new Set(),
+    chatLoadSeq:0,
+    inboxChannel:null,
+    inboxRefreshTimer:null,
+    pendingChatSendId:null,
+    pendingChatMediaId:null,
+    pendingChatFileKey:null,
     reelObserver:null,
     storyTimer:null,
     activePage:"homePage",
@@ -288,6 +297,8 @@
 
   function clearAuthSession(){
     recoveryModeActive=false;
+    closeChatRealtime();
+    closeInboxRealtime();
     authHydrationKey="";
     authHydrationPromise=null;
     lastHydratedKey="";
@@ -474,10 +485,7 @@
       if(dialog===except)return;
       if(dialog.id==="systemDialog" && dialog.dataset.blocking==="1")return;
       if(dialog.id==="chatDialog"){
-        clearInterval(state.chatTimer);
-        state.chatTimer=null;
-        state.chatChannel?.unsubscribe?.();
-        state.chatChannel=null;
+        closeChatRealtime();
         state.activeConversation=null;
         clearChatAttachment();
       }
@@ -834,9 +842,13 @@
       state.reelObserver?.disconnect?.();
       state.reelObserver=null;
     }
+    if(page!=="messagesPage")closeInboxRealtime();
     if(page==="searchPage")await loadExplore();
     if(page==="reelsPage")await loadReels();
-    if(page==="messagesPage")await loadConversations();
+    if(page==="messagesPage"){
+      await loadConversations();
+      subscribeInboxRealtime();
+    }
     if(page==="profilePage")await loadProfile();
     window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
   }
@@ -1807,45 +1819,127 @@
     }
   }
 
+  function scheduleInboxRefresh(){
+    clearTimeout(state.inboxRefreshTimer);
+    state.inboxRefreshTimer=setTimeout(()=>{
+      if(state.activePage==="messagesPage")loadConversations().catch(()=>{});
+    },280);
+  }
+
+  function closeInboxRealtime(){
+    clearTimeout(state.inboxRefreshTimer);
+    state.inboxRefreshTimer=null;
+    if(state.inboxChannel){
+      try{client.removeChannel(state.inboxChannel)}catch(_){try{state.inboxChannel.unsubscribe?.()}catch(__){}}
+      state.inboxChannel=null;
+    }
+  }
+
+  function subscribeInboxRealtime(){
+    closeInboxRealtime();
+    if(!state.user||state.activePage!=="messagesPage")return;
+    state.inboxChannel=client.channel("ashur-inbox-"+state.user.id)
+      .on("postgres_changes",{
+        event:"INSERT",
+        schema:"public",
+        table:"messages"
+      },scheduleInboxRefresh)
+      .on("postgres_changes",{
+        event:"INSERT",
+        schema:"public",
+        table:"message_reads"
+      },scheduleInboxRefresh)
+      .subscribe();
+  }
+
+  function setChatConnectionStatus(text="",kind=""){
+    const el=$("#chatConnectionStatus");
+    if(!el)return;
+    el.textContent=text;
+    el.className="chat-connection-status"+(kind?" "+kind:"");
+  }
+
+  function scheduleChatRefresh({markRead=true}={}){
+    clearTimeout(state.chatRefreshTimer);
+    state.chatRefreshTimer=setTimeout(()=>{
+      if($("#chatDialog")?.open&&state.activeConversation){
+        loadChat({quiet:true,markRead}).catch(()=>{});
+      }
+    },180);
+  }
 
   function closeChatRealtime(){
     clearInterval(state.chatTimer);
+    clearTimeout(state.chatRefreshTimer);
+    clearTimeout(state.chatReconnectTimer);
     state.chatTimer=null;
+    state.chatRefreshTimer=null;
+    state.chatReconnectTimer=null;
+    state.chatMessageIds=new Set();
     if(state.chatChannel){
       try{client.removeChannel(state.chatChannel)}catch(_){try{state.chatChannel.unsubscribe?.()}catch(__){}}
       state.chatChannel=null;
     }
+    setChatConnectionStatus("");
   }
 
   function subscribeChatRealtime(){
     closeChatRealtime();
     if(!state.activeConversation)return;
     const conversationId=state.activeConversation;
+    setChatConnectionStatus("جارٍ الاتصال...","connecting");
+
     state.chatChannel=client.channel("ashur-chat-"+conversationId)
       .on("postgres_changes",{
         event:"*",
         schema:"public",
         table:"messages",
         filter:"conversation_id=eq."+conversationId
-      },()=>loadChat({quiet:true}))
+      },()=>scheduleChatRefresh({markRead:true}))
       .on("postgres_changes",{
         event:"*",
         schema:"public",
         table:"message_reads"
-      },()=>loadChat({quiet:true,markRead:false}))
-      .subscribe();
+      },payload=>{
+        const messageId=payload?.new?.message_id||payload?.old?.message_id||"";
+        if(messageId&&state.chatMessageIds.has(messageId)){
+          scheduleChatRefresh({markRead:false});
+        }
+      })
+      .subscribe(status=>{
+        if(conversationId!==state.activeConversation)return;
+        if(status==="SUBSCRIBED"){
+          setChatConnectionStatus("متصل","online");
+          clearTimeout(state.chatReconnectTimer);
+          state.chatReconnectTimer=null;
+        }else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"){
+          setChatConnectionStatus("إعادة الاتصال...","offline");
+          clearTimeout(state.chatReconnectTimer);
+          state.chatReconnectTimer=setTimeout(()=>{
+            if($("#chatDialog")?.open&&state.activeConversation===conversationId)subscribeChatRealtime();
+          },2500);
+        }else if(status==="CLOSED"){
+          setChatConnectionStatus("غير متصل","offline");
+        }
+      });
+
     state.chatTimer=setInterval(()=>{
-      if($("#chatDialog").open&&state.activeConversation)loadChat({quiet:true});
-    },12000);
+      if($("#chatDialog").open&&state.activeConversation===conversationId){
+        loadChat({quiet:true}).catch(()=>{});
+      }
+    },15000);
   }
 
   async function openChat(id,title){
+    closeChatRealtime();
     state.activeConversation=id;
+    state.chatLoadSeq++;
     $("#chatTitle").textContent=title||"المحادثة";
+    $("#chatMessage").textContent="";
     clearChatAttachment();
     openDialog($("#chatDialog"));
     await loadChat();
-    subscribeChatRealtime();
+    if(state.activeConversation===id)subscribeChatRealtime();
   }
 
   function sharedMessageMarkup(message){
@@ -1860,39 +1954,36 @@
   async function loadChat({quiet=false,markRead=true}={}){
     if(!state.activeConversation)return;
     const conversationId=state.activeConversation;
-    const result=await client.from("messages")
-      .select("id,sender_id,body,media_id,reply_to,shared_type,shared_id,created_at")
-      .eq("conversation_id",conversationId)
-      .eq("is_deleted",false)
-      .order("created_at")
-      .limit(220);
-    if(result.error){
-      if(!quiet)$("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(result.error.message)+'</div>';
+    const seq=++state.chatLoadSeq;
+
+    let result;
+    try{
+      result=await api("/v1/conversations/"+encodeURIComponent(conversationId)+"/messages");
+    }catch(error){
+      if(!quiet&&conversationId===state.activeConversation){
+        $("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+      }
       return;
     }
-    if(conversationId!==state.activeConversation)return;
 
-    const data=result.data||[];
-    const ownIds=data.filter(m=>m.sender_id===state.user.id).map(m=>m.id);
+    if(conversationId!==state.activeConversation||seq!==state.chatLoadSeq)return;
+
+    const data=result.items||[];
+    state.chatMessageIds=new Set(data.map(m=>m.id));
     const otherUnread=data.filter(m=>m.sender_id!==state.user.id).map(m=>m.id);
-    let readSet=new Set();
-    if(ownIds.length){
-      const readsResult=await client.from("message_reads")
-        .select("message_id,user_id")
-        .in("message_id",ownIds);
-      readSet=new Set((readsResult.data||[]).filter(r=>r.user_id!==state.user.id).map(r=>r.message_id));
-    }
-
     const byId=new Map(data.map(m=>[m.id,m]));
+
     const html=data.map(m=>{
       const parent=m.reply_to?byId.get(m.reply_to):null;
       const media=m.media_id?'<img class="chat-media" data-media-id="'+escapeHtml(m.media_id)+'" alt="مرفق">':"";
       const body=m.body?'<div class="message-text">'+escapeHtml(m.body)+'</div>':"";
-      const parentHtml=parent?'<div class="comment-parent">'+escapeHtml(parent.body||"مرفق")+'</div>':"";
-      const read=m.sender_id===state.user.id&&readSet.has(m.id)?'<span class="message-read">تمت القراءة</span>':"";
-      return '<div class="message-row '+(m.sender_id===state.user.id?"mine":"other")+'">'+
+      const parentHtml=parent?'<div class="comment-parent">رد على: '+escapeHtml(parent.body||"مرفق")+'</div>':"";
+      const delivery=m.sender_id===state.user.id
+        ?'<span class="message-read">'+(m.read_by_other?"تمت القراءة":"تم الإرسال")+'</span>'
+        :"";
+      return '<div class="message-row '+(m.sender_id===state.user.id?"mine":"other")+'" data-message-id="'+escapeHtml(m.id)+'">'+
         '<div class="bubble">'+parentHtml+sharedMessageMarkup(m)+media+body+'</div>'+
-        '<time>'+new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+read+
+        '<time>'+new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+delivery+
       '</div>';
     }).join("")||'<div class="empty">ابدأ المحادثة برسالة.</div>';
 
@@ -1907,6 +1998,7 @@
         const type=raw.slice(0,cut),id=raw.slice(cut+1);
         $("#chatDialog").close();
         closeChatRealtime();
+        state.activeConversation=null;
         openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
       });
       if(nearBottom||!quiet)$("#chatMessages").scrollTop=$("#chatMessages").scrollHeight;
@@ -1916,7 +2008,7 @@
       api("/v1/social/message-read",{
         method:"POST",
         body:JSON.stringify({message_ids:otherUnread})
-      }).catch(()=>{});
+      }).then(scheduleInboxRefresh).catch(()=>{});
     }
   }
 
@@ -1953,7 +2045,16 @@
     state.voiceRecorder=null;
   }
 
+  function resetPendingChatDelivery({keepMedia=false}={}){
+    state.pendingChatSendId=null;
+    if(!keepMedia){
+      state.pendingChatMediaId=null;
+      state.pendingChatFileKey=null;
+    }
+  }
+
   function clearChatAttachment(){
+    resetPendingChatDelivery();
     if(state.chatPreviewUrl){
       URL.revokeObjectURL(state.chatPreviewUrl);
       state.chatPreviewUrl=null;
@@ -1974,6 +2075,7 @@
   }
 
   function showVoicePreview(file){
+    resetPendingChatDelivery();
     if(state.chatPreviewUrl)URL.revokeObjectURL(state.chatPreviewUrl);
     state.chatPreviewUrl=URL.createObjectURL(file);
     $("#chatAttachmentPreview").innerHTML=
@@ -1987,6 +2089,7 @@
   $("#chatFile").onchange=()=>{
     const file=$("#chatFile").files[0];
     if(!file)return;
+    resetPendingChatDelivery();
     if(state.recordedVoiceFile){
       state.recordedVoiceFile=null;
       state.voiceChunks=[];
@@ -2067,47 +2170,101 @@
     }
   };
 
+  function chatFileKey(file){
+    if(!file)return "";
+    return [file.name||"",file.size||0,file.type||"",file.lastModified||0].join(":");
+  }
+
+  function setChatSendBusy(busy){
+    const form=$("#chatForm");
+    if(!form)return;
+    form.setAttribute("aria-busy",busy?"true":"false");
+    const submit=form.querySelector("button[type='submit']");
+    if(submit)submit.disabled=Boolean(busy);
+    $("#chatInput").disabled=Boolean(busy);
+    $("#voiceRecordButton").disabled=Boolean(busy);
+    $("#chatFile").disabled=Boolean(busy);
+  }
+
+  $("#chatInput").oninput=()=>{
+    state.pendingChatSendId=null;
+  };
+
   $("#chatForm").onsubmit=async(e)=>{
     e.preventDefault();
+    if(!state.activeConversation)return;
+
     if(state.voiceRecorder?.state==="recording"){
-      try{state.voiceRecorder.stop()}catch(_){}
-      return;
+      await stopVoiceRecording(false);
     }
-    const body=$("#chatInput").value.trim();
+
+    const body=$("#chatInput").value.trim().slice(0,4000);
     const file=state.recordedVoiceFile||$("#chatFile").files[0]||null;
-    if((!body&&!file)||!state.activeConversation)return;
-    const submit=$("#chatForm button[type='submit']");
-    submit.disabled=true;
+    if(!body&&!file)return;
+
+    const message=$("#chatMessage");
+    setChatSendBusy(true);
+    message.textContent=file?"جارٍ تجهيز المرفق...":"جارٍ إرسال الرسالة...";
+
     try{
       let mediaId=null;
       if(file){
-        const kind=file.type.startsWith("image/")?"chat_image":
-          file.type.startsWith("video/")?"chat_video":
-          file.type.startsWith("audio/")?"chat_audio":"chat_file";
-        const media=await uploadFile(file,kind,{silent:true});
-        mediaId=media.id;
+        const key=chatFileKey(file);
+        if(state.pendingChatFileKey!==key){
+          state.pendingChatFileKey=key;
+          state.pendingChatMediaId=null;
+          state.pendingChatSendId=null;
+        }
+
+        if(state.pendingChatMediaId){
+          mediaId=state.pendingChatMediaId;
+        }else{
+          const kind=file.type.startsWith("image/")?"chat_image":
+            file.type.startsWith("video/")?"chat_video":
+            file.type.startsWith("audio/")?"chat_audio":"chat_file";
+          message.textContent="جارٍ رفع المرفق...";
+          const media=await uploadFile(file,kind,{silent:true});
+          mediaId=media.id;
+          state.pendingChatMediaId=mediaId;
+        }
       }
+
+      if(!state.pendingChatSendId){
+        state.pendingChatSendId=crypto.randomUUID?.()||(
+          "00000000-0000-4000-8000-"+Math.random().toString(16).slice(2).padEnd(12,"0").slice(0,12)
+        );
+      }
+
+      message.textContent="جارٍ إرسال الرسالة...";
       await api("/v1/conversations/"+encodeURIComponent(state.activeConversation)+"/messages",{
         method:"POST",
-        body:JSON.stringify({body,media_id:mediaId})
+        body:JSON.stringify({
+          body,
+          media_id:mediaId,
+          client_message_id:state.pendingChatSendId
+        })
       });
+
       $("#chatInput").value="";
       clearChatAttachment();
-      await loadChat();
-      loadConversations();
+      message.textContent="";
+      await loadChat({quiet:true});
+      scheduleInboxRefresh();
     }catch(error){
-      $("#chatAttachmentPreview").innerHTML='<span class="error">'+escapeHtml(error.message)+'</span>';
-      $("#chatAttachmentPreview").classList.remove("hidden");
+      message.textContent=(error?.message||"تعذر إرسال الرسالة.")+" يمكنك إعادة المحاولة دون تكرار الرسالة.";
     }finally{
-      submit.disabled=false;
+      setChatSendBusy(false);
     }
   };
 
   $("#closeChat").onclick=()=>{
     closeChatRealtime();
     state.activeConversation=null;
+    state.chatLoadSeq++;
     clearChatAttachment();
+    $("#chatMessage").textContent="";
     $("#chatDialog").close();
+    scheduleInboxRefresh();
   };
 
   async function openComments(type,id){

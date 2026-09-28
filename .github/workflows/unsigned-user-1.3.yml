@@ -63,3 +63,5 @@ jobs:
           path: ${{ runner.temp }}/unsigned/
           retention-days: 7
           if-no-files-found: error
+
+# rebuild: shared-story-tap-fix

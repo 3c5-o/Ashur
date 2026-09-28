@@ -1562,8 +1562,33 @@
   async function openFollowList(profileId,mode,title){
     openInfoDialog(title,'<div id="followListDialog" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
     try{
-      const result=await api("/v1/social/follows/"+encodeURIComponent(profileId)+"?mode="+encodeURIComponent(mode));
-      const items=result.items||[];
+      let items=[];
+      try{
+        const result=await api("/v1/social/follows/"+encodeURIComponent(profileId)+"?mode="+encodeURIComponent(mode));
+        items=result.items||[];
+      }catch(apiError){
+        const targetIsOwn=profileId===state.user.id;
+        const knownPublic=state.currentPublicProfile?.id===profileId && state.currentPublicProfile?.is_private===false;
+        if(!targetIsOwn&&!knownPublic)throw apiError;
+        const isFollowing=mode==="following";
+        const idField=isFollowing?"following_id":"follower_id";
+        const filterField=isFollowing?"follower_id":"following_id";
+        const {data:followRows,error:followError}=await client.from("follows")
+          .select(idField)
+          .eq(filterField,profileId)
+          .eq("status","accepted")
+          .limit(500);
+        if(followError)throw followError;
+        const ids=[...new Set((followRows||[]).map(row=>row[idField]).filter(Boolean))];
+        if(ids.length){
+          const {data:profiles,error:profilesError}=await client.from("profiles")
+            .select("id,name,username,avatar_media_id,is_verified,is_private")
+            .in("id",ids);
+          if(profilesError)throw profilesError;
+          const map=new Map((profiles||[]).map(p=>[p.id,p]));
+          items=ids.map(id=>map.get(id)).filter(Boolean);
+        }
+      }
       $("#followListDialog").innerHTML=items.map(p=>`
         <button class="list-card" data-open-follow-profile="${p.id}" type="button">
           ${avatar(p)}
@@ -1576,7 +1601,7 @@
         openPublicProfile(uid);
       });
     }catch(error){
-      $("#followListDialog").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+      $("#followListDialog").innerHTML='<div class="empty error">تعذر تحميل القائمة. أعد المحاولة بعد تحديث الخدمة.</div>';
     }
   }
 

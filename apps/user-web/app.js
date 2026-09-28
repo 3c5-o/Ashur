@@ -1632,6 +1632,9 @@
     state.commentReply=null;
     updateCommentReplyBar();
     $("#commentsDialog").close();
+    const returnProfile=state.returnPublicProfileId;
+    state.returnPublicProfileId=null;
+    if(returnProfile)setTimeout(()=>openPublicProfile(returnProfile).catch(()=>{}),0);
   };
 
   async function openFollowList(profileId,mode,title){
@@ -1820,13 +1823,18 @@
 
   function bindProfileGrid(root){
     root.querySelectorAll("[data-preview-id]").forEach(btn=>{
-      btn.onclick=()=>openProfileContentPreview(
+      btn.onclick=()=>{
+        if($("#publicProfileDialog")?.open && state.currentPublicProfile?.id){
+          state.returnPublicProfileId=state.currentPublicProfile.id;
+        }
+        return openProfileContentPreview(
         btn.dataset.previewKind,
         btn.dataset.previewId,
         btn.dataset.previewMedia,
         btn.dataset.previewCaption,
         btn.dataset.previewComments==="true"
       ).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+      };
     });
   }
 
@@ -2026,6 +2034,7 @@
   }
   $("#closePublicProfile").onclick=()=>{
     state.currentPublicProfile=null;
+    state.returnPublicProfileId=null;
     $("#publicProfileDialog").close();
   };
 
@@ -2791,7 +2800,7 @@
         clearChatAttachment();
       }
       if(dialog.id==="storyViewerDialog")clearTimeout(state.storyTimer);
-      const returnProfile=dialog.id==="infoDialog"?state.returnPublicProfileId:null;
+      const returnProfile=["infoDialog","commentsDialog"].includes(dialog.id)?state.returnPublicProfileId:null;
       state.returnPublicProfileId=null;
       try{dialog.close()}catch(_){}
       if(returnProfile){

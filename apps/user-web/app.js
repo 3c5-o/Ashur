@@ -3543,8 +3543,8 @@
         const postIds=(postSaved.items||[]).map(x=>x.post_id).filter(Boolean);
         const reelIds=(reelSaved.items||[]).map(x=>x.reel_id).filter(Boolean);
         const [postsResult,reelsResult]=await Promise.all([
-          postIds.length?client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").in("id",postIds):Promise.resolve({data:[],error:null}),
-          reelIds.length?client.from("reels").select("id,caption,media_id,cover_media_id,comments_enabled").in("id",reelIds):Promise.resolve({data:[],error:null})
+          postIds.length?client.from("posts").select("id,author_id,caption,comments_enabled,pinned_at,post_media(media_id,sort_order)").in("id",postIds):Promise.resolve({data:[],error:null}),
+          reelIds.length?client.from("reels").select("id,author_id,caption,media_id,cover_media_id,comments_enabled,view_count").in("id",reelIds):Promise.resolve({data:[],error:null})
         ]);
         if(postsResult.error)throw postsResult.error;
         if(reelsResult.error)throw reelsResult.error;
@@ -3563,7 +3563,11 @@
           .order("created_at",{ascending:false})
           .limit(90);
         if(result.error)throw result.error;
-        $("#publicProfileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"posts")).join("")||
+        const orderedPosts=[...(result.data||[])].sort((a,b)=>
+          Number(Boolean(b.pinned_at))-Number(Boolean(a.pinned_at)) ||
+          new Date(b.pinned_at||b.created_at)-new Date(a.pinned_at||a.created_at)
+        );
+        $("#publicProfileContent").innerHTML=orderedPosts.map(row=>profileGridTile(row,"posts")).join("")||
           '<div class="empty profile-grid-empty">لا توجد منشورات بعد.</div>';
       }
       await hydrateMedia($("#publicProfileContent"));

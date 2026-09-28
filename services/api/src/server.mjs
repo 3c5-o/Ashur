@@ -1755,21 +1755,59 @@ async function socialFollowList(req, res, profileId, url) {
   if (profile.is_private && profileId !== user.id && !(await canViewOwner(user, profileId))) {
     return json(res, 403, { error: "الحساب خاص" });
   }
+
   const filter = mode === "following"
     ? "follower_id=eq." + encodeURIComponent(profileId)
     : "following_id=eq." + encodeURIComponent(profileId);
   const idField = mode === "following" ? "following_id" : "follower_id";
-  const rows = await select("follows", "select=" + idField + ",created_at&" + filter + "&status=eq.accepted&order=created_at.desc&limit=500");
-  const items = [];
+  const rows = await select(
+    "follows",
+    "select=" + idField + ",created_at&" + filter + "&status=eq.accepted&order=created_at.desc&limit=500",
+  );
+
+  const visibleIds = [];
   for (const row of rows || []) {
     const id = row[idField];
-    if (await isBlockedBetween(user.id, id)) continue;
-    const p = await select(
-      "profiles",
-      "select=id,name,username,avatar_media_id,is_verified,is_private&id=eq." + encodeURIComponent(id) + "&is_banned=eq.false&limit=1",
-    );
-    if (p?.[0]) items.push(p[0]);
+    if (!id || await isBlockedBetween(user.id, id)) continue;
+    visibleIds.push(id);
   }
+  const ids = [...new Set(visibleIds)];
+  if (!ids.length) return json(res, 200, { items: [] });
+
+  const encodedIds = ids.map(encodeURIComponent).join(",");
+  const [profiles, viewerFollowing, followsViewer] = await Promise.all([
+    select(
+      "profiles",
+      "select=id,name,username,bio,avatar_media_id,is_verified,is_private&id=in.(" + encodedIds + ")&is_banned=eq.false",
+    ),
+    select(
+      "follows",
+      "select=following_id,status&follower_id=eq." + encodeURIComponent(user.id) +
+        "&following_id=in.(" + encodedIds + ")",
+    ).catch(() => []),
+    select(
+      "follows",
+      "select=follower_id,status&following_id=eq." + encodeURIComponent(user.id) +
+        "&follower_id=in.(" + encodedIds + ")",
+    ).catch(() => []),
+  ]);
+
+  const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
+  const viewerMap = new Map((viewerFollowing || []).map((row) => [row.following_id, row.status]));
+  const followsViewerSet = new Set(
+    (followsViewer || []).filter((row) => row.status === "accepted").map((row) => row.follower_id),
+  );
+
+  const items = ids.map((id) => {
+    const p = profileMap.get(id);
+    if (!p) return null;
+    return {
+      ...p,
+      viewer_status: viewerMap.get(id) || "",
+      follows_viewer: followsViewerSet.has(id),
+    };
+  }).filter(Boolean);
+
   json(res, 200, { items });
 }
 

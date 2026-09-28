@@ -31,6 +31,7 @@ import com.onesignal.OneSignal;
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4107;
     private static final int AUDIO_PERMISSION_REQUEST = 4108;
+    private static final int MEDIA_PERMISSION_REQUEST = 4109;
     private static final String LOCAL_APP_URL = "https://appassets.androidplatform.net/assets/www/index.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
@@ -108,26 +109,40 @@ public class MainActivity extends Activity {
             public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> {
                     boolean wantsAudio = false;
+                    boolean wantsVideo = false;
                     for (String resource : request.getResources()) {
-                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
-                            wantsAudio = true;
-                            break;
-                        }
+                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) wantsAudio = true;
+                        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) wantsVideo = true;
                     }
-                    if (!wantsAudio) {
+
+                    if (!wantsAudio && !wantsVideo) {
                         request.deny();
                         return;
                     }
-                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
-                            == PackageManager.PERMISSION_GRANTED) {
-                        request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+
+                    boolean audioGranted = !wantsAudio ||
+                            ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                                    == PackageManager.PERMISSION_GRANTED;
+                    boolean videoGranted = !wantsVideo ||
+                            ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                                    == PackageManager.PERMISSION_GRANTED;
+
+                    if (audioGranted && videoGranted) {
+                        java.util.ArrayList<String> resources = new java.util.ArrayList<>();
+                        if (wantsAudio) resources.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
+                        if (wantsVideo) resources.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
+                        request.grant(resources.toArray(new String[0]));
                         return;
                     }
+
+                    java.util.ArrayList<String> permissions = new java.util.ArrayList<>();
+                    if (!audioGranted) permissions.add(Manifest.permission.RECORD_AUDIO);
+                    if (!videoGranted) permissions.add(Manifest.permission.CAMERA);
                     pendingPermissionRequest = request;
                     ActivityCompat.requestPermissions(
                             MainActivity.this,
-                            new String[]{Manifest.permission.RECORD_AUDIO},
-                            AUDIO_PERMISSION_REQUEST
+                            permissions.toArray(new String[0]),
+                            MEDIA_PERMISSION_REQUEST
                     );
                 });
             }
@@ -188,15 +203,41 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode != AUDIO_PERMISSION_REQUEST) return;
+
+        if (requestCode == AUDIO_PERMISSION_REQUEST) {
+            PermissionRequest request = pendingPermissionRequest;
+            pendingPermissionRequest = null;
+            if (request == null) return;
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+            } else {
+                request.deny();
+            }
+            return;
+        }
+
+        if (requestCode != MEDIA_PERMISSION_REQUEST) return;
         PermissionRequest request = pendingPermissionRequest;
         pendingPermissionRequest = null;
         if (request == null) return;
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-        } else {
-            request.deny();
+
+        boolean audioGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+        boolean videoGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+
+        java.util.ArrayList<String> resources = new java.util.ArrayList<>();
+        for (String resource : request.getResources()) {
+            if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource) && audioGranted) {
+                resources.add(resource);
+            }
+            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource) && videoGranted) {
+                resources.add(resource);
+            }
         }
+
+        if (resources.isEmpty()) request.deny();
+        else request.grant(resources.toArray(new String[0]));
     }
 
     @Override
@@ -273,6 +314,27 @@ public class MainActivity extends Activity {
                         MainActivity.this,
                         new String[]{Manifest.permission.RECORD_AUDIO},
                         AUDIO_PERMISSION_REQUEST
+                );
+            });
+        }
+
+        @JavascriptInterface
+        public boolean hasCameraPermission() {
+            return ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void requestCameraPermission() {
+            runOnUiThread(() -> {
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                        == PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+                ActivityCompat.requestPermissions(
+                        MainActivity.this,
+                        new String[]{Manifest.permission.CAMERA},
+                        MEDIA_PERMISSION_REQUEST
                 );
             });
         }

@@ -2322,7 +2322,7 @@
     $("#publicProfileTabs").classList.toggle("show-saved",savedPublic);
     state.publicProfileTab="posts";
     await loadPublicProfileContent(uid,"posts",mayView);
-    $("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
+    $$("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
       btn.onclick=()=>loadPublicProfileContent(uid,btn.dataset.publicProfileTab,mayView);
     });
   }

@@ -1618,7 +1618,6 @@
     $("#profileCard").innerHTML=`
       <div class="profile-cover">
         ${p.cover_media_id?`<img class="cover-image" data-media-id="${p.cover_media_id}" alt="">`:""}
-        <button id="profileSettingsFab" class="profile-settings-fab" aria-label="الإعدادات">${icon("settings")}</button>
       </div>
       <div class="profile-main">
         <div class="profile-avatar-wrap">${avatar(p)}</div>
@@ -1642,7 +1641,6 @@
     $("#logoutButton").onclick=()=>client.auth.signOut();
     $("#editProfileButton").onclick=openEditProfile;
     $("#settingsButton").onclick=openSettings;
-    $("#profileSettingsFab").onclick=openSettings;
     $("#ownFollowersButton").onclick=()=>openFollowList(state.user.id,"followers","المتابعون");
     $("#ownFollowingButton").onclick=()=>openFollowList(state.user.id,"following","الحسابات التي تتابعها");
     await hydrateMedia($("#profileCard"));

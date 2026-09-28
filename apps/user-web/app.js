@@ -4984,6 +4984,7 @@
     $("#editProfileMessage").textContent="";
     $("#editUsernameStatus").textContent="اسم المستخدم الحالي";
     $("#editUsernameStatus").className="field-hint good";
+    $("#editNameCount").textContent=String(($("#editName").value||"").length);
     $("#editBioCount").textContent=String(($("#editBio").value||"").length);
     await Promise.all([
       renderEditMedia("avatar",{mediaId:state.profile?.avatar_media_id||null}),
@@ -4997,8 +4998,16 @@
     $("#editProfileDialog").close();
   };
 
+  $("#editName").oninput=()=>{
+    const input=$("#editName");
+    if(input.value.length>30)input.value=input.value.slice(0,30);
+    $("#editNameCount").textContent=String(input.value.length);
+  };
+
   $("#editBio").oninput=()=>{
-    $("#editBioCount").textContent=String($("#editBio").value.length);
+    const input=$("#editBio");
+    if(input.value.length>150)input.value=input.value.slice(0,150);
+    $("#editBioCount").textContent=String(input.value.length);
   };
 
   $("#editUsername").oninput=()=>{
@@ -5008,8 +5017,8 @@
     const status=$("#editUsernameStatus");
     clearTimeout(usernameCheckTimer);
     const version=++usernameCheckVersion;
-    if(!/^[a-z0-9_]{3,24}$/.test(normalized)){
-      status.textContent="اسم المستخدم غير صالح";
+    if(!/^[a-z0-9_.]{2,10}$/.test(normalized)){
+      status.textContent="استخدم ٢–١٠ خانات: حروف، أرقام، نقطة أو _";
       status.className="field-hint bad";
       return;
     }

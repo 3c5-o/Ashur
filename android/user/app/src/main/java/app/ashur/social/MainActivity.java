@@ -247,6 +247,11 @@ public class MainActivity extends Activity {
 
     public class AshurBridge {
         @JavascriptInterface
+        public void authReady() {
+            runOnUiThread(() -> dispatchPendingDeepLink());
+        }
+
+        @JavascriptInterface
         public String getApiBaseUrl() {
             return BuildConfig.ASHUR_API_URL == null ? "" : BuildConfig.ASHUR_API_URL;
         }

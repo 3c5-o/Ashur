@@ -989,13 +989,12 @@ async function socialShareToStory(req, res) {
   if (!source || !mediaId) return json(res, 404, { error: "تعذر العثور على وسائط المحتوى" });
 
   if (source.author_id !== user.id) {
-    if (!(await canViewOwner(user, source.author_id))) return json(res, 403, { error: "لا يمكنك مشاركة هذا المحتوى" });
-    if (source.visibility === "followers") {
-      const relation = await select(
-        "follows",
-        "select=status&follower_id=eq." + encodeURIComponent(user.id) + "&following_id=eq." + encodeURIComponent(source.author_id) + "&status=eq.accepted&limit=1",
-      );
-      if (!relation?.length) return json(res, 403, { error: "هذا المحتوى للمتابعين فقط" });
+    const owner = await profileFor(source.author_id);
+    if (!owner || owner.is_private || source.visibility !== "public") {
+      return json(res, 403, { error: "يمكن مشاركة المحتوى العام فقط داخل القصة" });
+    }
+    if (await isBlockedBetween(user.id, source.author_id)) {
+      return json(res, 403, { error: "لا يمكنك مشاركة هذا المحتوى" });
     }
   }
 

@@ -632,12 +632,20 @@
     if($("#storyViewerDialog").open)$("#storyViewerDialog").close();
   }
 
+
   async function openStoryViewers(storyId){
     closeStoryViewer();
     openInfoDialog("مشاهدو القصة",'<div id="storyViewersList" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
     try{
-      const result=await api("/v1/social/story-viewers/"+encodeURIComponent(storyId));
-      $("#storyViewersList").innerHTML=(result.items||[]).map(p=>
+      const result=await client.from("story_views")
+        .select("user_id,viewed_at")
+        .eq("story_id",storyId)
+        .order("viewed_at",{ascending:false})
+        .limit(500);
+      if(result.error)throw result.error;
+      const profiles=await profilesMap([...new Set((result.data||[]).map(v=>v.user_id))]);
+      const items=(result.data||[]).map(v=>profiles[v.user_id]?Object.assign({},profiles[v.user_id],{viewed_at:v.viewed_at}):null).filter(Boolean);
+      $("#storyViewersList").innerHTML=items.map(p=>
         '<button class="list-card" data-story-viewer-profile="'+escapeHtml(p.id)+'" type="button">'+
           avatar(p)+'<span class="grow"><b>'+escapeHtml(p.name||"مستخدم")+'</b><small>@'+escapeHtml(p.username||"")+'</small></span>'+
           '<time>'+new Date(p.viewed_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+
@@ -1637,43 +1645,28 @@
     if(returnProfile)setTimeout(()=>openPublicProfile(returnProfile).catch(()=>{}),0);
   };
 
+
   async function openFollowList(profileId,mode,title){
-    if($("#publicProfileDialog")?.open)state.returnPublicProfileId=profileId;
     openInfoDialog(title,'<div id="followListDialog" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
     try{
-      let items=[];
-      try{
-        const result=await api("/v1/social/follows/"+encodeURIComponent(profileId)+"?mode="+encodeURIComponent(mode));
-        items=result.items||[];
-      }catch(apiError){
-        const targetIsOwn=profileId===state.user.id;
-        const knownVisible=state.currentPublicProfile?.id===profileId &&
-          (state.currentPublicProfile?.is_private===false || state.currentPublicProfile?.mayView===true);
-        if(!targetIsOwn&&!knownVisible)throw apiError;
-        const isFollowing=mode==="following";
-        const idField=isFollowing?"following_id":"follower_id";
-        const filterField=isFollowing?"follower_id":"following_id";
-        const {data:followRows,error:followError}=await client.from("follows")
-          .select(idField)
-          .eq(filterField,profileId)
-          .eq("status","accepted")
-          .limit(500);
-        if(followError)throw followError;
-        const ids=[...new Set((followRows||[]).map(row=>row[idField]).filter(Boolean))];
-        if(ids.length){
-          const {data:profiles,error:profilesError}=await client.from("profiles")
-            .select("id,name,username,avatar_media_id,is_verified,is_private")
-            .in("id",ids);
-          if(profilesError)throw profilesError;
-          const map=new Map((profiles||[]).map(p=>[p.id,p]));
-          items=ids.map(id=>map.get(id)).filter(Boolean);
-        }
-      }
-      $("#followListDialog").innerHTML=items.map(p=>`
-        <button class="list-card" data-open-follow-profile="${p.id}" type="button">
-          ${avatar(p)}
-          <span class="grow"><b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b><small>@${escapeHtml(p.username||"")}</small></span>
-        </button>`).join("")||'<div class="empty">لا توجد حسابات.</div>';
+      const field=mode==="following"?"follower_id":"following_id";
+      const target=mode==="following"?"following_id":"follower_id";
+      const result=await client.from("follows")
+        .select(target+",created_at")
+        .eq(field,profileId)
+        .eq("status","accepted")
+        .order("created_at",{ascending:false})
+        .limit(500);
+      if(result.error)throw result.error;
+      const ids=[...new Set((result.data||[]).map(row=>row[target]).filter(Boolean))];
+      const profiles=await profilesMap(ids);
+      const items=ids.map(id=>profiles[id]).filter(Boolean);
+      $("#followListDialog").innerHTML=items.map(p=>
+        '<button class="list-card" data-open-follow-profile="'+escapeHtml(p.id)+'" type="button">'+
+          avatar(p)+
+          '<span class="grow"><b>'+escapeHtml(p.name||"مستخدم")+(p.is_verified?'<span class="verified-inline">✓</span>':"")+'</b><small>@'+escapeHtml(p.username||"")+'</small></span>'+
+        '</button>'
+      ).join("")||'<div class="empty">لا توجد حسابات.</div>';
       await hydrateMedia($("#followListDialog"));
       $("#followListDialog").querySelectorAll("[data-open-follow-profile]").forEach(btn=>btn.onclick=()=>{
         const uid=btn.dataset.openFollowProfile;
@@ -1681,7 +1674,7 @@
         openPublicProfile(uid);
       });
     }catch(error){
-      $("#followListDialog").innerHTML='<div class="empty error">تعذر تحميل القائمة. أعد المحاولة بعد تحديث الخدمة.</div>';
+      $("#followListDialog").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
     }
   }
 

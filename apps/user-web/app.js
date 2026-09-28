@@ -35,6 +35,11 @@
     pendingChatSendId:null,
     pendingChatMediaId:null,
     pendingChatFileKey:null,
+    messageFilter:"all",
+    conversationCache:new Map(),
+    conversationCreateMode:"direct",
+    selectedGroupMembers:new Map(),
+    activeConversationMeta:null,
     reelObserver:null,
     storyTimer:null,
     activePage:"homePage",
@@ -118,6 +123,19 @@
     try { return window.AshurNative?.getApiBaseUrl?.() || ""; } catch { return ""; }
   };
   const apiUrl = (path) => (cfg.apiBaseUrl || nativeApiBase() || location.origin).replace(/\/$/,"") + path;
+
+  const editableTarget = (target) => Boolean(
+    target?.closest?.("input,textarea,[contenteditable='true'],[data-allow-select='true']")
+  );
+  document.addEventListener("contextmenu",(event)=>{
+    if(!editableTarget(event.target))event.preventDefault();
+  },{capture:true});
+  document.addEventListener("selectstart",(event)=>{
+    if(!editableTarget(event.target))event.preventDefault();
+  },{capture:true});
+  document.addEventListener("dragstart",(event)=>{
+    if(!editableTarget(event.target))event.preventDefault();
+  },{capture:true});
 
   function avatar(profile, cls="avatar"){
     if (profile?.avatar_media_id) return `<img class="${cls}" data-media-id="${profile.avatar_media_id}" alt="">`;

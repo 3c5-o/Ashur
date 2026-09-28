@@ -1372,6 +1372,39 @@ async function socialPublicSaved(req, res, profileId, url) {
   json(res, 200, { items: rows || [] });
 }
 
+async function ensureMentionDirectConversation(senderId, targetUserId) {
+  const directKey = [senderId, targetUserId].map(String).sort().join(":");
+  let conversations = await select(
+    "conversations",
+    "select=id&direct_key=eq." + encodeURIComponent(directKey) + "&is_deleted=eq.false&limit=1",
+  ).catch(() => []);
+  if (conversations?.[0]) return conversations[0].id;
+
+  try {
+    const created = await insert("conversations", {
+      kind: "direct",
+      title: "",
+      created_by: senderId,
+      direct_key: directKey,
+      is_deleted: false,
+    });
+    const conversationId = created?.[0]?.id;
+    if (!conversationId) throw new Error("تعذر إنشاء المحادثة");
+    await insert("conversation_members", [
+      { conversation_id: conversationId, user_id: senderId, role: "owner" },
+      { conversation_id: conversationId, user_id: targetUserId, role: "member" },
+    ], { returning: false });
+    return conversationId;
+  } catch (error) {
+    conversations = await select(
+      "conversations",
+      "select=id&direct_key=eq." + encodeURIComponent(directKey) + "&is_deleted=eq.false&limit=1",
+    ).catch(() => []);
+    if (conversations?.[0]) return conversations[0].id;
+    throw error;
+  }
+}
+
 async function socialMentions(req, res) {
   const user = await currentUser(req);
   const body = await readJson(req);
@@ -1380,6 +1413,16 @@ async function socialMentions(req, res) {
   const id = String(body.id || "");
   if (!/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "معرف المحتوى غير صالح" });
 
+  const sourceTable = ({ post: "posts", reel: "reels", story: "stories", comment: "comments" })[type];
+  const sourceRows = await select(
+    sourceTable,
+    "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1",
+  ).catch(() => []);
+  if (!sourceRows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
+  if (sourceRows[0].author_id !== user.id) {
+    return json(res, 403, { error: "لا يمكنك إرسال إشارات من محتوى لا تملكه" });
+  }
+
   const usernames = [...new Set(
     [...caption.matchAll(/@([A-Za-z0-9_.]{2,24})/g)].map((m) => m[1].toLowerCase())
   )].slice(0, 20);
@@ -1387,7 +1430,7 @@ async function socialMentions(req, res) {
     [...caption.matchAll(/#([\p{L}\p{N}_]{2,50})/gu)].map((m) => m[1].toLowerCase())
   )].slice(0, 30);
 
-  if (!usernames.length) return json(res, 200, { ok: true, mentions: 0, hashtags });
+  if (!usernames.length) return json(res, 200, { ok: true, mentions: 0, hashtags, direct_messages: 0 });
   const profiles = await select(
     "profiles",
     "select=id,name,username&username=in.(" + usernames.map((x) => '"' + x.replace(/"/g, "") + '"').join(",") + ")&is_banned=eq.false",
@@ -1395,19 +1438,49 @@ async function socialMentions(req, res) {
   const sender = await profileFor(user.id).catch(() => null);
   const label = type === "reel" ? "ريلز" : type === "story" ? "قصة" : type === "comment" ? "تعليق" : "منشور";
   let countNotified = 0;
+  let directMessages = 0;
 
   for (const profile of profiles || []) {
     if (profile.id === user.id || await isBlockedBetween(user.id, profile.id)) continue;
     if (type === "story" && !(await isAcceptedFollower(profile.id, user.id))) continue;
 
+    let firstMention = true;
     if (type === "story") {
+      const existingStoryMention = await select(
+        "story_mentions",
+        "select=story_id&story_id=eq." + encodeURIComponent(id) +
+          "&user_id=eq." + encodeURIComponent(profile.id) + "&limit=1",
+      ).catch(() => []);
+      firstMention = !existingStoryMention?.length;
       await upsert("story_mentions", {
         story_id: id,
         user_id: profile.id,
         mentioned_by: user.id,
         created_at: new Date().toISOString(),
       }, "story_id,user_id").catch(() => {});
+    } else {
+      const existingMention = await select(
+        "content_mentions",
+        "select=content_id&content_type=eq." + encodeURIComponent(type) +
+          "&content_id=eq." + encodeURIComponent(id) +
+          "&user_id=eq." + encodeURIComponent(profile.id) + "&limit=1",
+      ).catch(() => []);
+      firstMention = !existingMention?.length;
+      if (firstMention) {
+        try {
+          await insert("content_mentions", {
+            content_type: type,
+            content_id: id,
+            user_id: profile.id,
+            mentioned_by: user.id,
+          }, { returning: false });
+        } catch {
+          firstMention = false;
+        }
+      }
     }
+
+    if (!firstMention) continue;
 
     const title = "تمت الإشارة إليك";
     const message = (sender?.name || sender?.username || "مستخدم") + " أشار إليك في " + label;
@@ -1427,8 +1500,28 @@ async function socialMentions(req, res) {
       data: { kind: "mention", entity_type: type, entity_id: id },
     }).catch(() => {});
     countNotified++;
+
+    if (type === "post") {
+      try {
+        const conversationId = await ensureMentionDirectConversation(user.id, profile.id);
+        await insert("messages", {
+          conversation_id: conversationId,
+          sender_id: user.id,
+          body: "ذكرتك في هذا المنشور",
+          shared_type: "post",
+          shared_id: id,
+          client_message_id: crypto.randomUUID(),
+        }, { returning: false });
+        await update("conversations", "id=eq." + encodeURIComponent(conversationId), {
+          updated_at: new Date().toISOString(),
+        }, { returning: false });
+        directMessages++;
+      } catch (error) {
+        console.warn("ASHUR_MENTION_DM_FAILED", profile.id, error?.message || error);
+      }
+    }
   }
-  json(res, 200, { ok: true, mentions: countNotified, hashtags });
+  json(res, 200, { ok: true, mentions: countNotified, hashtags, direct_messages: directMessages });
 }
 
 async function socialReshareMentionedStory(req, res) {
@@ -1720,14 +1813,34 @@ async function socialEditContent(req, res, kind, id) {
   const user = await currentUser(req);
   const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
   if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
-  const rows = await select(table, "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+  const selectFields = table === "posts" ? "id,author_id,pinned_at" : "id,author_id";
+  const rows = await select(table, "select=" + selectFields + "&id=eq." + encodeURIComponent(id) + "&limit=1");
   if (!rows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
   if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك تعديل هذا المحتوى" });
+
   const body = await readJson(req);
   const patch = {};
   if (body.caption !== undefined) patch.caption = String(body.caption || "").slice(0, 2200);
   if (body.comments_enabled !== undefined && table !== "stories") patch.comments_enabled = Boolean(body.comments_enabled);
-  if (body.visibility !== undefined && table !== "stories") patch.visibility = ["public", "followers"].includes(body.visibility) ? body.visibility : "public";
+  if (body.visibility !== undefined && table !== "stories") {
+    patch.visibility = ["public", "followers"].includes(body.visibility) ? body.visibility : "public";
+  }
+
+  if (table === "posts" && body.pinned !== undefined) {
+    const pinned = Boolean(body.pinned);
+    if (pinned && !rows[0].pinned_at) {
+      const existingPinned = await count(
+        "posts",
+        "author_id=eq." + encodeURIComponent(user.id) +
+          "&pinned_at=not.is.null&deleted_at=is.null&moderation_status=eq.active",
+      );
+      if (existingPinned >= 3) {
+        return json(res, 409, { error: "يمكن تثبيت 3 منشورات كحد أقصى. ألغِ تثبيت منشور أولًا." });
+      }
+    }
+    patch.pinned_at = pinned ? (rows[0].pinned_at || new Date().toISOString()) : null;
+  }
+
   if (table === "posts") patch.updated_at = new Date().toISOString();
   if (!Object.keys(patch).length) return json(res, 400, { error: "لا توجد تعديلات" });
   const updated = await update(table, "id=eq." + encodeURIComponent(id), patch);
@@ -1762,6 +1875,76 @@ async function socialEditComment(req, res, commentId) {
     updated_at: new Date().toISOString(),
   });
   json(res, 200, updated?.[0] || { ok: true });
+}
+
+async function socialRecordReelView(req, res, reelId) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "reels",
+    "select=id,author_id,visibility,moderation_status,deleted_at,view_count&id=eq." +
+      encodeURIComponent(reelId) + "&limit=1",
+  );
+  const reel = rows?.[0];
+  if (!reel || reel.deleted_at || reel.moderation_status !== "active") {
+    return json(res, 404, { error: "الريلز غير متاح" });
+  }
+  if (!(await canViewContentOwner(user, reel.author_id, reel.visibility || "public"))) {
+    return json(res, 403, { error: "لا يمكنك مشاهدة هذا الريلز" });
+  }
+
+  if (reel.author_id === user.id) {
+    return json(res, 200, { ok: true, view_count: Number(reel.view_count || 0), own_view: true });
+  }
+
+  const result = await serviceRequest("/rest/v1/rpc/record_reel_view", {
+    method: "POST",
+    body: { p_reel_id: reelId, p_viewer_id: user.id },
+  });
+  const viewCount = Array.isArray(result) ? Number(result[0] || 0) : Number(result || 0);
+  json(res, 200, { ok: true, view_count: viewCount });
+}
+
+async function socialPinComment(req, res, commentId) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const rows = await select(
+    "comments",
+    "select=id,author_id,post_id,reel_id,parent_id,pinned_at,deleted_at,moderation_status&id=eq." +
+      encodeURIComponent(commentId) + "&limit=1",
+  );
+  const comment = rows?.[0];
+  if (!comment || comment.deleted_at || comment.moderation_status !== "active") {
+    return json(res, 404, { error: "التعليق غير موجود" });
+  }
+  if (comment.parent_id) return json(res, 400, { error: "يمكن تثبيت تعليق رئيسي فقط" });
+
+  const targetTable = comment.post_id ? "posts" : "reels";
+  const targetId = comment.post_id || comment.reel_id;
+  const content = await select(
+    targetTable,
+    "select=id,author_id&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+  );
+  if (!content?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
+  if (content[0].author_id !== user.id) {
+    return json(res, 403, { error: "تثبيت التعليقات متاح لصاحب المحتوى فقط" });
+  }
+
+  const pinned = body.pinned !== false;
+  const filterField = comment.post_id ? "post_id" : "reel_id";
+  if (pinned) {
+    await update(
+      "comments",
+      filterField + "=eq." + encodeURIComponent(targetId) + "&pinned_at=not.is.null",
+      { pinned_at: null },
+      { returning: false },
+    ).catch(() => {});
+  }
+  const updated = await update(
+    "comments",
+    "id=eq." + encodeURIComponent(commentId),
+    { pinned_at: pinned ? new Date().toISOString() : null },
+  );
+  json(res, 200, updated?.[0] || { ok: true, pinned });
 }
 
 async function socialDeleteAccount(req, res) {
@@ -2601,6 +2784,7 @@ const server = http.createServer(async (req, res) => {
         api_version: "1.3.0",
         messaging_revision: "E2",
         stories_revision: "S3",
+        content_revision: "C3",
         commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
         readiness: readiness()
       });
@@ -2666,6 +2850,14 @@ const server = http.createServer(async (req, res) => {
     const publicSavedMatch = /^\/v1\/social\/saved\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "GET" && publicSavedMatch) {
       return socialPublicSaved(req, res, publicSavedMatch[1], url);
+    }
+    const reelViewMatch = /^\/v1\/social\/reel-view\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "POST" && reelViewMatch) {
+      return socialRecordReelView(req, res, reelViewMatch[1]);
+    }
+    const commentPinMatch = /^\/v1\/social\/comments\/([0-9a-f-]{36})\/pin$/.exec(url.pathname);
+    if (req.method === "PATCH" && commentPinMatch) {
+      return socialPinComment(req, res, commentPinMatch[1]);
     }
     const socialContentMatch = /^\/v1\/social\/content\/(posts|reels|stories)\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (socialContentMatch && req.method === "PATCH") {

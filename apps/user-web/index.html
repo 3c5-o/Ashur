@@ -47,13 +47,22 @@
         <button id="cancelPasswordRecovery" class="link-button" type="button">العودة لتسجيل الدخول</button>
       </form>
 
-      <form id="registerForm" class="form hidden">
-        <label><span>الاسم</span><input id="registerName" maxlength="80" required placeholder="اسمك الظاهر"></label>
-        <label><span>اسم المستخدم</span><input id="registerUsername" maxlength="24" required autocapitalize="none" placeholder="اسم المستخدم"></label>
+      <form id="registerForm" class="form hidden auth-register-form">
+        <div class="register-avatar-row">
+          <label class="register-avatar-picker" for="registerAvatar">
+            <input id="registerAvatar" type="file" accept="image/jpeg,image/png,image/webp,image/avif">
+            <span id="registerAvatarPreview" class="register-avatar-preview"><img class="hidden" alt="صورة الحساب"><b>+</b></span>
+            <span class="register-avatar-copy"><b>صورة الحساب</b><small>اختيارية ويمكن تغييرها لاحقًا</small></span>
+          </label>
+          <button id="removeRegisterAvatar" class="register-avatar-remove hidden" type="button">إزالة</button>
+        </div>
+        <label><span>الاسم</span><input id="registerName" maxlength="30" minlength="1" required autocomplete="name" placeholder="اسمك الظاهر"></label>
+        <label><span>اسم المستخدم</span><input id="registerUsername" maxlength="10" minlength="2" pattern="[A-Za-z0-9_.]{2,10}" required autocapitalize="none" autocomplete="username" placeholder="مثال: ali.1"></label>
+        <small class="field-hint">من 2 إلى 10 خانات: حروف إنجليزية، أرقام، نقطة أو شرطة سفلية.</small>
         <label><span>البريد الإلكتروني</span><input id="registerEmail" type="email" required autocomplete="email" placeholder="البريد الإلكتروني"></label>
         <label><span>كلمة المرور</span><input id="registerPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="٨ أحرف أو أكثر"></label>
         <label><span>تأكيد كلمة المرور</span><input id="registerPassword2" type="password" minlength="8" required autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></label>
-        <button class="primary" type="submit">إنشاء الحساب</button>
+        <button class="primary auth-main-submit" type="submit">إنشاء حساب آشور</button>
       </form>
       <p id="authMessage" class="message" aria-live="polite"></p>
     </section>
@@ -91,12 +100,14 @@
             <span class="eyebrow">اكتشف</span>
             <h2>البحث</h2>
           </div>
-          <div class="search-box">
+          <div class="search-box stage4-search-box">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-            <input id="searchInput" placeholder="ابحث عن حساب أو محتوى" autocomplete="off">
+            <input id="searchInput" type="search" placeholder="اسم، @يوزر، منشور أو ريلز" autocomplete="off">
+            <button id="clearSearchButton" class="search-clear hidden" type="button" aria-label="مسح البحث"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
+          <small id="searchContextHint" class="search-context-hint">اكتشف حسابات ومحتوى جديدًا</small>
         </div>
-        <div class="chips">
+        <div class="chips search-filter-bar">
           <button class="chip active" data-search-type="all">الكل</button>
           <button class="chip" data-search-type="accounts">الحسابات</button>
           <button class="chip" data-search-type="posts">المنشورات</button>
@@ -486,11 +497,12 @@
           </div>
         </div>
       </div>
-      <label><span>الاسم</span><input id="editName" maxlength="80" required autocomplete="name"></label>
-      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="24" required autocapitalize="none" autocomplete="username"></label>
+      <label><span>الاسم</span><input id="editName" maxlength="30" required autocomplete="name"></label>
+      <div class="field-counter"><span id="editNameCount">0</span><span>/ 30</span></div>
+      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="10" minlength="2" pattern="[A-Za-z0-9_.]{2,10}" required autocapitalize="none" autocomplete="username"></label>
       <small id="editUsernameStatus" class="field-hint"></small>
-      <label><span>نبذة</span><textarea id="editBio" maxlength="300" placeholder="اكتب نبذة قصيرة عنك"></textarea></label>
-      <div class="field-counter"><span id="editBioCount">0</span><span>/ 300</span></div>
+      <label><span>نبذة</span><textarea id="editBio" maxlength="150" placeholder="اكتب نبذة قصيرة عنك"></textarea></label>
+      <div class="field-counter"><span id="editBioCount">0</span><span>/ 150</span></div>
       <label><span>الرابط</span><input id="editProfileLink" maxlength="220" inputmode="url" autocomplete="url" placeholder="example.com/yourname"></label>
       <label class="switch-row"><span><b>حساب خاص</b><small>المتابعة تحتاج موافقتك</small></span><input id="editPrivate" type="checkbox"></label>
       <button id="saveProfileButton" class="primary" type="submit">حفظ التعديلات</button>
@@ -546,6 +558,21 @@
         <button id="deleteAccountButton" class="danger-wide danger-outline" type="button">حذف الحساب نهائيًا</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="confirmDialog" class="confirm-dialog">
+    <div class="confirm-card">
+      <div id="confirmIcon" class="confirm-icon"></div>
+      <div class="confirm-copy">
+        <span class="eyebrow">تأكيد الإجراء</span>
+        <h3 id="confirmTitle">هل أنت متأكد؟</h3>
+        <p id="confirmText"></p>
+      </div>
+      <div class="confirm-actions">
+        <button id="confirmCancel" class="secondary-wide" type="button">إلغاء</button>
+        <button id="confirmAccept" class="primary" type="button">تأكيد</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="infoDialog" class="panel-dialog">

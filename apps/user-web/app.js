@@ -584,6 +584,110 @@
     catch{return ""}
   }
 
+  const REGISTRATION_MEDIA_DB="ashur_registration_media_v1";
+  const REGISTRATION_MEDIA_STORE="pending_avatar";
+  let registerAvatarFile=null;
+  let registerAvatarObjectUrl="";
+
+  function openRegistrationMediaDb(){
+    return new Promise((resolve,reject)=>{
+      if(!("indexedDB" in window))return reject(new Error("IndexedDB unavailable"));
+      const request=indexedDB.open(REGISTRATION_MEDIA_DB,1);
+      request.onupgradeneeded=()=>{
+        const db=request.result;
+        if(!db.objectStoreNames.contains(REGISTRATION_MEDIA_STORE)){
+          db.createObjectStore(REGISTRATION_MEDIA_STORE,{keyPath:"email"});
+        }
+      };
+      request.onsuccess=()=>resolve(request.result);
+      request.onerror=()=>reject(request.error||new Error("تعذر فتح التخزين المحلي"));
+    });
+  }
+
+  async function savePendingRegistrationAvatar(email,file){
+    const normalized=authUtil.normalizeEmail(email);
+    if(!normalized||!file)return;
+    const db=await openRegistrationMediaDb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(REGISTRATION_MEDIA_STORE,"readwrite");
+      tx.objectStore(REGISTRATION_MEDIA_STORE).put({
+        email:normalized,
+        file,
+        saved_at:Date.now()
+      });
+      tx.oncomplete=resolve;
+      tx.onerror=()=>reject(tx.error||new Error("تعذر حفظ الصورة مؤقتًا"));
+    });
+    db.close();
+  }
+
+  async function takePendingRegistrationAvatar(email){
+    const normalized=authUtil.normalizeEmail(email);
+    if(!normalized)return null;
+    const db=await openRegistrationMediaDb().catch(()=>null);
+    if(!db)return null;
+    const value=await new Promise(resolve=>{
+      const tx=db.transaction(REGISTRATION_MEDIA_STORE,"readwrite");
+      const store=tx.objectStore(REGISTRATION_MEDIA_STORE);
+      const request=store.get(normalized);
+      request.onsuccess=()=>{
+        const row=request.result||null;
+        if(row)store.delete(normalized);
+        resolve(row?.file||null);
+      };
+      request.onerror=()=>resolve(null);
+    });
+    db.close();
+    return value;
+  }
+
+  async function clearPendingRegistrationAvatar(email){
+    const normalized=authUtil.normalizeEmail(email);
+    if(!normalized)return;
+    const db=await openRegistrationMediaDb().catch(()=>null);
+    if(!db)return;
+    await new Promise(resolve=>{
+      const tx=db.transaction(REGISTRATION_MEDIA_STORE,"readwrite");
+      tx.objectStore(REGISTRATION_MEDIA_STORE).delete(normalized);
+      tx.oncomplete=resolve;
+      tx.onerror=resolve;
+    });
+    db.close();
+  }
+
+  function resetRegisterAvatar(){
+    registerAvatarFile=null;
+    if(registerAvatarObjectUrl){
+      try{URL.revokeObjectURL(registerAvatarObjectUrl)}catch(_){}
+      registerAvatarObjectUrl="";
+    }
+    const input=$("#registerAvatar");
+    if(input)input.value="";
+    const wrap=$("#registerAvatarPreview");
+    const img=wrap?.querySelector("img");
+    const plus=wrap?.querySelector("b");
+    if(img){
+      img.classList.add("hidden");
+      img.removeAttribute("src");
+    }
+    if(plus)plus.classList.remove("hidden");
+    $("#removeRegisterAvatar")?.classList.add("hidden");
+  }
+
+  async function applyPendingRegistrationAvatar(email){
+    if(!state.user)return;
+    const file=await takePendingRegistrationAvatar(email);
+    if(!file)return;
+    const check=profileUtil.validateImageFile(file);
+    if(!check.ok)return;
+    try{
+      const media=await uploadFile(file,"profile",{silent:true});
+      await updateOwnProfile({avatar_media_id:media.id});
+    }catch(error){
+      console.warn("ASHUR_REGISTER_AVATAR_APPLY_FAILED",error);
+    }
+  }
+
   function enterPasswordRecoveryMode(message="اكتب كلمة المرور الجديدة للحساب."){
     recoveryModeActive=true;
     setAuthView("recovery");
@@ -633,6 +737,8 @@
       try{
         await refreshProfile();
         await ensureProfileIdentity();
+        await applyPendingRegistrationAvatar(session.user.email||"").catch(()=>{});
+        await refreshProfile();
         setNetworkState(true);
       }catch(error){
         console.warn("ASHUR_PROFILE_OFFLINE",error);
@@ -928,7 +1034,7 @@
     if(!state.user||state.profile?.username)return;
     const username=String(state.user.user_metadata?.username||"").trim().toLowerCase();
     const name=String(state.user.user_metadata?.name||state.profile?.name||"مستخدم").trim();
-    if(!/^[a-z0-9_]{3,24}$/.test(username))return;
+    if(!/^[a-z0-9_.]{2,10}$/.test(username))return;
     const {error}=await client.rpc("claim_username",{p_username:username,p_name:name});
     if(!error)await refreshProfile();
   }
@@ -1035,20 +1141,50 @@
     }
   };
 
+  $("#registerAvatar").onchange=()=>{
+    const file=$("#registerAvatar").files[0]||null;
+    if(!file)return resetRegisterAvatar();
+    const check=profileUtil.validateImageFile(file);
+    if(!check.ok){
+      resetRegisterAvatar();
+      showAuthMessage(check.error);
+      return;
+    }
+    registerAvatarFile=file;
+    if(registerAvatarObjectUrl){
+      try{URL.revokeObjectURL(registerAvatarObjectUrl)}catch(_){}
+    }
+    registerAvatarObjectUrl=URL.createObjectURL(file);
+    const wrap=$("#registerAvatarPreview");
+    const img=wrap.querySelector("img");
+    const plus=wrap.querySelector("b");
+    img.src=registerAvatarObjectUrl;
+    img.classList.remove("hidden");
+    plus.classList.add("hidden");
+    $("#removeRegisterAvatar").classList.remove("hidden");
+    showAuthMessage("");
+  };
+  $("#removeRegisterAvatar").onclick=resetRegisterAvatar;
+
   $("#registerForm").onsubmit=async(e)=>{
     e.preventDefault();
     const form=e.currentTarget;
-    const name=$("#registerName").value.trim();
-    const username=$("#registerUsername").value.trim().toLowerCase();
+    const name=profileUtil.normalizeName($("#registerName").value);
+    const username=profileUtil.normalizeUsername($("#registerUsername").value);
     const email=authUtil.normalizeEmail($("#registerEmail").value);
     const p1=$("#registerPassword").value;
     const p2=$("#registerPassword2").value;
+    const avatar=registerAvatarFile;
 
-    if(name.length<2)return showAuthMessage("اكتب اسمًا ظاهرًا من حرفين على الأقل.");
-    if(!authUtil.validUsername(username))return showAuthMessage("اسم المستخدم يقبل الحروف الإنجليزية والأرقام والشرطة السفلية، من ٣ إلى ٢٤ خانة.");
+    if(name.length<1||name.length>30)return showAuthMessage("الاسم يجب ألا يتجاوز ٣٠ حرفًا.");
+    if(!authUtil.validUsername(username))return showAuthMessage("اسم المستخدم من ٢ إلى ١٠ خانات ويقبل الحروف الإنجليزية والأرقام والنقطة والشرطة السفلية.");
     if(!authUtil.validEmail(email))return showAuthMessage("اكتب بريدًا إلكترونيًا صحيحًا.");
     if(!authUtil.validPassword(p1))return showAuthMessage("كلمة المرور يجب ألا تقل عن ٨ أحرف.");
     if(p1!==p2)return showAuthMessage("كلمتا المرور غير متطابقتين.");
+    if(avatar){
+      const avatarCheck=profileUtil.validateImageFile(avatar);
+      if(!avatarCheck.ok)return showAuthMessage(avatarCheck.error);
+    }
 
     setAuthBusy(form,true);
     try{
@@ -1057,6 +1193,9 @@
         .select("id").eq("username",username).maybeSingle();
       if(checkError)throw checkError;
       if(existingUsername)throw new Error("اسم المستخدم مستخدم بالفعل.");
+
+      if(avatar)await savePendingRegistrationAvatar(email,avatar);
+      else await clearPendingRegistrationAvatar(email);
 
       showAuthMessage("جارٍ إنشاء الحساب...",true);
       const {data,error}=await client.auth.signUp({
@@ -1070,17 +1209,20 @@
       if(error)throw error;
 
       $("#loginEmail").value=email;
+      $("#registerPassword").value="";
+      $("#registerPassword2").value="";
+      resetRegisterAvatar();
+
       if(data?.session){
         state.user=data.session.user;
         await hydrateAuthenticatedSession(data.session,{reason:"signup"});
         showAuthMessage("");
       }else{
         rememberPendingConfirmation(email);
-        $("#registerPassword").value="";
-        $("#registerPassword2").value="";
-        showAuthMessage("إذا تم إنشاء الحساب بنجاح فستصلك رسالة تأكيد. افتحها من نفس الهاتف لإكمال الدخول.",true);
+        showAuthMessage("تم إنشاء الحساب. افتح رسالة التأكيد من نفس الهاتف لإكمال الدخول وإضافة صورة الحساب.",true);
       }
     }catch(error){
+      await clearPendingRegistrationAvatar(email).catch(()=>{});
       const text=String(error?.message||"");
       if(text==="اسم المستخدم مستخدم بالفعل.")showAuthMessage(text);
       else showAuthMessage(authUtil.errorMessage(error,"تعذر إنشاء الحساب. حاول مرة أخرى."));

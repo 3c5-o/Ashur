@@ -824,7 +824,7 @@ async function listConversations(req, res) {
   const ids = memberships.map((x) => x.conversation_id);
   const conversations = await select(
     "conversations",
-    `select=id,kind,title,image_media_id,updated_at&id=in.(${ids.join(",")})&order=updated_at.desc`,
+    `select=id,kind,title,image_media_id,updated_at&id=in.(${ids.join(",")})&is_deleted=eq.false&order=updated_at.desc`,
   );
 
   const items = [];

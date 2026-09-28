@@ -30,6 +30,20 @@ jobs:
           node --check apps/user-web/app.js
           node <<'NODE'
           const fs = require('fs');
+          const vm = require('vm');
+          global.window = global;
+          vm.runInThisContext(fs.readFileSync('apps/user-web/auth-core.js','utf8'));
+          if (!global.AshurAuth.validEmail('User@Example.com')) throw new Error('auth email validator failed');
+          if (global.AshurAuth.normalizeEmail(' User@Example.com ') !== 'user@example.com') throw new Error('auth email normalization failed');
+          if (!global.AshurAuth.validUsername('ashur_123')) throw new Error('auth username validator failed');
+          if (global.AshurAuth.validPassword('1234567')) throw new Error('auth password validator failed');
+          const signup = global.AshurAuth.parseAuthLink('ashur://reset-password?flow=signup#access_token=a&refresh_token=b&type=signup');
+          if (signup.flow !== 'signup' || signup.accessToken !== 'a' || signup.refreshToken !== 'b') throw new Error('auth signup link parser failed');
+          const recovery = global.AshurAuth.parseAuthLink('ashur://reset-password#access_token=a&refresh_token=b&type=recovery');
+          if (recovery.flow !== 'recovery') throw new Error('auth recovery link parser failed');
+          NODE
+          node <<'NODE'
+          const fs = require('fs');
           const app = fs.readFileSync('apps/user-web/app.js','utf8');
           const index = fs.readFileSync('apps/user-web/index.html','utf8');
           const core = fs.readFileSync('apps/user-web/core.js','utf8');

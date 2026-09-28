@@ -49,6 +49,7 @@ jobs:
             cat "$PART" >> /tmp/user-signing.patch
             FIRST=0
           done
+          printf '\n' >> /tmp/user-signing.patch
           (
             cd /tmp/patch-user
             git init -q
@@ -68,6 +69,7 @@ jobs:
           test -n "$ADMIN_BASE" && test -s "$ADMIN_BASE"
           cp "$ADMIN_BASE" /tmp/patch-admin/base.apk
           cat .github/signing-patches/admin.part* > /tmp/admin-signing.patch
+          printf '\n' >> /tmp/admin-signing.patch
           (
             cd /tmp/patch-admin
             git init -q
@@ -101,4 +103,4 @@ jobs:
           git commit -m "Publish signed Ashur user 1.5.0 and admin 1.2.0 [skip ci]"
           git push
 
-# retry-line-safe-3
+# retry-final-newline

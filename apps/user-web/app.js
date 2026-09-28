@@ -101,11 +101,14 @@
           if(!node.isConnected)continue;
           if(access.mime_type?.startsWith("video/") && node.tagName==="IMG"){
             const video=document.createElement("video");
+            const coverMode=node.dataset.profileCover==="1";
             video.className=node.className;
             video.dataset.mediaId=node.dataset.mediaId;
             video.dataset.mediaReady="1";
-            video.src=access.url;
-            video.controls=true;
+            if(coverMode)video.dataset.videoCover="1";
+            video.src=access.url+(coverMode?"#t=0.12":"");
+            video.controls=!coverMode;
+            video.muted=coverMode;
             video.playsInline=true;
             video.preload="metadata";
             node.replaceWith(video);
@@ -128,7 +131,14 @@
             link.textContent=access.original_name||"فتح الملف";
             node.replaceWith(link);
           }else{
-            node.src=access.url;
+            const coverMode=node.dataset.videoCover==="1";
+            node.src=access.url+(coverMode?"#t=0.12":"");
+            if(coverMode && node.tagName==="VIDEO"){
+              node.muted=true;
+              node.controls=false;
+              node.playsInline=true;
+              node.preload="metadata";
+            }
             node.dataset.mediaReady="1";
           }
         }catch(_){
@@ -141,6 +151,25 @@
     };
     const workers=Array.from({length:Math.min(4,nodes.length)},()=>worker());
     await Promise.all(workers);
+  }
+
+  function prepareVideoCovers(root=document){
+    root.querySelectorAll('video[data-video-cover="1"]').forEach(video=>{
+      const showFrame=()=>{
+        try{
+          video.pause();
+          if(Number.isFinite(video.duration)&&video.duration>0&&video.currentTime<0.08){
+            video.currentTime=Math.min(0.12,Math.max(0.01,video.duration/20));
+          }
+        }catch(_){}
+        video.classList.add("frame-ready");
+      };
+      if(video.readyState>=2)showFrame();
+      else{
+        video.addEventListener("loadeddata",showFrame,{once:true});
+        video.addEventListener("seeked",()=>video.classList.add("frame-ready"),{once:true});
+      }
+    });
   }
 
   async function accessToken(){
@@ -1637,6 +1666,7 @@
     $("#profileCard").innerHTML=`
       <div class="profile-cover">
         ${p.cover_media_id?`<img class="cover-image" data-media-id="${p.cover_media_id}" alt="">`:""}
+        <button id="profileSettingsFab" class="profile-settings-fab" type="button" aria-label="الإعدادات">${icon("settings")}</button>
       </div>
       <div class="profile-main">
         <div class="profile-avatar-wrap">${avatar(p)}</div>
@@ -1657,6 +1687,7 @@
         </div>
       </div>`;
     $("#editProfileButton").onclick=openEditProfile;
+    $("#profileSettingsFab").onclick=openSettings;
     $("#profilePrivacyButton").onclick=async()=>{
       const next=!Boolean(state.profile?.is_private);
       const label=next?"خاص":"عام";
@@ -1711,7 +1742,7 @@
     await hydrateMedia($("#profileContent"));
   }
 
-  $$(".profile-tabs button").forEach((b,i)=>b.onclick=()=>loadProfileContent(i===0?"posts":"reels"));
+  $("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.onclick=()=>loadProfileContent(btn.dataset.profileTab));
 
   async function openPublicProfile(uid){
     if(uid===state.user.id){

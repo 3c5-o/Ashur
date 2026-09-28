@@ -2439,6 +2439,7 @@
       $("#notifyStories").checked=p.stories!==false;
       $("#notifySystem").checked=p.system!==false;
       $("#notifyPreview").checked=p.preview_message!==false;
+      $("#settingsPrivateToggle").checked=!!state.profile?.is_private;
       await loadFollowRequests();
     }catch(error){
       $("#followRequestsList").innerHTML='<div class="empty error">تعذر تحميل بعض الإعدادات.</div>';
@@ -2454,6 +2455,22 @@
   $("#settingsEditProfile").onclick=()=>{
     $("#settingsDialog").close();
     openEditProfile();
+  };
+  $("#settingsPrivateToggle").onchange=async()=>{
+    const toggle=$("#settingsPrivateToggle");
+    const next=toggle.checked;
+    toggle.disabled=true;
+    const {error}=await client.from("profiles").update({
+      is_private:next,
+      updated_at:new Date().toISOString()
+    }).eq("id",state.user.id);
+    toggle.disabled=false;
+    if(error){
+      toggle.checked=!next;
+      alert(error.message);
+      return;
+    }
+    await refreshProfile();
   };
 
   function openInfoDialog(title,html){

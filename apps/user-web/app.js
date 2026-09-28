@@ -1864,6 +1864,46 @@
 
   $("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.onclick=()=>loadProfileContent(btn.dataset.profileTab));
 
+  async function loadPublicProfileContent(uid,kind="posts",mayView=true){
+    if(!["posts","reels"].includes(kind))kind="posts";
+    state.publicProfileTab=kind;
+    $("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
+      btn.classList.toggle("active",btn.dataset.publicProfileTab===kind);
+    });
+    $("#publicProfileContent").className="profile-media-grid";
+    if(!mayView){
+      $("#publicProfileContent").innerHTML='<div class="empty profile-grid-empty">هذا الحساب خاص. تابع الحساب وانتظر الموافقة لعرض المحتوى.</div>';
+      return;
+    }
+    $("#publicProfileContent").innerHTML='<div class="profile-grid-loading">جارٍ التحميل...</div>';
+    try{
+      if(kind==="reels"){
+        const result=await client.from("reels")
+          .select("id,caption,media_id,comments_enabled,created_at")
+          .eq("author_id",uid)
+          .order("created_at",{ascending:false})
+          .limit(90);
+        if(result.error)throw result.error;
+        $("#publicProfileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"reels")).join("")||
+          '<div class="empty profile-grid-empty">لا توجد ريلز بعد.</div>';
+      }else{
+        const result=await client.from("posts")
+          .select("id,caption,comments_enabled,created_at,post_media(media_id,sort_order)")
+          .eq("author_id",uid)
+          .order("created_at",{ascending:false})
+          .limit(90);
+        if(result.error)throw result.error;
+        $("#publicProfileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"posts")).join("")||
+          '<div class="empty profile-grid-empty">لا توجد منشورات بعد.</div>';
+      }
+      await hydrateMedia($("#publicProfileContent"));
+      prepareVideoCovers($("#publicProfileContent"));
+      bindProfileGrid($("#publicProfileContent"));
+    }catch(error){
+      $("#publicProfileContent").innerHTML='<div class="empty error profile-grid-empty">'+escapeHtml(error.message)+'</div>';
+    }
+  }
+
   async function openPublicProfile(uid){
     if(uid===state.user.id){
       $("#publicProfileDialog").close();
@@ -1948,32 +1988,12 @@
     };
 
     const mayView=!p.is_private||followRow?.status==="accepted";
-    if(!mayView){
-      $("#publicProfileContent").innerHTML='<div class="empty">هذا الحساب خاص. تابع الحساب وانتظر الموافقة لعرض المحتوى.</div>';
-    }else{
-      const {data:content,error:contentError}=await client.from("posts")
-        .select("id,caption,created_at,post_media(media_id,sort_order)")
-        .eq("author_id",uid)
-        .order("created_at",{ascending:false})
-        .limit(30);
-      if(contentError){
-        $("#publicProfileContent").innerHTML='<div class="empty error">'+escapeHtml(contentError.message)+'</div>';
-      }else{
-        $("#publicProfileContent").innerHTML=(content||[]).map(row=>{
-          const media=(row.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
-          return '<article class="post">'+
-            (media?'<img class="post-media" data-media-id="'+escapeHtml(media)+'" alt="">':"")+
-            '<div class="post-body">'+escapeHtml(row.caption||"")+
-              '<div class="content-owner-actions"><button data-report-public-post="'+escapeHtml(row.id)+'" type="button">إبلاغ</button></div>'+
-            '</div></article>';
-        }).join("")||'<div class="empty">لا توجد منشورات بعد.</div>';
-        await hydrateMedia($("#publicProfileContent"));
-        $("#publicProfileContent").querySelectorAll("[data-report-public-post]").forEach(btn=>btn.onclick=()=>{
-          $("#publicProfileDialog").close();
-          openReportDialog("post",btn.dataset.reportPublicPost);
-        });
-      }
-    }
+    state.currentPublicProfile={...p,mayView};
+    state.publicProfileTab="posts";
+    await loadPublicProfileContent(uid,"posts",mayView);
+    $$("#publicProfileTabs [data-public-profile-tab]").forEach(btn=>{
+      btn.onclick=()=>loadPublicProfileContent(uid,btn.dataset.publicProfileTab,mayView);
+    });
   }
   $("#closePublicProfile").onclick=()=>{
     state.currentPublicProfile=null;

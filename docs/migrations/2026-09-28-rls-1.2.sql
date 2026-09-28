@@ -393,3 +393,297 @@ with check (
     )
   )
 );
+
+-- Batch D: social content ownership and least-privilege hardening
+
+revoke insert, update, delete, truncate on table
+  public.posts,
+  public.post_media,
+  public.post_likes,
+  public.reels,
+  public.reel_likes,
+  public.stories,
+  public.comments
+from anon;
+
+revoke all on table
+  public.saved_posts,
+  public.saved_reels,
+  public.story_views
+from anon;
+
+revoke truncate on table
+  public.posts,
+  public.post_media,
+  public.post_likes,
+  public.saved_posts,
+  public.reels,
+  public.reel_likes,
+  public.saved_reels,
+  public.stories,
+  public.story_views,
+  public.comments
+from authenticated;
+
+revoke update, delete on table
+  public.posts,
+  public.post_media,
+  public.reels,
+  public.stories,
+  public.comments
+from authenticated;
+
+revoke update on table
+  public.post_likes,
+  public.reel_likes,
+  public.saved_posts,
+  public.saved_reels,
+  public.story_views
+from authenticated;
+
+revoke insert on table public.posts from authenticated;
+grant insert (author_id, caption, visibility, comments_enabled)
+on table public.posts to authenticated;
+
+revoke insert on table public.post_media from authenticated;
+grant insert (post_id, media_id, sort_order)
+on table public.post_media to authenticated;
+
+revoke insert on table public.reels from authenticated;
+grant insert (author_id, media_id, cover_media_id, caption, visibility, comments_enabled, explore_enabled)
+on table public.reels to authenticated;
+
+revoke insert on table public.stories from authenticated;
+grant insert (author_id, media_id, caption, overlay_text, overlay_color, overlay_y, overlay_bg)
+on table public.stories to authenticated;
+
+revoke insert on table public.comments from authenticated;
+grant insert (author_id, body, parent_id, post_id, reel_id)
+on table public.comments to authenticated;
+
+revoke insert, delete on table public.story_views from authenticated;
+
+drop policy if exists post_media_insert on public.post_media;
+create policy post_media_insert on public.post_media
+for insert to authenticated
+with check (
+  exists (
+    select 1
+    from public.posts p
+    where p.id = post_media.post_id
+      and p.author_id = (select auth.uid())
+  )
+  and exists (
+    select 1
+    from public.media_objects m
+    where m.id = post_media.media_id
+      and m.owner_id = (select auth.uid())
+      and m.status = 'ready'
+      and m.kind in ('post_image','post_video')
+  )
+);
+
+drop policy if exists post_media_update on public.post_media;
+create policy post_media_update on public.post_media
+for update to authenticated
+using (
+  exists (
+    select 1 from public.posts p
+    where p.id = post_media.post_id
+      and p.author_id = (select auth.uid())
+  )
+)
+with check (
+  exists (
+    select 1 from public.posts p
+    where p.id = post_media.post_id
+      and p.author_id = (select auth.uid())
+  )
+  and exists (
+    select 1
+    from public.media_objects m
+    where m.id = post_media.media_id
+      and m.owner_id = (select auth.uid())
+      and m.status = 'ready'
+      and m.kind in ('post_image','post_video')
+  )
+);
+
+drop policy if exists reels_insert on public.reels;
+create policy reels_insert on public.reels
+for insert to authenticated
+with check (
+  author_id = (select auth.uid())
+  and moderation_status = 'active'
+  and deleted_at is null
+  and exists (
+    select 1 from public.profiles p
+    where p.id = (select auth.uid())
+      and p.deleted_at is null
+      and p.is_banned = false
+      and (p.banned_until is null or p.banned_until <= now())
+  )
+  and exists (
+    select 1 from public.media_objects m
+    where m.id = reels.media_id
+      and m.owner_id = (select auth.uid())
+      and m.status = 'ready'
+      and m.kind = 'reel'
+  )
+  and (
+    cover_media_id is null
+    or exists (
+      select 1 from public.media_objects m
+      where m.id = reels.cover_media_id
+        and m.owner_id = (select auth.uid())
+        and m.status = 'ready'
+        and m.kind = 'reel_cover'
+    )
+  )
+);
+
+drop policy if exists reels_update on public.reels;
+create policy reels_update on public.reels
+for update to authenticated
+using (author_id = (select auth.uid()))
+with check (
+  author_id = (select auth.uid())
+  and exists (
+    select 1 from public.media_objects m
+    where m.id = reels.media_id
+      and m.owner_id = (select auth.uid())
+      and m.status = 'ready'
+      and m.kind = 'reel'
+  )
+  and (
+    cover_media_id is null
+    or exists (
+      select 1 from public.media_objects m
+      where m.id = reels.cover_media_id
+        and m.owner_id = (select auth.uid())
+        and m.status = 'ready'
+        and m.kind = 'reel_cover'
+    )
+  )
+);
+
+drop policy if exists stories_insert on public.stories;
+create policy stories_insert on public.stories
+for insert to authenticated
+with check (
+  author_id = (select auth.uid())
+  and moderation_status = 'active'
+  and deleted_at is null
+  and exists (
+    select 1 from public.profiles p
+    where p.id = (select auth.uid())
+      and p.deleted_at is null
+      and p.is_banned = false
+      and (p.banned_until is null or p.banned_until <= now())
+  )
+  and exists (
+    select 1 from public.media_objects m
+    where m.id = stories.media_id
+      and m.owner_id = (select auth.uid())
+      and m.status = 'ready'
+      and m.kind = 'story'
+  )
+);
+
+drop policy if exists stories_update on public.stories;
+create policy stories_update on public.stories
+for update to authenticated
+using (author_id = (select auth.uid()))
+with check (
+  author_id = (select auth.uid())
+  and exists (
+    select 1 from public.media_objects m
+    where m.id = stories.media_id
+      and m.owner_id = (select auth.uid())
+      and m.status = 'ready'
+      and m.kind = 'story'
+  )
+);
+
+drop policy if exists comments_insert on public.comments;
+create policy comments_insert on public.comments
+for insert to authenticated
+with check (
+  author_id = (select auth.uid())
+  and moderation_status = 'active'
+  and deleted_at is null
+  and char_length(trim(body)) between 1 and 2000
+  and (
+    (
+      post_id is not null
+      and reel_id is null
+      and exists (
+        select 1 from public.posts p
+        where p.id = comments.post_id
+          and p.comments_enabled = true
+      )
+    )
+    or
+    (
+      reel_id is not null
+      and post_id is null
+      and exists (
+        select 1 from public.reels r
+        where r.id = comments.reel_id
+          and r.comments_enabled = true
+      )
+    )
+  )
+  and (
+    parent_id is null
+    or exists (
+      select 1
+      from public.comments parent
+      where parent.id = comments.parent_id
+        and parent.deleted_at is null
+        and parent.moderation_status = 'active'
+        and parent.post_id is not distinct from comments.post_id
+        and parent.reel_id is not distinct from comments.reel_id
+    )
+  )
+);
+
+drop policy if exists saved_posts_own on public.saved_posts;
+drop policy if exists saved_posts_read_own on public.saved_posts;
+drop policy if exists saved_posts_insert_own on public.saved_posts;
+drop policy if exists saved_posts_delete_own on public.saved_posts;
+
+create policy saved_posts_read_own on public.saved_posts
+for select to authenticated
+using (user_id = (select auth.uid()));
+
+create policy saved_posts_insert_own on public.saved_posts
+for insert to authenticated
+with check (
+  user_id = (select auth.uid())
+  and exists (select 1 from public.posts p where p.id = saved_posts.post_id)
+);
+
+create policy saved_posts_delete_own on public.saved_posts
+for delete to authenticated
+using (user_id = (select auth.uid()));
+
+drop policy if exists saved_reels_own on public.saved_reels;
+drop policy if exists saved_reels_read_own on public.saved_reels;
+drop policy if exists saved_reels_insert_own on public.saved_reels;
+drop policy if exists saved_reels_delete_own on public.saved_reels;
+
+create policy saved_reels_read_own on public.saved_reels
+for select to authenticated
+using (user_id = (select auth.uid()));
+
+create policy saved_reels_insert_own on public.saved_reels
+for insert to authenticated
+with check (
+  user_id = (select auth.uid())
+  and exists (select 1 from public.reels r where r.id = saved_reels.reel_id)
+);
+
+create policy saved_reels_delete_own on public.saved_reels
+for delete to authenticated
+using (user_id = (select auth.uid()));

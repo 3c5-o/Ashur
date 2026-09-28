@@ -269,45 +269,56 @@ async function canReadMedia(user, media) {
   if (media.kind === "post_image" || media.kind === "post_video") {
     const links = await select(
       "post_media",
-      `select=post_id&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=post_id&media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
     if (!links?.length) return false;
-    const posts = await select(
-      "posts",
-      `select=author_id,visibility,moderation_status,deleted_at&id=eq.${encodeURIComponent(links[0].post_id)}&limit=1`,
-    );
-    const post = posts?.[0];
-    if (!post || post.deleted_at || post.moderation_status !== "active") return false;
-    return canViewContentOwner(user, post.author_id, post.visibility || "public");
+    for (const link of links) {
+      const posts = await select(
+        "posts",
+        `select=author_id,visibility,moderation_status,deleted_at&id=eq.${encodeURIComponent(link.post_id)}&limit=1`,
+      );
+      const post = posts?.[0];
+      if (!post || post.deleted_at || post.moderation_status !== "active") continue;
+      if (await canViewContentOwner(user, post.author_id, post.visibility || "public")) return true;
+    }
+    return false;
   }
 
   if (media.kind === "reel") {
     const reels = await select(
       "reels",
-      `select=author_id,visibility,moderation_status,deleted_at&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,visibility,moderation_status,deleted_at&media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
-    const reel = reels?.[0];
-    if (!reel || reel.deleted_at || reel.moderation_status !== "active") return false;
-    return canViewContentOwner(user, reel.author_id, reel.visibility || "public");
+    for (const reel of reels || []) {
+      if (!reel || reel.deleted_at || reel.moderation_status !== "active") continue;
+      if (await canViewContentOwner(user, reel.author_id, reel.visibility || "public")) return true;
+    }
+    return false;
   }
 
   if (media.kind === "reel_cover") {
     const reels = await select(
       "reels",
-      `select=author_id,visibility,moderation_status,deleted_at&cover_media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,visibility,moderation_status,deleted_at&cover_media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
-    const reel = reels?.[0];
-    if (!reel || reel.deleted_at || reel.moderation_status !== "active") return false;
-    return canViewContentOwner(user, reel.author_id, reel.visibility || "public");
+    for (const reel of reels || []) {
+      if (!reel || reel.deleted_at || reel.moderation_status !== "active") continue;
+      if (await canViewContentOwner(user, reel.author_id, reel.visibility || "public")) return true;
+    }
+    return false;
   }
 
   if (media.kind === "story") {
     const stories = await select(
       "stories",
-      `select=author_id,expires_at&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,expires_at,moderation_status,deleted_at&media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
-    if (!stories?.[0] || new Date(stories[0].expires_at) <= new Date()) return false;
-    return canViewOwner(user, stories[0].author_id);
+    for (const story of stories || []) {
+      if (!story || story.deleted_at || story.moderation_status !== "active") continue;
+      if (new Date(story.expires_at) <= new Date()) continue;
+      if (await canViewOwner(user, story.author_id)) return true;
+    }
+    return false;
   }
 
   if (["chat_image", "chat_video", "chat_audio", "chat_file", "group_media"].includes(media.kind)) {
@@ -1301,18 +1312,24 @@ async function socialStoryViewers(req, res, storyId) {
   );
   if (!stories?.[0]) return json(res, 404, { error: "القصة غير موجودة" });
   if (stories[0].author_id !== user.id) return json(res, 403, { error: "هذه البيانات لصاحب القصة فقط" });
+
   const rows = await select(
     "story_views",
     "select=user_id,viewed_at&story_id=eq." + encodeURIComponent(storyId) + "&order=viewed_at.desc&limit=500",
   );
-  const items = [];
-  for (const row of rows || []) {
-    const p = await select(
-      "profiles",
-      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.user_id) + "&limit=1",
-    );
-    if (p?.[0]) items.push({ ...p[0], viewed_at: row.viewed_at });
-  }
+  const ids = [...new Set((rows || []).map((row) => row.user_id).filter(Boolean))];
+  if (!ids.length) return json(res, 200, { items: [] });
+
+  const profiles = await select(
+    "profiles",
+    "select=id,name,username,avatar_media_id,is_verified&id=in.(" + ids.map(encodeURIComponent).join(",") + ")",
+  );
+  const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const items = (rows || []).map((row) => {
+    const profile = profileMap.get(row.user_id);
+    return profile ? { ...profile, viewed_at: row.viewed_at } : null;
+  }).filter(Boolean);
+
   json(res, 200, { items });
 }
 

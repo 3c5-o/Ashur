@@ -1060,3 +1060,16 @@ input[type="email"],#loginEmail,#registerEmail,#newConversationUsername,#editUse
   .profile-buttons{grid-template-columns:minmax(0,1fr) 42px 42px!important}
   #settingsButton,#logoutButton{width:42px!important;min-width:42px!important}
 }
+
+.profile-buttons .small-button svg,
+.profile-actions-public .small-button svg{
+  fill:none!important;
+  stroke:currentColor!important;
+  stroke-width:2!important;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.profile-more-button svg{
+  fill:currentColor!important;
+  stroke:none!important;
+}

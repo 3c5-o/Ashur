@@ -7,7 +7,7 @@ def keystoreFilePath = System.getenv("ASHUR_KEYSTORE_FILE") ?: ""
 def keystorePassword = System.getenv("ASHUR_KEYSTORE_PASSWORD") ?: ""
 def keyAliasName = System.getenv("ASHUR_KEY_ALIAS") ?: ""
 def keyPasswordValue = System.getenv("ASHUR_KEY_PASSWORD") ?: ""
-def hasReleaseSigning = keystoreFilePath && keystorePassword && keyAliasName && keyPasswordValue && file(keystoreFilePath).exists()
+def hasReleaseSigning = keystoreFilePath && keystorePassword && keyAliasName && keyPasswordValue && file(keystoreFilePath).exists()\ndef requireReleaseSigning = (System.getenv("ASHUR_REQUIRE_RELEASE_SIGNING") ?: "false").toBoolean()
 
 android {
     namespace 'app.ashur.admin'
@@ -40,7 +40,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            if (hasReleaseSigning) signingConfig signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else if (requireReleaseSigning) {
+                throw new GradleException("توقيع Release الرسمي مطلوب لكنه غير متوفر")
+            }
         }
     }
 

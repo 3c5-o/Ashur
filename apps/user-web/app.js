@@ -1411,7 +1411,8 @@
             body:JSON.stringify({
               body:"",
               shared_type:type,
-              shared_id:id
+              shared_id:id,
+              client_message_id:crypto.randomUUID?.()||undefined
             })
           });
           btn.querySelector(".share-send-label").textContent="تم";
@@ -1956,19 +1957,40 @@
     const conversationId=state.activeConversation;
     const seq=++state.chatLoadSeq;
 
-    let result;
+    let data=[];
     try{
-      result=await api("/v1/conversations/"+encodeURIComponent(conversationId)+"/messages");
-    }catch(error){
-      if(!quiet&&conversationId===state.activeConversation){
-        $("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+      const result=await api("/v1/conversations/"+encodeURIComponent(conversationId)+"/messages");
+      data=result.items||[];
+    }catch(apiError){
+      // Compatibility fallback for an older Ashur API deployment.
+      const direct=await client.from("messages")
+        .select("id,sender_id,body,media_id,reply_to,shared_type,shared_id,created_at")
+        .eq("conversation_id",conversationId)
+        .eq("is_deleted",false)
+        .order("created_at")
+        .limit(220);
+
+      if(direct.error){
+        if(!quiet&&conversationId===state.activeConversation){
+          $("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(apiError.message||direct.error.message)+'</div>';
+        }
+        return;
       }
-      return;
+
+      data=direct.data||[];
+      const ownIds=data.filter(m=>m.sender_id===state.user.id).map(m=>m.id);
+      if(ownIds.length){
+        const reads=await client.from("message_reads")
+          .select("message_id,user_id")
+          .in("message_id",ownIds);
+        const readSet=new Set((reads.data||[]).filter(r=>r.user_id!==state.user.id).map(r=>r.message_id));
+        data=data.map(m=>({...m,read_by_other:m.sender_id===state.user.id&&readSet.has(m.id)}));
+      }
+      console.warn("ASHUR_CHAT_API_FALLBACK",apiError);
     }
 
     if(conversationId!==state.activeConversation||seq!==state.chatLoadSeq)return;
 
-    const data=result.items||[];
     state.chatMessageIds=new Set(data.map(m=>m.id));
     const otherUnread=data.filter(m=>m.sender_id!==state.user.id).map(m=>m.id);
     const byId=new Map(data.map(m=>[m.id,m]));

@@ -321,3 +321,75 @@ with check (
   user_id = (select auth.uid())
   and exists (select 1 from public.reels r where r.id = reel_likes.reel_id)
 );
+
+-- Batch C: profile identity hardening
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname='profiles_name_length' and conrelid='public.profiles'::regclass) then
+    alter table public.profiles
+      add constraint profiles_name_length check (char_length(trim(name)) between 1 and 80);
+  end if;
+  if not exists (select 1 from pg_constraint where conname='profiles_bio_length' and conrelid='public.profiles'::regclass) then
+    alter table public.profiles
+      add constraint profiles_bio_length check (char_length(bio) <= 300);
+  end if;
+  if not exists (select 1 from pg_constraint where conname='profiles_link_length' and conrelid='public.profiles'::regclass) then
+    alter table public.profiles
+      add constraint profiles_link_length check (char_length(profile_link) <= 220);
+  end if;
+  if not exists (select 1 from pg_constraint where conname='profiles_saved_visibility_values' and conrelid='public.profiles'::regclass) then
+    alter table public.profiles
+      add constraint profiles_saved_visibility_values check (saved_visibility in ('private','public'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname='profiles_username_lowercase' and conrelid='public.profiles'::regclass) then
+    alter table public.profiles
+      add constraint profiles_username_lowercase check (username is null or username = lower(username));
+  end if;
+end $$;
+
+drop policy if exists profiles_update_own on public.profiles;
+create policy profiles_update_own on public.profiles
+for update to authenticated
+using (
+  id = (select auth.uid())
+  and deleted_at is null
+  and is_banned = false
+  and (banned_until is null or banned_until <= now())
+)
+with check (
+  id = (select auth.uid())
+  and deleted_at is null
+  and is_banned = false
+  and (banned_until is null or banned_until <= now())
+  and char_length(trim(name)) between 1 and 80
+  and char_length(bio) <= 300
+  and char_length(profile_link) <= 220
+  and saved_visibility in ('private','public')
+  and (username is null or (
+    username = lower(username)
+    and username ~ '^[a-z0-9_]{3,24}$'
+  ))
+  and (
+    avatar_media_id is null
+    or exists (
+      select 1
+      from public.media_objects m
+      where m.id = avatar_media_id
+        and m.owner_id = (select auth.uid())
+        and m.status = 'ready'
+        and m.kind = 'profile'
+    )
+  )
+  and (
+    cover_media_id is null
+    or exists (
+      select 1
+      from public.media_objects m
+      where m.id = cover_media_id
+        and m.owner_id = (select auth.uid())
+        and m.status = 'ready'
+        and m.kind = 'profile_cover'
+    )
+  )
+);

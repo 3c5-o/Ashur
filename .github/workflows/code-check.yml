@@ -5,6 +5,8 @@ on:
     branches: [main, feature/ashur-1.2-full-build]
     paths:
       - "apps/**/*.js"
+      - "apps/**/*.html"
+      - "apps/**/*.css"
       - "services/**/*.mjs"
       - "android/user/app/src/main/java/**/*.java"
       - ".github/workflows/code-check.yml"
@@ -27,12 +29,14 @@ jobs:
         run: |
           node --check apps/user-web/core.js
           node --check apps/user-web/auth-core.js
+          node --check apps/user-web/profile-core.js
           node --check apps/user-web/app.js
           node <<'NODE'
           const fs = require('fs');
           const vm = require('vm');
           global.window = global;
           vm.runInThisContext(fs.readFileSync('apps/user-web/auth-core.js','utf8'));
+          vm.runInThisContext(fs.readFileSync('apps/user-web/profile-core.js','utf8'));
           if (!global.AshurAuth.validEmail('User@Example.com')) throw new Error('auth email validator failed');
           if (global.AshurAuth.normalizeEmail(' User@Example.com ') !== 'user@example.com') throw new Error('auth email normalization failed');
           if (!global.AshurAuth.validUsername('ashur_123')) throw new Error('auth username validator failed');
@@ -41,6 +45,16 @@ jobs:
           if (signup.flow !== 'signup' || signup.accessToken !== 'a' || signup.refreshToken !== 'b') throw new Error('auth signup link parser failed');
           const recovery = global.AshurAuth.parseAuthLink('ashur://reset-password#access_token=a&refresh_token=b&type=recovery');
           if (recovery.flow !== 'recovery') throw new Error('auth recovery link parser failed');
+          const profile = global.AshurProfile.validateProfile({
+            name:' حمد  النزار ',
+            username:'ASHUR_123',
+            bio:'نبذة',
+            profile_link:'example.com/user',
+            is_private:true
+          });
+          if (!profile.ok || profile.value.username !== 'ashur_123' || profile.value.name !== 'حمد النزار') throw new Error('profile normalization failed');
+          if (!profile.value.profile_link.startsWith('https://')) throw new Error('profile link normalization failed');
+          if (global.AshurProfile.validateImageFile({type:'application/pdf',size:10}).ok) throw new Error('profile image validation failed');
           NODE
           node <<'NODE'
           const fs = require('fs');
@@ -48,6 +62,8 @@ jobs:
           const index = fs.readFileSync('apps/user-web/index.html','utf8');
           const core = fs.readFileSync('apps/user-web/core.js','utf8');
           const authCore = fs.readFileSync('apps/user-web/auth-core.js','utf8');
+          const profileCore = fs.readFileSync('apps/user-web/profile-core.js','utf8');
+          const server = fs.readFileSync('services/api/src/server.mjs','utf8');
           const manifest = fs.readFileSync('android/user/app/src/main/AndroidManifest.xml','utf8');
           const main = fs.readFileSync('android/user/app/src/main/java/app/ashur/social/MainActivity.java','utf8');
           const directSingleForEach = /(^|[^$])\$\((?:"[^"]*"|'[^']*')\)\.forEach/g.test(app);
@@ -64,8 +80,11 @@ jobs:
           const missingAuthReady = !main.includes('void authReady()') || !app.includes('AshurNative?.authReady');
           const missingSingleTask = !manifest.includes('android:launchMode="singleTask"');
           const missingLocalLogout = !app.includes('signOut({scope:"local"})');
-          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout) {
-            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout});
+          const missingProfileCore = !index.includes('./profile-core.js') || !profileCore.includes('validateProfile') || !app.includes('window.AshurProfile');
+          const missingProfileMediaGuard = !server.includes('detectProfileImageMime') || !server.includes('kind === "profile_cover"');
+          const missingDeleteRevocation = !server.includes('/auth/v1/logout?scope=global');
+          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation) {
+            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation});
             process.exit(1);
           }
           NODE

@@ -1451,20 +1451,25 @@
           '<button id="shareToStoryButton" type="button"><span class="share-round">'+icon("play")+'</span><b>إضافة للقصة</b></button>'+
           '<button id="shareExternalButton" type="button"><span class="share-round">'+icon("share")+'</span><b>مشاركة خارجية</b></button>'+
         '</div>'+
+        '<label class="creator-caption-wrap share-story-caption"><span>اكتب على القصة</span><textarea id="shareStoryCaption" maxlength="300" placeholder="اكتب نصًا أو استخدم @ لذكر صديق"></textarea></label>'+
         '<div class="settings-group"><div class="settings-group-title"><div><span class="eyebrow">الخاص</span><h4>إرسال لصديق</h4></div></div>'+
           '<div id="shareConversationsList" class="list compact"><div class="empty">جارٍ تحميل المحادثات...</div></div>'+
         '</div>'+
         '<p id="shareMessage" class="message"></p>'+
       '</div>');
 
+    bindMentionAutocomplete($("#shareStoryCaption"));
     $("#shareToStoryButton").onclick=async()=>{
       $("#shareToStoryButton").disabled=true;
       try{
-        await api("/v1/social/share-story",{
+        const caption=$("#shareStoryCaption")?.value.trim()||"";
+        const created=await api("/v1/social/share-story",{
           method:"POST",
-          body:JSON.stringify({type,id})
+          body:JSON.stringify({type,id,caption})
         });
+        if(created?.id)await notifyMentions(caption,"story",created.id);
         $("#shareMessage").textContent="تمت إضافة "+label+" إلى قصتك.";
+        await loadStories().catch(()=>{});
       }catch(error){
         $("#shareMessage").textContent=error.message;
       }finally{$("#shareToStoryButton").disabled=false}
@@ -2487,7 +2492,7 @@
         avatar(p)+
         '<div class="comment-bubble"><div class="comment-bubble-head"><b>'+escapeHtml(p.name||p.username||"مستخدم")+'</b>'+
         (p.is_verified?'<span class="verified-inline">✓</span>':"")+'</div>'+
-        parentHtml+'<p>'+escapeHtml(row.body)+'</p>'+
+        parentHtml+'<p>'+richText(row.body)+'</p>'+
         '<div class="comment-meta">'+new Date(row.created_at).toLocaleString("ar-IQ")+edited+'</div>'+
         '<div class="comment-actions">'+
           '<button class="comment-action" data-reply-comment="'+escapeHtml(row.id)+'" data-reply-name="'+escapeHtml(p.username||p.name||"مستخدم")+'" type="button">رد</button>'+

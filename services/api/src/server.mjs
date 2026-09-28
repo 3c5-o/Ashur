@@ -33,6 +33,7 @@ const CHANNELS = {
   post_image: "posts_media",
   post_video: "posts_media",
   reel: "reels",
+  reel_cover: "reels",
   story: "stories",
   chat_image: "chat_media",
   chat_video: "chat_media",
@@ -49,6 +50,7 @@ const DEFAULT_LIMITS_MB = {
   post_image: 10,
   post_video: 60,
   reel: 60,
+  reel_cover: 10,
   story: 30,
   chat_image: 10,
   chat_video: 50,
@@ -268,6 +270,14 @@ async function canReadMedia(user, media) {
     return reels?.[0] ? canViewOwner(user, reels[0].author_id) : false;
   }
 
+  if (media.kind === "reel_cover") {
+    const reels = await select(
+      "reels",
+      `select=author_id&cover_media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+    );
+    return reels?.[0] ? canViewOwner(user, reels[0].author_id) : false;
+  }
+
   if (media.kind === "story") {
     const stories = await select(
       "stories",
@@ -331,6 +341,7 @@ async function uploadLimitBytes(kind) {
       post_image: limits.image_mb,
       post_video: limits.max_upload_mb,
       reel: limits.max_upload_mb,
+      reel_cover: limits.image_mb,
       story: limits.story_mb,
       chat_image: limits.image_mb,
       chat_video: limits.chat_video_mb,

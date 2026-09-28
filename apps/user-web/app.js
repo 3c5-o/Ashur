@@ -46,6 +46,8 @@
     viewedReels:new Set(),
     reelViewTimers:new Map(),
     composerPublishing:false,
+    composerDraftTimer:null,
+    composerDraftRestoring:false,
     cameraStream:null,
     cameraFacing:"environment",
     cameraMode:"photo",
@@ -1704,12 +1706,19 @@
     };
   }
 
-  function openOwnContentActions(kind,id,caption="",commentsEnabled=true,pinned=false){
+  function openOwnContentActions(kind,id,caption="",commentsEnabled=true,pinned=false,visibility="public"){
     const label=kind==="reels"?"الريلز":kind==="stories"?"القصة":"المنشور";
     const commentsField=kind==="stories"?"":`
       <label class="switch-row">
         <span><b>السماح بالتعليقات</b><small>يمكن تغييرها بأي وقت</small></span>
         <input id="ownContentComments" type="checkbox" ${commentsEnabled!==false?"checked":""}>
+      </label>`;
+    const audienceField=kind==="stories"?"":`
+      <label><span>من يشاهد المحتوى؟</span>
+        <select id="ownContentVisibility">
+          <option value="public" ${visibility!=="followers"?"selected":""}>الجميع</option>
+          <option value="followers" ${visibility==="followers"?"selected":""}>المتابعون فقط</option>
+        </select>
       </label>`;
     const pinAction=kind==="posts"
       ?`<button id="pinOwnContent" class="secondary-wide content-pin-action ${pinned?"active":""}" type="button">${icon("pin")}<span>${pinned?"إلغاء تثبيت المنشور":"تثبيت في الملف الشخصي"}</span></button>`
@@ -1718,6 +1727,7 @@
       <div class="form settings-info content-manage-sheet">
         <label><span>الوصف</span><textarea id="ownContentCaption" maxlength="2200">${escapeHtml(caption||"")}</textarea></label>
         ${commentsField}
+        ${audienceField}
         ${pinAction}
         <button id="saveOwnContent" class="primary" type="button">حفظ التعديلات</button>
         <button id="deleteOwnContent" class="danger-wide danger-outline" type="button">حذف ${label}</button>
@@ -1747,7 +1757,10 @@
       $("#saveOwnContent").disabled=true;
       try{
         const body={caption:$("#ownContentCaption").value.trim()};
-        if(kind!=="stories")body.comments_enabled=$("#ownContentComments").checked;
+        if(kind!=="stories"){
+          body.comments_enabled=$("#ownContentComments").checked;
+          body.visibility=$("#ownContentVisibility").value==="followers"?"followers":"public";
+        }
         await api("/v1/social/content/"+kind+"/"+id,{method:"PATCH",body:JSON.stringify(body)});
         $("#infoDialog").close();
         if(state.activePage==="profilePage")await loadProfileContent(state.profileTab);
@@ -1833,7 +1846,7 @@
     article.querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
     article.querySelectorAll("[data-share-post]").forEach(b=>b.onclick=()=>shareContent("post",b.dataset.sharePost));
     article.querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSavedContent("post",b.dataset.savePost,b).catch(()=>{}));
-    article.querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true",b.dataset.pinned==="true"));
+    article.querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true",b.dataset.pinned==="true",b.dataset.visibility||"public"));
     article.querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
   }
 
@@ -1849,7 +1862,7 @@
     const pageSize=20;
     try{
       const {data,error}=await client.from("posts")
-        .select("id,author_id,caption,created_at,comments_enabled,pinned_at,post_media(media_id,sort_order)")
+        .select("id,author_id,caption,created_at,comments_enabled,visibility,pinned_at,post_media(media_id,sort_order)")
         .order("created_at",{ascending:false})
         .range(start,start+pageSize-1);
 
@@ -1893,7 +1906,7 @@
               <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
               <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
             </button>
-            ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" data-pinned="${Boolean(post.pinned_at)}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
+            ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" data-pinned="${Boolean(post.pinned_at)}" data-visibility="${escapeHtml(post.visibility||"public")}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
           </div>
           ${mediaHtml}
           <div class="post-body">
@@ -2265,7 +2278,7 @@
     root.querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
     root.querySelectorAll("[data-share-reel]").forEach(b=>b.onclick=()=>shareContent("reel",b.dataset.shareReel));
     root.querySelectorAll("[data-save-reel]").forEach(b=>b.onclick=()=>toggleSavedContent("reel",b.dataset.saveReel,b).catch(()=>{}));
-    root.querySelectorAll("[data-own-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.ownReel,b.dataset.caption,b.dataset.comments==="true"));
+    root.querySelectorAll("[data-own-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.ownReel,b.dataset.caption,b.dataset.comments==="true",false,b.dataset.visibility||"public"));
     root.querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
     root.querySelectorAll("[data-follow-reel]").forEach(b=>b.onclick=()=>followUser(b.dataset.followReel,b));
   }
@@ -2285,7 +2298,7 @@
 
     try{
       const {data,error}=await client.from("reels")
-        .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled,view_count")
+        .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled,visibility,view_count")
         .order("created_at",{ascending:false})
         .range(start,start+pageSize-1);
       if(error)throw error;
@@ -2359,7 +2372,7 @@
             <button class="reel-action ${savedNow?"active":""}" data-save-reel="${r.id}" type="button">
               <span class="reel-action-icon">${icon("save")}</span><span>${savedNow?"محفوظ":"حفظ"}</span>
             </button>
-            ${r.author_id===state.user.id?`<button class="reel-action" data-own-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" type="button"><span class="reel-action-icon">${icon("more")}</span><span>إدارة</span></button>`:""}
+            ${r.author_id===state.user.id?`<button class="reel-action" data-own-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" data-visibility="${escapeHtml(r.visibility||"public")}" type="button"><span class="reel-action-icon">${icon("more")}</span><span>إدارة</span></button>`:""}
           </div>
           <div class="reel-progress"><span></span></div>
         </article>`;
@@ -3448,7 +3461,7 @@
         .order("created_at",{ascending:true})
         .limit(200),
       client.from(targetTable)
-        .select("author_id")
+        .select("author_id,comments_enabled")
         .eq("id",state.commentTarget.id)
         .maybeSingle()
     ]);
@@ -3463,7 +3476,16 @@
       if(pin)return pin;
       return new Date(a.created_at)-new Date(b.created_at);
     });
+    const commentsAllowed=targetResult.data?.comments_enabled!==false;
     const canPinComments=targetResult.data?.author_id===state.user.id;
+    const commentInput=$("#commentInput");
+    const commentSubmit=$("#commentForm button[type='submit']");
+    if(commentInput){
+      commentInput.disabled=!commentsAllowed;
+      commentInput.placeholder=commentsAllowed?"اكتب تعليقًا...":"التعليقات مغلقة لهذا المحتوى";
+    }
+    if(commentSubmit)commentSubmit.disabled=!commentsAllowed;
+    if($("#commentMessage"))$("#commentMessage").textContent=commentsAllowed?"":"صاحب المحتوى أوقف التعليقات.";
     const profiles=await profilesMap([...new Set(data.map(x=>x.author_id))]);
     const byId=new Map(data.map(row=>[row.id,row]));
 
@@ -3588,6 +3610,12 @@
   $("#commentForm").onsubmit=async(e)=>{
     e.preventDefault();
     if(!state.commentTarget)return;
+    const targetTable=state.commentTarget.type==="post"?"posts":"reels";
+    const {data:target}=await client.from(targetTable).select("comments_enabled").eq("id",state.commentTarget.id).maybeSingle();
+    if(target?.comments_enabled===false){
+      $("#commentMessage").textContent="التعليقات مغلقة لهذا المحتوى.";
+      return;
+    }
     const input=$("#commentInput");
     const submit=$("#commentForm button[type='submit']");
     const message=$("#commentMessage");
@@ -4284,6 +4312,132 @@
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
 
 
+  const COMPOSER_DRAFT_DB="ashur_composer_drafts_v1";
+  const COMPOSER_DRAFT_STORE="drafts";
+
+  function composerDraftKey(type=state.composerType){
+    return state.user?.id ? state.user.id+":"+type : "";
+  }
+
+  function openComposerDraftDb(){
+    return new Promise((resolve,reject)=>{
+      const request=indexedDB.open(COMPOSER_DRAFT_DB,1);
+      request.onupgradeneeded=()=>{
+        const db=request.result;
+        if(!db.objectStoreNames.contains(COMPOSER_DRAFT_STORE)){
+          db.createObjectStore(COMPOSER_DRAFT_STORE,{keyPath:"key"});
+        }
+      };
+      request.onsuccess=()=>resolve(request.result);
+      request.onerror=()=>reject(request.error||new Error("تعذر فتح المسودات"));
+    });
+  }
+
+  function composerHasDraftContent(){
+    return Boolean(
+      (state.composerFiles||[]).length ||
+      $("#composerCaption")?.value.trim() ||
+      $("#storyOverlayInput")?.value.trim()
+    );
+  }
+
+  function composerDraftSnapshot(){
+    const key=composerDraftKey();
+    if(!key)return null;
+    return {
+      key,
+      type:state.composerType,
+      files:[...(state.composerFiles||[])],
+      caption:$("#composerCaption")?.value||"",
+      visibility:$("#composerVisibility")?.value||"public",
+      comments_enabled:Boolean($("#composerCommentsEnabled")?.checked),
+      explore_enabled:Boolean($("#composerExploreEnabled")?.checked),
+      overlay_text:$("#storyOverlayInput")?.value||"",
+      overlay_color:$("#storyOverlayColor")?.value||"#ffffff",
+      overlay_y:$("#storyOverlayY")?.value||"50",
+      overlay_bg:Boolean($("#storyOverlayBg")?.checked),
+      saved_at:Date.now()
+    };
+  }
+
+  async function deleteComposerDraft(type=state.composerType){
+    const key=composerDraftKey(type);
+    if(!key)return;
+    const db=await openComposerDraftDb().catch(()=>null);
+    if(!db)return;
+    await new Promise(resolve=>{
+      const tx=db.transaction(COMPOSER_DRAFT_STORE,"readwrite");
+      tx.objectStore(COMPOSER_DRAFT_STORE).delete(key);
+      tx.oncomplete=resolve;
+      tx.onerror=resolve;
+    });
+    db.close();
+  }
+
+  async function saveComposerDraft({silent=true}={}){
+    if(state.composerDraftRestoring||!state.user)return;
+    const snapshot=composerDraftSnapshot();
+    if(!snapshot)return;
+    if(!composerHasDraftContent()){
+      await deleteComposerDraft(state.composerType).catch(()=>{});
+      return;
+    }
+    const db=await openComposerDraftDb();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(COMPOSER_DRAFT_STORE,"readwrite");
+      tx.objectStore(COMPOSER_DRAFT_STORE).put(snapshot);
+      tx.oncomplete=resolve;
+      tx.onerror=()=>reject(tx.error||new Error("تعذر حفظ المسودة"));
+    });
+    db.close();
+    if(!silent&&$("#composerMessage"))$("#composerMessage").textContent="تم حفظ المسودة على هذا الجهاز.";
+  }
+
+  async function readComposerDraft(type){
+    const key=composerDraftKey(type);
+    if(!key)return null;
+    const db=await openComposerDraftDb().catch(()=>null);
+    if(!db)return null;
+    const value=await new Promise(resolve=>{
+      const tx=db.transaction(COMPOSER_DRAFT_STORE,"readonly");
+      const request=tx.objectStore(COMPOSER_DRAFT_STORE).get(key);
+      request.onsuccess=()=>resolve(request.result||null);
+      request.onerror=()=>resolve(null);
+    });
+    db.close();
+    return value;
+  }
+
+  function scheduleComposerDraftSave(){
+    if(state.composerDraftRestoring||!$("#composerDialog")?.open)return;
+    clearTimeout(state.composerDraftTimer);
+    state.composerDraftTimer=setTimeout(()=>saveComposerDraft({silent:true}).catch(()=>{}),450);
+  }
+
+  async function restoreComposerDraft(type){
+    const draft=await readComposerDraft(type);
+    if(!draft)return false;
+    state.composerDraftRestoring=true;
+    try{
+      state.composerFiles=Array.isArray(draft.files)?draft.files.filter(Boolean):[];
+      $("#composerCaption").value=draft.caption||"";
+      const privateAccount=Boolean(state.profile?.is_private);
+      $("#composerVisibility").value=privateAccount?"followers":(draft.visibility==="followers"?"followers":"public");
+      $("#composerCommentsEnabled").checked=draft.comments_enabled!==false;
+      $("#composerExploreEnabled").checked=draft.explore_enabled!==false;
+      $("#storyOverlayInput").value=draft.overlay_text||"";
+      $("#storyOverlayColor").value=draft.overlay_color||"#ffffff";
+      $("#storyOverlayY").value=String(draft.overlay_y||"50");
+      $("#storyOverlayBg").checked=draft.overlay_bg!==false;
+      renderComposerPreview();
+      updateStoryOverlayPreview();
+      if($("#composerMessage"))$("#composerMessage").textContent="تم استعادة آخر مسودة محفوظة.";
+      return true;
+    }finally{
+      state.composerDraftRestoring=false;
+    }
+  }
+
   function clearComposerPreview(){
     for(const url of state.previewUrls||[]){
       try{URL.revokeObjectURL(url)}catch(_){}
@@ -4810,7 +4964,7 @@
     }
   };
 
-  function openComposer(type){
+  async function openComposer(type){
     state.composerType=type;
     $("#publishDialog").close();
     clearComposerPreview();
@@ -4836,10 +4990,23 @@
     $("#storyOverlayBg").checked=true;
     $("#composerMessage").textContent="";
     openDialog($("#composerDialog"));
+    await restoreComposerDraft(type).catch(()=>false);
   }
 
-  $("#composerFile").onchange=()=>acceptComposerFiles($("#composerFile").files,"library");
-  $("#composerCameraFile").onchange=()=>acceptComposerFiles($("#composerCameraFile").files,"camera");
+  ["composerCaption","composerVisibility","composerCommentsEnabled","composerExploreEnabled","storyOverlayInput","storyOverlayColor","storyOverlayY","storyOverlayBg"].forEach(id=>{
+    const el=$("#"+id);
+    if(!el)return;
+    el.addEventListener(id==="composerCaption"||id==="storyOverlayInput"||id==="storyOverlayY"?"input":"change",scheduleComposerDraftSave);
+  });
+
+  $("#composerFile").onchange=()=>{
+    acceptComposerFiles($("#composerFile").files,"library");
+    setTimeout(scheduleComposerDraftSave,0);
+  };
+  $("#composerCameraFile").onchange=()=>{
+    acceptComposerFiles($("#composerCameraFile").files,"camera");
+    setTimeout(scheduleComposerDraftSave,0);
+  };
 
   async function generateVideoCover(file){
     if(!file?.type?.startsWith("video/"))return null;
@@ -4885,7 +5052,18 @@
     }).catch(()=>{});
   }
 
-  $("#cancelComposer").onclick=()=>{
+  $("#cancelComposer").onclick=async()=>{
+    if(state.composerPublishing)return;
+    if(composerHasDraftContent()){
+      await saveComposerDraft({silent:true}).catch(()=>{});
+      const ok=await confirmAction({
+        title:"الخروج من استوديو آشور؟",
+        text:"تم حفظ عملك كمسودة على هذا الجهاز. يمكنك الرجوع إليه لاحقًا من نفس نوع النشر.",
+        acceptLabel:"خروج",
+        danger:false
+      });
+      if(!ok)return;
+    }
     if(state.activeUpload){
       try{state.activeUpload.abort()}catch(_){}
       if(state.activeUploadId){
@@ -5033,6 +5211,7 @@
       }
 
       setComposerOverallProgress(100,"تم النشر");
+      await deleteComposerDraft(state.composerType).catch(()=>{});
       $("#composerMessage").textContent="تم نشر المحتوى بنجاح.";
       setComposerPublishState(true,"تم");
       await new Promise(resolve=>setTimeout(resolve,280));

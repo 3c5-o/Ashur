@@ -803,6 +803,40 @@
     if(!dialog.open)dialog.showModal();
   }
 
+  function confirmAction({
+    title="تأكيد الإجراء",
+    text="هل تريد المتابعة؟",
+    acceptLabel="تأكيد",
+    danger=false
+  }={}){
+    return new Promise(resolve=>{
+      const dialog=$("#confirmDialog");
+      const accept=$("#confirmAccept");
+      const cancel=$("#confirmCancel");
+      const finish=value=>{
+        if(dialog.open)dialog.close();
+        accept.onclick=null;
+        cancel.onclick=null;
+        dialog.oncancel=null;
+        resolve(value);
+      };
+      $("#confirmTitle").textContent=title;
+      $("#confirmText").textContent=text;
+      $("#confirmIcon").innerHTML=danger
+        ?'<svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4Z"/><path d="M12 9v4M12 17h.01"/></svg>'
+        :'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5 10.7 15 16 9"/></svg>';
+      dialog.classList.toggle("danger",danger);
+      accept.className=danger?"danger-wide":"primary";
+      accept.textContent=acceptLabel;
+      cancel.textContent="إلغاء";
+      accept.onclick=()=>finish(true);
+      cancel.onclick=()=>finish(false);
+      dialog.oncancel=e=>{e.preventDefault();finish(false)};
+      closeTransientDialogs(dialog);
+      if(!dialog.open)dialog.showModal();
+    });
+  }
+
 
   function compareVersions(a,b){
     const pa=String(a||"0").split(".").map(n=>Number(n)||0);
@@ -3300,15 +3334,21 @@
     $("#profileSettingsFab").onclick=openSettings;
     $("#profilePrivacyButton").onclick=async()=>{
       const next=!Boolean(state.profile?.is_private);
-      const label=next?"خاص":"عام";
-      if(!confirm("تغيير الحساب إلى "+label+"؟"))return;
+      const ok=await confirmAction({
+        title:next?"تحويل الحساب إلى خاص":"تحويل الحساب إلى عام",
+        text:next
+          ?"لن يرى منشوراتك وقصصك إلا المتابعون الذين وافقت عليهم، والطلبات الجديدة ستحتاج موافقتك."
+          :"سيصبح محتواك العام قابلًا للاكتشاف والمشاهدة حسب إعدادات كل منشور أو ريلز.",
+        acceptLabel:next?"جعله خاصًا":"جعله عامًا"
+      });
+      if(!ok)return;
       $("#profilePrivacyButton").disabled=true;
       const {error}=await client.from("profiles").update({
         is_private:next,
         updated_at:new Date().toISOString()
       }).eq("id",state.user.id);
       if(error){
-        alert(error.message);
+        openInfoDialog("تعذر تغيير الخصوصية",'<div class="empty error">'+escapeHtml(profileUtil.errorMessage(error,error.message))+'</div>');
         $("#profilePrivacyButton").disabled=false;
         return;
       }
@@ -5015,13 +5055,24 @@
   $("#settingsPrivateToggle").onchange=async()=>{
     const toggle=$("#settingsPrivateToggle");
     const next=toggle.checked;
+    const ok=await confirmAction({
+      title:next?"تحويل الحساب إلى خاص":"تحويل الحساب إلى عام",
+      text:next
+        ?"طلبات المتابعة الجديدة ستحتاج موافقتك، ولن يظهر المحتوى المخصص للمتابعين لغير المقبولين."
+        :"سيتمكن الآخرون من اكتشاف حسابك ومشاهدة المحتوى العام الذي تسمح به.",
+      acceptLabel:next?"جعله خاصًا":"جعله عامًا"
+    });
+    if(!ok){
+      toggle.checked=!next;
+      return;
+    }
     toggle.disabled=true;
     try{
       await updateOwnProfile({is_private:next});
       $("#editPrivate").checked=next;
     }catch(error){
       toggle.checked=!next;
-      alert(profileUtil.errorMessage(error,error?.message||"تعذر تغيير خصوصية الحساب."));
+      openInfoDialog("تعذر تغيير الخصوصية",'<div class="empty error">'+escapeHtml(profileUtil.errorMessage(error,error?.message||"تعذر تغيير خصوصية الحساب."))+'</div>');
     }finally{
       toggle.disabled=false;
     }
@@ -5296,11 +5347,21 @@
     await navigateTo("profilePage");
     await loadProfileContent("saved");
   };
-  $("#deleteAccountButton").onclick=()=>{
-    openInfoDialog("حذف الحساب نهائيًا",
-      '<div class="settings-info danger-confirmation">'+
-        '<p>سيتم حذف الحساب والبيانات المرتبطة به. هذه العملية لا يمكن التراجع عنها.</p>'+
-        '<label><span>اكتب كلمة حذف للتأكيد</span><input id="deleteAccountPhrase" autocomplete="off" placeholder="حذف"></label>'+
+  $("#deleteAccountButton").onclick=async()=>{
+    const ok=await confirmAction({
+      title:"حذف حساب آشور؟",
+      text:"سيتم حذف حسابك نهائيًا مع بيانات الحساب المرتبطة به، ولا يمكن التراجع عن العملية بعد تنفيذها.",
+      acceptLabel:"متابعة الحذف",
+      danger:true
+    });
+    if(!ok)return;
+
+    openInfoDialog("التأكيد النهائي",
+      '<div class="settings-info danger-confirmation stage4-danger-confirmation">'+
+        '<div class="danger-confirm-icon"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4Z"/><path d="M12 9v4M12 17h.01"/></svg></div>'+
+        '<h4>اكتب كلمة حذف لإكمال العملية</h4>'+
+        '<p>هذه آخر خطوة قبل حذف الحساب نهائيًا.</p>'+
+        '<label><span>كلمة التأكيد</span><input id="deleteAccountPhrase" autocomplete="off" placeholder="حذف"></label>'+
         '<button id="confirmDeleteAccount" class="danger-wide" type="button" disabled>حذف الحساب نهائيًا</button>'+
         '<p id="deleteAccountMessage" class="message" aria-live="polite"></p>'+
       '</div>');

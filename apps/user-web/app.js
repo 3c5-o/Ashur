@@ -2233,17 +2233,63 @@
     $("#removeChatAttachment").onclick=clearChatAttachment;
   };
 
+  async function ensureNativeAudioPermission(){
+    try{
+      if(window.AshurNative?.hasAudioPermission?.())return true;
+      window.AshurNative?.requestAudioPermission?.();
+      for(let i=0;i<24;i++){
+        await new Promise(resolve=>setTimeout(resolve,125));
+        if(window.AshurNative?.hasAudioPermission?.())return true;
+      }
+      return !window.AshurNative?.hasAudioPermission;
+    }catch{return true}
+  }
+
+  async function openVoiceStream(){
+    stopVoiceTracks();
+    const constraints=[
+      {audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}},
+      {audio:true}
+    ];
+    let lastError=null;
+    for(const config of constraints){
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia(config);
+        const track=stream.getAudioTracks?.()[0];
+        if(track&&track.readyState==="live")return stream;
+        stream.getTracks().forEach(t=>t.stop());
+      }catch(error){
+        lastError=error;
+        await new Promise(resolve=>setTimeout(resolve,260));
+      }
+    }
+    throw lastError||new Error("تعذر تشغيل الميكروفون");
+  }
+
+  function voiceErrorMessage(error){
+    const name=String(error?.name||"");
+    const message=String(error?.message||"");
+    if(name==="NotAllowedError"||name==="SecurityError")return "يلزم السماح لآشور باستخدام الميكروفون من أذونات التطبيق.";
+    if(name==="NotFoundError")return "لم يتم العثور على ميكروفون متاح على الجهاز.";
+    if(name==="NotReadableError"||/audio source/i.test(message))return "تعذر تشغيل الميكروفون. أغلق أي تطبيق يستخدم التسجيل أو المكالمة ثم أعد المحاولة.";
+    return message&&message!=="Could not start audio source"?message:"تعذر بدء التسجيل الصوتي.";
+  }
+
   $("#voiceRecordButton").onclick=async()=>{
     if(state.voiceRecorder?.state==="recording"){
-      try{state.voiceRecorder.stop()}catch(_){}
+      try{state.voiceRecorder.stop()}catch(_){ }
       return;
     }
+    const btn=$("#voiceRecordButton");
+    btn.disabled=true;
     try{
       if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){
         throw new Error("التسجيل الصوتي غير مدعوم على هذا الجهاز.");
       }
       clearChatAttachment();
-      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      const permitted=await ensureNativeAudioPermission();
+      if(!permitted)throw Object.assign(new Error("Microphone permission denied"),{name:"NotAllowedError"});
+      const stream=await openVoiceStream();
       state.voiceStream=stream;
       const types=["audio/webm;codecs=opus","audio/webm","audio/mp4"];
       const mime=types.find(t=>MediaRecorder.isTypeSupported?.(t))||"";
@@ -2251,6 +2297,11 @@
       state.voiceRecorder=recorder;
       state.voiceChunks=[];
       recorder.ondataavailable=e=>{if(e.data?.size)state.voiceChunks.push(e.data)};
+      recorder.onerror=e=>{
+        console.warn("ASHUR_VOICE_RECORDER_ERROR",e?.error||e);
+        stopVoiceTracks();
+        clearVoiceTimer();
+      };
       recorder.onstop=()=>{
         const type=recorder.mimeType||"audio/webm";
         const blob=new Blob(state.voiceChunks,{type});
@@ -2259,27 +2310,30 @@
         state.voiceRecorder=null;
         if(blob.size<800){
           state.voiceChunks=[];
+          $("#chatMessage").textContent="التسجيل قصير جدًا أو لم يلتقط صوتًا.";
           return;
         }
         const ext=type.includes("mp4")?"m4a":"webm";
         state.recordedVoiceFile=new File([blob],"voice-"+Date.now()+"."+ext,{type});
         showVoicePreview(state.recordedVoiceFile);
+        $("#chatMessage").textContent="";
       };
       recorder.start(250);
       state.voiceStartedAt=Date.now();
-      $("#voiceRecordButton").classList.add("recording");
+      btn.classList.add("recording");
       $("#voiceRecordTimer").classList.remove("hidden");
       state.voiceTimer=setInterval(()=>{
         const sec=Math.floor((Date.now()-state.voiceStartedAt)/1000);
         $("#voiceRecordTimer").textContent=Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0");
-        if(sec>=180){
-          try{recorder.stop()}catch(_){}
-        }
+        if(sec>=180){try{recorder.stop()}catch(_){ }}
       },250);
     }catch(error){
       clearVoiceTimer();
       stopVoiceTracks();
-      openInfoDialog("التسجيل الصوتي",'<div class="empty error">'+escapeHtml(error.message||"تعذر الوصول إلى الميكروفون")+'</div>');
+      state.voiceRecorder=null;
+      openInfoDialog("التسجيل الصوتي",`<div class="empty error">${escapeHtml(voiceErrorMessage(error))}</div>`);
+    }finally{
+      btn.disabled=false;
     }
   };
 

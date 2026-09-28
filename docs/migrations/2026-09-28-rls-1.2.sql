@@ -687,3 +687,75 @@ with check (
 create policy saved_reels_delete_own on public.saved_reels
 for delete to authenticated
 using (user_id = (select auth.uid()));
+
+-- Batch E: messaging reliability, idempotency, and least privilege
+
+alter table public.conversations
+  add column if not exists is_deleted boolean not null default false;
+
+alter table public.conversations
+  add column if not exists direct_key text;
+
+with pairs as (
+  select
+    cm.conversation_id,
+    string_agg(cm.user_id::text, ':' order by cm.user_id::text) as direct_key
+  from public.conversation_members cm
+  join public.conversations c
+    on c.id = cm.conversation_id
+   and c.kind = 'direct'
+  group by cm.conversation_id
+  having count(*) = 2
+)
+update public.conversations c
+set direct_key = p.direct_key
+from pairs p
+where c.id = p.conversation_id
+  and c.direct_key is null;
+
+drop index if exists public.conversations_direct_key_unique;
+create unique index conversations_direct_key_unique
+  on public.conversations (direct_key)
+  where direct_key is not null and is_deleted = false;
+
+alter table public.messages
+  add column if not exists client_message_id uuid;
+
+create unique index if not exists messages_sender_client_message_unique
+  on public.messages (sender_id, client_message_id)
+  where client_message_id is not null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid='public.messages'::regclass
+      and conname='messages_body_length'
+  ) then
+    alter table public.messages
+      add constraint messages_body_length
+      check (char_length(body) <= 4000);
+  end if;
+end $$;
+
+revoke all on table
+  public.conversations,
+  public.conversation_members,
+  public.messages,
+  public.message_reads
+from anon;
+
+revoke insert, update, delete, truncate on table
+  public.conversations,
+  public.conversation_members,
+  public.messages,
+  public.message_reads
+from authenticated;
+
+grant select on table
+  public.conversations,
+  public.conversation_members,
+  public.messages,
+  public.message_reads
+to authenticated;

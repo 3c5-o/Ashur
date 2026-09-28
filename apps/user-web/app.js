@@ -1190,16 +1190,18 @@
 
   async function renderReelResults(query=""){
     let request=client.from("reels")
-      .select("id,media_id,caption,author_id,created_at")
+      .select("id,media_id,cover_media_id,caption,author_id,created_at")
       .eq("explore_enabled",true)
       .order("created_at",{ascending:false})
-      .limit(18);
+      .limit(12);
     if(query)request=request.ilike("caption",`%${query.replace(/[,%()]/g,"")}%`);
     const {data,error}=await request;
     if(error)throw error;
     return (data||[]).map(r=>`
       <button class="explore-tile" data-open-reel="${r.id}" type="button">
-        <video muted playsinline preload="metadata" data-video-cover="1" data-media-id="${r.media_id}"></video>
+        ${r.cover_media_id
+          ?`<img class="explore-cover" data-media-id="${r.cover_media_id}" alt="">`
+          :`<video muted playsinline preload="metadata" data-video-cover="1" data-media-id="${r.media_id}"></video>`}
         <span class="explore-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z"/></svg></span>
       </button>`).join("");
   }

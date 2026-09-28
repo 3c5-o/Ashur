@@ -29,6 +29,9 @@
     chatRefreshTimer:null,
     chatReconnectTimer:null,
     chatMessageIds:new Set(),
+    chatMessageCache:new Map(),
+    chatInitialLoaded:false,
+    chatLastSyncAt:0,
     chatLoadSeq:0,
     inboxChannel:null,
     inboxRefreshTimer:null,
@@ -102,6 +105,25 @@
       .replace(/(^|\s)#([\p{L}\p{N}_]{2,50})/gu,'$1<button class="inline-tag hashtag-tag" type="button" data-inline-hashtag="$2">#$2</button>')
       .replace(/\n/g,"<br>");
   };
+  const chatTextMarkup = (value="") => {
+    const text=String(value||"");
+    const pattern=/https?:\/\/[^\s<>"']+/gi;
+    let html="";
+    let cursor=0;
+    for(const match of text.matchAll(pattern)){
+      const index=Number(match.index||0);
+      html+=richText(text.slice(cursor,index));
+      const raw=match[0];
+      const href=safeLink(raw);
+      html+=href
+        ?'<a class="message-link" href="'+escapeHtml(href)+'" target="_blank" rel="noopener">'+escapeHtml(raw)+'</a>'
+        :escapeHtml(raw);
+      cursor=index+raw.length;
+    }
+    html+=richText(text.slice(cursor));
+    return html;
+  };
+
   const safeLink = (value="") => {
     const raw=String(value||"").trim();
     if(!raw)return "";

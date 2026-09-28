@@ -872,21 +872,84 @@
 
   async function loadStories(){
     const since=new Date().toISOString();
-    const {data,error}=await client.from("stories").select("id,author_id,media_id,caption,expires_at,overlay_text,overlay_color,overlay_y,overlay_bg,shared_type,shared_id").gt("expires_at",since).order("created_at",{ascending:false}).limit(20);
+    const {data,error}=await client.from("stories")
+      .select("id,author_id,media_id,caption,created_at,expires_at,overlay_text,overlay_color,overlay_y,overlay_bg,shared_type,shared_id,reshared_from_story_id")
+      .gt("expires_at",since).order("created_at",{ascending:true}).limit(120);
     if(error){$("#stories").innerHTML="";return}
-    const ids=[...new Set((data||[]).map(x=>x.author_id))];
+    const rows=data||[];
+    const ids=[...new Set(rows.map(x=>x.author_id))];
     const profiles=await profilesMap(ids);
     state.stories=new Map();
-    let html=`<button class="story" data-own-story="1"><div class="story-ring"><div class="fallback">+</div></div><span>قصتك</span></button>`;
-    html+=(data||[]).map(s=>{
-      const p=profiles[s.author_id]||{};
-      state.stories.set(s.id,{...s,profile:p});
-      return `<button class="story" data-story="${s.id}"><div class="story-ring">${avatar(p,"avatar")}</div><span>${escapeHtml(p.username||p.name||"مستخدم")}</span></button>`
+    state.storyGroups=new Map();
+    for(const row of rows){
+      const story={...row,profile:profiles[row.author_id]||{}};
+      state.stories.set(story.id,story);
+      if(!state.storyGroups.has(story.author_id))state.storyGroups.set(story.author_id,[]);
+      state.storyGroups.get(story.author_id).push(story);
+    }
+    const ordered=[...state.storyGroups.entries()].sort((a,b)=>{
+      const at=new Date(a[1][a[1].length-1]?.created_at||0).getTime();
+      const bt=new Date(b[1][b[1].length-1]?.created_at||0).getTime();
+      return bt-at;
+    });
+    let html=`<button class="story" data-own-story="1"><div class="story-ring"><div class="fallback">+</div></div><span>إضافة قصة</span></button>`;
+    html+=ordered.map(([authorId,group])=>{
+      const p=profiles[authorId]||{};
+      const label=authorId===state.user.id?"قصتك":(p.username||p.name||"مستخدم");
+      return `<button class="story" data-story-author="${authorId}"><div class="story-ring">${avatar(p,"avatar")}</div><span>${escapeHtml(label)}</span><small>${group.length>1?group.length+" قصص":""}</small></button>`;
     }).join("");
     $("#stories").innerHTML=html;
     await hydrateMedia($("#stories"));
     $("#stories").querySelector("[data-own-story]")?.addEventListener("click",()=>openComposer("story"));
-    $("#stories").querySelectorAll("[data-story]").forEach(b=>b.onclick=()=>openStoryViewer(b.dataset.story));
+    $("#stories").querySelectorAll("[data-story-author]").forEach(b=>b.onclick=()=>openStoryGroup(b.dataset.storyAuthor,0));
+  }
+
+  function storyGroup(authorId){
+    return state.storyGroups?.get(authorId)||[];
+  }
+
+  function openStoryGroup(authorId,index=0){
+    const group=storyGroup(authorId);
+    if(!group.length)return;
+    const next=Math.max(0,Math.min(group.length-1,Number(index)||0));
+    state.currentStoryAuthor=authorId;
+    state.currentStoryIndex=next;
+    return openStoryViewer(group[next].id,{preserveGroup:true});
+  }
+
+  function moveStory(direction){
+    const group=storyGroup(state.currentStoryAuthor);
+    if(!group.length)return closeStoryViewer();
+    const next=Number(state.currentStoryIndex||0)+direction;
+    if(next<0||next>=group.length)return closeStoryViewer();
+    state.currentStoryIndex=next;
+    return openStoryViewer(group[next].id,{preserveGroup:true});
+  }
+
+  async function storySharedDetails(story){
+    if(!story?.shared_type||!story?.shared_id)return null;
+    try{
+      if(story.shared_type==="post"){
+        const {data,error}=await client.from("posts").select("id,author_id,caption,post_media(media_id,sort_order)").eq("id",story.shared_id).maybeSingle();
+        if(error||!data)return null;
+        const p=(await profilesMap([data.author_id]))[data.author_id]||{};
+        const media=[...(data.post_media||[])].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))[0]?.media_id||null;
+        return {type:"post",id:data.id,author_id:data.author_id,caption:data.caption||"",profile:p,media_id:media};
+      }
+      if(story.shared_type==="reel"){
+        const {data,error}=await client.from("reels").select("id,author_id,caption,media_id,cover_media_id").eq("id",story.shared_id).maybeSingle();
+        if(error||!data)return null;
+        const p=(await profilesMap([data.author_id]))[data.author_id]||{};
+        return {type:"reel",id:data.id,author_id:data.author_id,caption:data.caption||"",profile:p,media_id:data.cover_media_id||data.media_id};
+      }
+      if(story.shared_type==="story"){
+        const {data,error}=await client.from("stories").select("id,author_id,caption,media_id").eq("id",story.shared_id).maybeSingle();
+        if(error||!data)return null;
+        const p=(await profilesMap([data.author_id]))[data.author_id]||{};
+        return {type:"story",id:data.id,author_id:data.author_id,caption:data.caption||"",profile:p,media_id:data.media_id};
+      }
+    }catch(_){ }
+    return null;
   }
 
   function closeStoryViewer(){
@@ -921,44 +984,76 @@
     }
   }
 
-  async function openStoryViewer(id){
+  async function openStoryViewer(id,{preserveGroup=false}={}){
     const story=state.stories.get(id);
     if(!story)return;
+    if(!preserveGroup){
+      const group=storyGroup(story.author_id);
+      state.currentStoryAuthor=story.author_id;
+      state.currentStoryIndex=Math.max(0,group.findIndex(x=>x.id===id));
+    }
     clearTimeout(state.storyTimer);
     const dialog=$("#storyViewerDialog");
     const user=$("#storyViewerUser");
     const own=story.author_id===state.user.id;
-    user.innerHTML=avatar(story.profile)+'<span>'+escapeHtml(story.profile?.name||story.profile?.username||"مستخدم")+'</span>';
-    $("#storyViewerCaption").textContent=story.caption||"";
+    const group=storyGroup(story.author_id);
+    const index=Math.max(0,Number(state.currentStoryIndex||0));
+    user.innerHTML=avatar(story.profile)+"<span>"+escapeHtml(story.profile?.name||story.profile?.username||"مستخدم")+"</span>"+(group.length>1?`<small class="story-seq">${index+1}/${group.length}</small>`:"");
+    $("#storyViewerCaption").innerHTML=richText(story.caption||"");
     const storyOverlay=$("#storyViewerOverlay");
     const overlayText=String(story.overlay_text||"").trim();
-    storyOverlay.innerHTML=overlayText?'<span>'+escapeHtml(overlayText)+'</span>':"";
+    storyOverlay.innerHTML=overlayText?`<span>${richText(overlayText)}</span>`:"";
     storyOverlay.classList.toggle("hidden",!overlayText);
     storyOverlay.classList.toggle("with-bg",Boolean(story.overlay_bg));
     storyOverlay.style.color=story.overlay_color||"#ffffff";
     storyOverlay.style.top=(Math.max(.12,Math.min(.86,Number(story.overlay_y||.5)))*100)+"%";
+    $("#storyViewerMedia").classList.remove("has-shared-card");
     $("#storyViewerMedia").innerHTML='<div class="empty">جارٍ تحميل القصة...</div>';
     $("#storyProgressBar").style.transition="none";
     $("#storyProgressBar").style.width="0%";
+
+    let canReshare=false;
+    if(!own){
+      const mention=await client.from("story_mentions").select("story_id").eq("story_id",id).eq("user_id",state.user.id).maybeSingle().catch(()=>({data:null}));
+      canReshare=Boolean(mention?.data);
+    }
     const sharedAction=story.shared_type&&story.shared_id
-      ?'<button id="openSharedStoryContent" type="button">'+(story.shared_type==="reel"?"فتح الريلز":"فتح المنشور")+'</button>'
+      ?`<button id="openSharedStoryContent" type="button">${story.shared_type==="reel"?"فتح الريلز":story.shared_type==="story"?"القصة الأصلية":"فتح المنشور"}</button>`
       :"";
+    const reshareAction=canReshare?'<button id="reshareMentionedStoryButton" class="story-reshare-button" type="button">إعادة مشاركة القصة</button>':"";
     $("#storyViewerActions").innerHTML=own
       ?sharedAction+'<button id="storyViewersButton" type="button">المشاهدات</button><button id="manageStoryButton" type="button">إدارة القصة</button>'
-      :sharedAction+'<button id="replyStoryButton" type="button">رد برسالة</button><button id="reportStoryButton" type="button">إبلاغ</button>';
+      :sharedAction+reshareAction+'<button id="replyStoryButton" type="button">رد برسالة</button><button id="reportStoryButton" type="button">إبلاغ</button>';
+
     if($("#openSharedStoryContent")){
-      $("#openSharedStoryContent").onclick=()=>{
-        const type=story.shared_type;
-        const id=story.shared_id;
+      $("#openSharedStoryContent").onclick=async()=>{
+        const type=story.shared_type,id=story.shared_id;
         closeStoryViewer();
-        openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+        if(type==="story"){
+          const original=state.stories.get(id);
+          if(original)return openStoryViewer(id);
+          const details=await storySharedDetails(story);
+          if(details?.author_id)return openPublicProfile(details.author_id);
+          return;
+        }
+        return openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",`<div class="empty error">${escapeHtml(error.message)}</div>`));
       };
     }
+
     openDialog(dialog);
     await hydrateMedia(user);
 
     if(!own){
       api("/v1/social/story-view/"+encodeURIComponent(id),{method:"POST"}).catch(()=>{});
+      if($("#reshareMentionedStoryButton"))$("#reshareMentionedStoryButton").onclick=async()=>{
+        const btn=$("#reshareMentionedStoryButton");
+        btn.disabled=true;
+        try{
+          await api("/v1/social/reshare-mentioned-story",{method:"POST",body:JSON.stringify({story_id:id})});
+          btn.textContent="تمت إعادة المشاركة";
+          await loadStories().catch(()=>{});
+        }catch(error){btn.textContent=error.message||"تعذر إعادة المشاركة";btn.disabled=false}
+      };
       $("#replyStoryButton").onclick=async()=>{
         try{
           const conversation=await api("/v1/conversations",{method:"POST",body:JSON.stringify({kind:"direct",target_user_id:story.author_id})});
@@ -969,53 +1064,49 @@
           $("#chatInput").focus();
         }catch(error){alert(error.message)}
       };
-      $("#reportStoryButton").onclick=()=>{
-        closeStoryViewer();
-        openReportDialog("story",id);
-      };
+      $("#reportStoryButton").onclick=()=>{closeStoryViewer();openReportDialog("story",id)};
     }else{
       $("#storyViewersButton").onclick=()=>openStoryViewers(id);
-      $("#manageStoryButton").onclick=()=>{
-        closeStoryViewer();
-        openOwnContentActions("stories",id,story.caption||"",true);
-      };
+      $("#manageStoryButton").onclick=()=>{closeStoryViewer();openOwnContentActions("stories",id,story.caption||"",true)};
     }
 
+    const mediaRoot=$("#storyViewerMedia");
+    const shared=await storySharedDetails(story);
     try{
       const access=await mediaAccess(story.media_id);
-      if(access.mime_type?.startsWith("video/")){
+      if(shared){
+        mediaRoot.classList.add("has-shared-card");
+        const backdrop=access.mime_type?.startsWith("video/")
+          ?`<video class="story-share-backdrop" src="${escapeHtml(access.url)}" muted autoplay loop playsinline></video>`
+          :`<img class="story-share-backdrop" src="${escapeHtml(access.url)}" alt="">`;
+        mediaRoot.innerHTML=backdrop+`<button class="story-shared-card" id="storySharedCard" type="button"><div class="story-shared-owner">${avatar(shared.profile)}<span><b>${escapeHtml(shared.profile?.name||shared.profile?.username||"مستخدم")}</b><small>@${escapeHtml(shared.profile?.username||"")}</small></span></div><img class="story-shared-media" data-media-id="${escapeHtml(shared.media_id||story.media_id)}" alt=""><p class="story-shared-caption">${richText(shared.caption||"")}</p></button>`;
+        await hydrateMedia(mediaRoot);
+        $("#storySharedCard").onclick=e=>{e.stopPropagation();$("#openSharedStoryContent")?.click()};
+        requestAnimationFrame(()=>{$("#storyProgressBar").style.transition="width 8s linear";$("#storyProgressBar").style.width="100%"});
+        state.storyTimer=setTimeout(()=>moveStory(1),8000);
+      }else if(access.mime_type?.startsWith("video/")){
         const video=document.createElement("video");
-        video.src=access.url;
-        video.autoplay=true;
-        video.playsInline=true;
-        video.preload="auto";
-        video.muted=false;
-        $("#storyViewerMedia").innerHTML="";
-        $("#storyViewerMedia").appendChild(video);
-        video.addEventListener("timeupdate",()=>{
-          if(Number.isFinite(video.duration)&&video.duration>0){
-            $("#storyProgressBar").style.transition="none";
-            $("#storyProgressBar").style.width=Math.min(100,(video.currentTime/video.duration)*100)+"%";
-          }
-        });
-        video.addEventListener("ended",closeStoryViewer,{once:true});
+        video.src=access.url;video.autoplay=true;video.playsInline=true;video.preload="auto";video.muted=false;
+        mediaRoot.innerHTML="";mediaRoot.appendChild(video);
+        video.addEventListener("timeupdate",()=>{if(Number.isFinite(video.duration)&&video.duration>0){$("#storyProgressBar").style.transition="none";$("#storyProgressBar").style.width=Math.min(100,(video.currentTime/video.duration)*100)+"%"}});
+        video.addEventListener("ended",()=>moveStory(1),{once:true});
         video.play().catch(()=>{});
       }else{
-        const img=document.createElement("img");
-        img.src=access.url;
-        img.alt="";
-        $("#storyViewerMedia").innerHTML="";
-        $("#storyViewerMedia").appendChild(img);
-        requestAnimationFrame(()=>{
-          $("#storyProgressBar").style.transition="width 6s linear";
-          $("#storyProgressBar").style.width="100%";
-        });
-        state.storyTimer=setTimeout(closeStoryViewer,6000);
+        const img=document.createElement("img");img.src=access.url;img.alt="";mediaRoot.innerHTML="";mediaRoot.appendChild(img);
+        requestAnimationFrame(()=>{$("#storyProgressBar").style.transition="width 6s linear";$("#storyProgressBar").style.width="100%"});
+        state.storyTimer=setTimeout(()=>moveStory(1),6000);
       }
-    }catch{
-      $("#storyViewerMedia").innerHTML='<div class="empty error">تعذر تحميل القصة.</div>';
-    }
+    }catch{mediaRoot.innerHTML='<div class="empty error">تعذر تحميل القصة.</div>'}
+
+    dialog.querySelectorAll(".story-nav-zone").forEach(x=>x.remove());
+    const prev=document.createElement("button");prev.type="button";prev.className="story-nav-zone prev";prev.setAttribute("aria-label","القصة السابقة");prev.onclick=e=>{e.stopPropagation();moveStory(-1)};
+    const next=document.createElement("button");next.type="button";next.className="story-nav-zone next";next.setAttribute("aria-label","القصة التالية");next.onclick=e=>{e.stopPropagation();moveStory(1)};
+    dialog.append(prev,next);
+    let touchX=0;
+    mediaRoot.ontouchstart=e=>{touchX=e.changedTouches?.[0]?.clientX||0};
+    mediaRoot.ontouchend=e=>{const x=e.changedTouches?.[0]?.clientX||0;const dx=x-touchX;if(Math.abs(dx)>55)moveStory(dx>0?-1:1)};
   }
+
   $("#closeStoryViewer").onclick=closeStoryViewer;
   $("#storyViewerDialog").addEventListener("cancel",e=>{
     e.preventDefault();

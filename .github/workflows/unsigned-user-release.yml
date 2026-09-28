@@ -1,0 +1,64 @@
+name: تجهيز Release غير موقع
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/unsigned-user-release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-user-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: تجهيز مكتبة Supabase المحلية
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          mkdir -p apps/user-web/vendor
+          cp node_modules/@supabase/supabase-js/dist/umd/supabase.js apps/user-web/vendor/supabase.min.js
+          test -s apps/user-web/vendor/supabase.min.js
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.1.0"
+
+      - name: بناء Release غير موقع
+        env:
+          ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
+          ONESIGNAL_APP_ID: ${{ vars.ONESIGNAL_APP_ID }}
+        run: gradle -p android/user :app:assembleRelease --stacktrace
+
+      - name: تجهيز الملفات
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/unsigned"
+          APK="$(find android/user/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" "$RUNNER_TEMP/unsigned/ASHUR-User-1.2.0-unsigned.apk"
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" "$RUNNER_TEMP/unsigned/apksigner.jar"
+          cp "$ANDROID_HOME/build-tools/36.0.0/zipalign" "$RUNNER_TEMP/unsigned/zipalign"
+          chmod +x "$RUNNER_TEMP/unsigned/zipalign"
+          sha256sum "$RUNNER_TEMP/unsigned/ASHUR-User-1.2.0-unsigned.apk" > "$RUNNER_TEMP/unsigned/unsigned-sha256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ashur-user-unsigned-release-tools
+          path: ${{ runner.temp }}/unsigned/
+          retention-days: 7
+          if-no-files-found: error

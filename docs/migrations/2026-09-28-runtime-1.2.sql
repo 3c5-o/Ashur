@@ -1,8 +1,21 @@
 -- ASHUR 1.2 realtime + interaction counters
 -- Runtime support for real-time chat and feed/reel interaction counters.
 
-alter publication supabase_realtime add table public.messages;
-alter publication supabase_realtime add table public.message_reads;
+do $
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='message_reads'
+  ) then
+    alter publication supabase_realtime add table public.message_reads;
+  end if;
+end $;
 
 create or replace function public.content_interaction_counts(p_kind text, p_ids uuid[])
 returns table(content_id uuid, likes bigint, comments bigint)

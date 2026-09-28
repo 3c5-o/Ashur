@@ -17,7 +17,7 @@
   }
 
   function validUsername(value = "") {
-    return /^[a-z0-9_]{3,24}$/.test(String(value).trim().toLowerCase());
+    return /^[a-z0-9_.]{2,10}$/.test(String(value).trim().toLowerCase());
   }
 
   function buildRedirect(base, flow) {

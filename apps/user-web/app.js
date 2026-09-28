@@ -1,6 +1,7 @@
 (() => {
   const cfg = window.ASHUR_CONFIG;
   const authUtil = window.AshurAuth;
+  const profileUtil = window.AshurProfile;
   const AUTH_REDIRECT_BASE = cfg.authRedirectUrl || "ashur://reset-password";
   const PENDING_CONFIRMATION_KEY = "ashur_pending_confirmation_email_v1";
   let recoveryModeActive = false;
@@ -3015,7 +3016,78 @@
     };
   };
 
-  function openEditProfile(){
+  let editAvatarObjectUrl="";
+  let editCoverObjectUrl="";
+  let usernameCheckTimer=null;
+  let usernameCheckVersion=0;
+
+  async function updateOwnProfile(patch){
+    const payload={...patch,updated_at:new Date().toISOString()};
+    const {data,error}=await client.from("profiles")
+      .update(payload)
+      .eq("id",state.user.id)
+      .select("*")
+      .single();
+    if(error)throw error;
+    state.profile=data;
+    cacheProfile(data);
+    return data;
+  }
+
+  function revokeEditObjectUrl(kind){
+    const current=kind==="avatar"?editAvatarObjectUrl:editCoverObjectUrl;
+    if(current){
+      try{URL.revokeObjectURL(current)}catch(_){}
+      if(kind==="avatar")editAvatarObjectUrl="";
+      else editCoverObjectUrl="";
+    }
+  }
+
+  async function renderEditMedia(kind,{file=null,mediaId=null,removed=false}={}){
+    const isAvatar=kind==="avatar";
+    const image=$(isAvatar?"#editAvatarPreview":"#editCoverPreview");
+    const fallback=$(isAvatar?"#editAvatarFallback":"#editCoverFallback");
+    const remove=$(isAvatar?"#removeAvatarImage":"#removeCoverImage");
+    revokeEditObjectUrl(kind);
+    image.classList.add("hidden");
+    image.removeAttribute("src");
+    delete image.dataset.mediaId;
+    image.dataset.mediaReady="0";
+
+    if(file){
+      const check=profileUtil.validateImageFile(file);
+      if(!check.ok)throw new Error(check.error);
+      const url=URL.createObjectURL(file);
+      if(isAvatar)editAvatarObjectUrl=url; else editCoverObjectUrl=url;
+      image.src=url;
+      image.classList.remove("hidden");
+      fallback.classList.add("hidden");
+      remove.disabled=false;
+      return;
+    }
+
+    if(mediaId&&!removed){
+      image.dataset.mediaId=mediaId;
+      image.classList.remove("hidden");
+      fallback.classList.add("hidden");
+      remove.disabled=false;
+      await hydrateMedia(image.parentElement).catch(()=>{});
+      return;
+    }
+
+    fallback.classList.remove("hidden");
+    remove.disabled=true;
+  }
+
+  function resetEditProfileMedia(){
+    revokeEditObjectUrl("avatar");
+    revokeEditObjectUrl("cover");
+    $("#editProfileDialog").dataset.removeAvatar="0";
+    $("#editProfileDialog").dataset.removeCover="0";
+  }
+
+  async function openEditProfile(){
+    resetEditProfileMedia();
     $("#editName").value=state.profile?.name||"";
     $("#editUsername").value=state.profile?.username||"";
     $("#editBio").value=state.profile?.bio||"";
@@ -3024,52 +3096,175 @@
     $("#editAvatarFile").value="";
     $("#editCoverFile").value="";
     $("#editProfileMessage").textContent="";
+    $("#editUsernameStatus").textContent="اسم المستخدم الحالي";
+    $("#editUsernameStatus").className="field-hint good";
+    $("#editBioCount").textContent=String(($("#editBio").value||"").length);
+    await Promise.all([
+      renderEditMedia("avatar",{mediaId:state.profile?.avatar_media_id||null}),
+      renderEditMedia("cover",{mediaId:state.profile?.cover_media_id||null})
+    ]);
     openDialog($("#editProfileDialog"));
   }
-  $("#closeEditProfile").onclick=()=>$("#editProfileDialog").close();
-  $("#editProfileForm").onsubmit=async(e)=>{
-    e.preventDefault();
-    const name=$("#editName").value.trim();
-    const username=$("#editUsername").value.trim().toLowerCase();
-    const bio=$("#editBio").value.trim();
-    const profileLink=$("#editProfileLink").value.trim();
-    if(!name)return;
-    if(!/^[a-z0-9_]{3,24}$/.test(username)){
-      $("#editProfileMessage").textContent="اسم المستخدم غير صالح";
+
+  $("#closeEditProfile").onclick=()=>{
+    resetEditProfileMedia();
+    $("#editProfileDialog").close();
+  };
+
+  $("#editBio").oninput=()=>{
+    $("#editBioCount").textContent=String($("#editBio").value.length);
+  };
+
+  $("#editUsername").oninput=()=>{
+    const input=$("#editUsername");
+    const normalized=profileUtil.normalizeUsername(input.value);
+    if(input.value!==normalized)input.value=normalized;
+    const status=$("#editUsernameStatus");
+    clearTimeout(usernameCheckTimer);
+    const version=++usernameCheckVersion;
+    if(!/^[a-z0-9_]{3,24}$/.test(normalized)){
+      status.textContent="اسم المستخدم غير صالح";
+      status.className="field-hint bad";
       return;
     }
-    $("#editProfileMessage").textContent="جارٍ الحفظ...";
+    if(normalized===(state.profile?.username||"")){
+      status.textContent="اسم المستخدم الحالي";
+      status.className="field-hint good";
+      return;
+    }
+    status.textContent="جارٍ التحقق من التوفر...";
+    status.className="field-hint";
+    usernameCheckTimer=setTimeout(async()=>{
+      const {data,error}=await client.from("profiles")
+        .select("id")
+        .eq("username",normalized)
+        .neq("id",state.user.id)
+        .maybeSingle();
+      if(version!==usernameCheckVersion)return;
+      if(error){
+        status.textContent="تعذر التحقق الآن؛ سيتم التحقق عند الحفظ.";
+        status.className="field-hint";
+      }else if(data){
+        status.textContent="اسم المستخدم مستخدم بالفعل";
+        status.className="field-hint bad";
+      }else{
+        status.textContent="اسم المستخدم متاح";
+        status.className="field-hint good";
+      }
+    },350);
+  };
+
+  $("#editAvatarFile").onchange=async()=>{
+    const file=$("#editAvatarFile").files[0]||null;
+    if(!file)return;
     try{
-      let avatarMediaId=state.profile?.avatar_media_id||null;
-      let coverMediaId=state.profile?.cover_media_id||null;
-      const file=$("#editAvatarFile").files[0];
-      const coverFile=$("#editCoverFile").files[0];
-      if(file){
-        if(file.size>10*1024*1024)throw new Error("صورة الحساب يجب ألا تتجاوز 10 ميغابايت");
-        const media=await uploadFile(file,"profile");
+      $("#editProfileDialog").dataset.removeAvatar="0";
+      await renderEditMedia("avatar",{file});
+      $("#editProfileMessage").textContent="";
+    }catch(error){
+      $("#editAvatarFile").value="";
+      $("#editProfileMessage").textContent=error.message;
+      await renderEditMedia("avatar",{mediaId:state.profile?.avatar_media_id||null});
+    }
+  };
+
+  $("#editCoverFile").onchange=async()=>{
+    const file=$("#editCoverFile").files[0]||null;
+    if(!file)return;
+    try{
+      $("#editProfileDialog").dataset.removeCover="0";
+      await renderEditMedia("cover",{file});
+      $("#editProfileMessage").textContent="";
+    }catch(error){
+      $("#editCoverFile").value="";
+      $("#editProfileMessage").textContent=error.message;
+      await renderEditMedia("cover",{mediaId:state.profile?.cover_media_id||null});
+    }
+  };
+
+  $("#removeAvatarImage").onclick=async()=>{
+    $("#editAvatarFile").value="";
+    $("#editProfileDialog").dataset.removeAvatar="1";
+    await renderEditMedia("avatar",{removed:true});
+    $("#editProfileMessage").textContent="سيتم حذف صورة الحساب عند الحفظ.";
+  };
+
+  $("#removeCoverImage").onclick=async()=>{
+    $("#editCoverFile").value="";
+    $("#editProfileDialog").dataset.removeCover="1";
+    await renderEditMedia("cover",{removed:true});
+    $("#editProfileMessage").textContent="سيتم حذف الغلاف عند الحفظ.";
+  };
+
+  $("#editProfileForm").onsubmit=async(e)=>{
+    e.preventDefault();
+    const form=e.currentTarget;
+    const validation=profileUtil.validateProfile({
+      name:$("#editName").value,
+      username:$("#editUsername").value,
+      bio:$("#editBio").value,
+      profile_link:$("#editProfileLink").value,
+      is_private:$("#editPrivate").checked
+    });
+    if(!validation.ok){
+      $("#editProfileMessage").textContent=validation.error;
+      return;
+    }
+
+    const avatarFile=$("#editAvatarFile").files[0]||null;
+    const coverFile=$("#editCoverFile").files[0]||null;
+    const avatarCheck=profileUtil.validateImageFile(avatarFile);
+    const coverCheck=profileUtil.validateImageFile(coverFile);
+    if(!avatarCheck.ok)return $("#editProfileMessage").textContent=avatarCheck.error;
+    if(!coverCheck.ok)return $("#editProfileMessage").textContent=coverCheck.error;
+
+    const saveButton=$("#saveProfileButton");
+    saveButton.disabled=true;
+    form.setAttribute("aria-busy","true");
+    $("#editProfileMessage").textContent="جارٍ حفظ الملف الشخصي...";
+
+    try{
+      let avatarMediaId=$("#editProfileDialog").dataset.removeAvatar==="1"?null:(state.profile?.avatar_media_id||null);
+      let coverMediaId=$("#editProfileDialog").dataset.removeCover==="1"?null:(state.profile?.cover_media_id||null);
+
+      if(avatarFile){
+        $("#editProfileMessage").textContent="جارٍ رفع صورة الحساب...";
+        const media=await uploadFile(avatarFile,"profile");
         avatarMediaId=media.id;
       }
       if(coverFile){
-        if(coverFile.size>10*1024*1024)throw new Error("صورة الغلاف يجب ألا تتجاوز 10 ميغابايت");
+        $("#editProfileMessage").textContent="جارٍ رفع الغلاف...";
         const media=await uploadFile(coverFile,"profile_cover");
         coverMediaId=media.id;
       }
-      const {error}=await client.from("profiles").update({
-        name,
-        username,
-        bio,
-        profile_link:profileLink,
-        is_private:$("#editPrivate").checked,
+
+      const previousUsername=state.profile?.username||"";
+      const previousName=state.profile?.name||"";
+      const value=validation.value;
+      await updateOwnProfile({
+        name:value.name,
+        username:value.username,
+        bio:value.bio,
+        profile_link:value.profile_link,
+        is_private:value.is_private,
         avatar_media_id:avatarMediaId,
-        cover_media_id:coverMediaId,
-        updated_at:new Date().toISOString()
-      }).eq("id",state.user.id);
-      if(error)throw error;
-      await refreshProfile();
+        cover_media_id:coverMediaId
+      });
+
+      if(previousUsername!==value.username||previousName!==value.name){
+        const metadata={...(state.user?.user_metadata||{}),name:value.name,username:value.username};
+        await client.auth.updateUser({data:metadata}).catch(()=>{});
+      }
+
+      $("#settingsPrivateToggle").checked=!!state.profile?.is_private;
+      resetEditProfileMedia();
       $("#editProfileDialog").close();
       await loadProfile();
     }catch(error){
-      $("#editProfileMessage").textContent=error.message;
+      $("#editProfileMessage").textContent=profileUtil.errorMessage(error,error?.message||"تعذر حفظ الملف الشخصي.");
+    }finally{
+      saveButton.disabled=false;
+      form.removeAttribute("aria-busy");
     }
   };
 
@@ -3117,33 +3312,29 @@
     const toggle=$("#settingsPrivateToggle");
     const next=toggle.checked;
     toggle.disabled=true;
-    const {error}=await client.from("profiles").update({
-      is_private:next,
-      updated_at:new Date().toISOString()
-    }).eq("id",state.user.id);
-    toggle.disabled=false;
-    if(error){
+    try{
+      await updateOwnProfile({is_private:next});
+      $("#editPrivate").checked=next;
+    }catch(error){
       toggle.checked=!next;
-      alert(error.message);
-      return;
+      alert(profileUtil.errorMessage(error,error?.message||"تعذر تغيير خصوصية الحساب."));
+    }finally{
+      toggle.disabled=false;
     }
-    await refreshProfile();
   };
+
   $("#savedVisibilityToggle").onchange=async()=>{
     const toggle=$("#savedVisibilityToggle");
     const next=toggle.checked;
     toggle.disabled=true;
-    const {error}=await client.from("profiles").update({
-      saved_visibility:next?"public":"private",
-      updated_at:new Date().toISOString()
-    }).eq("id",state.user.id);
-    toggle.disabled=false;
-    if(error){
+    try{
+      await updateOwnProfile({saved_visibility:next?"public":"private"});
+    }catch(error){
       toggle.checked=!next;
-      alert(error.message);
-      return;
+      alert(profileUtil.errorMessage(error,error?.message||"تعذر تغيير إعداد المحفوظات."));
+    }finally{
+      toggle.disabled=false;
     }
-    await refreshProfile();
   };
 
   function openInfoDialog(title,html){
@@ -3320,7 +3511,7 @@
     openInfoDialog("الأمان والجلسات",
       '<div class="settings-info">'+
         '<div class="info-row"><span>البريد الحالي</span><b>'+escapeHtml(email)+'</b></div>'+
-        '<div class="info-row"><span>حالة الجلسة</span><b>نشطة</b></div>'+
+        '<div class="info-row"><span>حالة الجلسة</span><b>نشطة على هذا الجهاز</b></div>'+
         '<div class="settings-group"><h4>تغيير كلمة المرور</h4>'+
           '<label><span>كلمة المرور الجديدة</span><input id="securityPassword1" type="password" minlength="8" autocomplete="new-password"></label>'+
           '<label><span>تأكيد كلمة المرور</span><input id="securityPassword2" type="password" minlength="8" autocomplete="new-password"></label>'+
@@ -3331,30 +3522,67 @@
           '<button id="changeEmailButton" class="secondary-wide" type="button">إرسال طلب تغيير البريد</button>'+
         '</div>'+
         '<button id="globalSignOutButton" class="danger-wide" type="button">تسجيل الخروج من جميع الأجهزة</button>'+
-        '<p id="securityMessage" class="message"></p>'+
+        '<p id="securityMessage" class="message" aria-live="polite"></p>'+
       '</div>');
+
+    const setSecurityMessage=(text,good=false)=>{
+      const el=$("#securityMessage");
+      el.textContent=text||"";
+      el.className="message "+(text?(good?"success":"error"):"");
+    };
+
     $("#changePasswordButton").onclick=async()=>{
       const p1=$("#securityPassword1").value;
       const p2=$("#securityPassword2").value;
-      if(p1.length<8)return $("#securityMessage").textContent="كلمة المرور يجب ألا تقل عن ٨ أحرف.";
-      if(p1!==p2)return $("#securityMessage").textContent="كلمتا المرور غير متطابقتين.";
-      $("#changePasswordButton").disabled=true;
-      const {error}=await client.auth.updateUser({password:p1});
-      $("#changePasswordButton").disabled=false;
-      $("#securityMessage").textContent=error?error.message:"تم تغيير كلمة المرور.";
+      if(!authUtil.validPassword(p1))return setSecurityMessage("كلمة المرور يجب ألا تقل عن ٨ أحرف.");
+      if(p1!==p2)return setSecurityMessage("كلمتا المرور غير متطابقتين.");
+      const button=$("#changePasswordButton");
+      button.disabled=true;
+      setSecurityMessage("جارٍ تغيير كلمة المرور...",true);
+      try{
+        const {error}=await client.auth.updateUser({password:p1});
+        if(error)throw error;
+        $("#securityPassword1").value="";
+        $("#securityPassword2").value="";
+        setSecurityMessage("تم تغيير كلمة المرور.",true);
+      }catch(error){
+        setSecurityMessage(authUtil.errorMessage(error,"تعذر تغيير كلمة المرور."));
+      }finally{
+        button.disabled=false;
+      }
     };
+
     $("#changeEmailButton").onclick=async()=>{
-      const next=$("#securityEmail").value.trim();
-      if(!next)return $("#securityMessage").textContent="اكتب البريد الجديد.";
-      $("#changeEmailButton").disabled=true;
-      const {error}=await client.auth.updateUser({email:next});
-      $("#changeEmailButton").disabled=false;
-      $("#securityMessage").textContent=error?error.message:"تم إرسال طلب تغيير البريد. أكمل التحقق من البريد.";
+      const next=authUtil.normalizeEmail($("#securityEmail").value);
+      if(!authUtil.validEmail(next))return setSecurityMessage("اكتب بريدًا إلكترونيًا صحيحًا.");
+      if(next===authUtil.normalizeEmail(state.user?.email||""))return setSecurityMessage("هذا هو البريد الحالي للحساب.");
+      const button=$("#changeEmailButton");
+      button.disabled=true;
+      setSecurityMessage("جارٍ إرسال طلب تغيير البريد...",true);
+      try{
+        const {error}=await client.auth.updateUser({email:next});
+        if(error)throw error;
+        $("#securityEmail").value="";
+        setSecurityMessage("تم إرسال طلب تغيير البريد. أكمل التحقق من الرسالة التي ستصلك.",true);
+      }catch(error){
+        setSecurityMessage(authUtil.errorMessage(error,"تعذر إرسال طلب تغيير البريد."));
+      }finally{
+        button.disabled=false;
+      }
     };
+
     $("#globalSignOutButton").onclick=async()=>{
-      $("#globalSignOutButton").disabled=true;
-      await client.auth.signOut({scope:"global"});
-      $("#infoDialog").close();
+      const button=$("#globalSignOutButton");
+      button.disabled=true;
+      setSecurityMessage("جارٍ إنهاء الجلسات...",true);
+      try{
+        const {error}=await client.auth.signOut({scope:"global"});
+        if(error)throw error;
+        $("#infoDialog").close();
+      }catch(error){
+        setSecurityMessage(authUtil.errorMessage(error,"تعذر تسجيل الخروج من جميع الأجهزة."));
+        button.disabled=false;
+      }
     };
   };
 
@@ -3364,21 +3592,36 @@
     await navigateTo("profilePage");
     await loadProfileContent("saved");
   };
-  $("#deleteAccountButton").onclick=async()=>{
-    const confirmText=prompt("اكتب كلمة حذف لتأكيد حذف الحساب نهائيًا.");
-    if(confirmText!=="حذف")return;
-    if(!confirm("سيتم حذف الحساب ولن تتمكن من التراجع. هل تريد المتابعة؟"))return;
-    $("#deleteAccountButton").disabled=true;
-    try{
-      await api("/v1/account",{method:"DELETE",body:JSON.stringify({confirm:"DELETE"})});
-      await client.auth.signOut().catch(()=>{});
-      $("#settingsDialog").close();
-      showApp(false);
-      showAuthMessage("تم حذف الحساب.");
-    }catch(error){
-      alert(error.message);
-      $("#deleteAccountButton").disabled=false;
-    }
+  $("#deleteAccountButton").onclick=()=>{
+    openInfoDialog("حذف الحساب نهائيًا",
+      '<div class="settings-info danger-confirmation">'+
+        '<p>سيتم حذف الحساب والبيانات المرتبطة به. هذه العملية لا يمكن التراجع عنها.</p>'+
+        '<label><span>اكتب كلمة حذف للتأكيد</span><input id="deleteAccountPhrase" autocomplete="off" placeholder="حذف"></label>'+
+        '<button id="confirmDeleteAccount" class="danger-wide" type="button" disabled>حذف الحساب نهائيًا</button>'+
+        '<p id="deleteAccountMessage" class="message" aria-live="polite"></p>'+
+      '</div>');
+    const phrase=$("#deleteAccountPhrase");
+    const button=$("#confirmDeleteAccount");
+    phrase.oninput=()=>{button.disabled=phrase.value.trim()!=="حذف"};
+
+    button.onclick=async()=>{
+      if(phrase.value.trim()!=="حذف")return;
+      button.disabled=true;
+      phrase.disabled=true;
+      $("#deleteAccountMessage").textContent="جارٍ حذف الحساب...";
+      try{
+        await api("/v1/account",{method:"DELETE",body:JSON.stringify({confirm:"DELETE"})});
+        await client.auth.signOut({scope:"local"}).catch(()=>{});
+        $("#infoDialog").close();
+        clearAuthSession();
+        setAuthView("login");
+        showAuthMessage("تم حذف الحساب.",true);
+      }catch(error){
+        $("#deleteAccountMessage").textContent=error?.message||"تعذر حذف الحساب.";
+        phrase.disabled=false;
+        button.disabled=false;
+      }
+    };
   };
 
   $("#helpButton").onclick=()=>{

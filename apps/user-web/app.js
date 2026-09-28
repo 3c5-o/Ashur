@@ -3184,11 +3184,13 @@
   async function loadProfile(){
     try{
       await refreshProfile();
-    const [{count:posts},{count:followers},{count:following}] = await Promise.all([
+    const [{count:posts},{count:reels},{count:followers},{count:following}] = await Promise.all([
       client.from("posts").select("*",{count:"exact",head:true}).eq("author_id",state.user.id),
+      client.from("reels").select("*",{count:"exact",head:true}).eq("author_id",state.user.id),
       client.from("follows").select("*",{count:"exact",head:true}).eq("following_id",state.user.id).eq("status","accepted"),
       client.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",state.user.id).eq("status","accepted")
     ]);
+    const totalContent=Number(posts||0)+Number(reels||0);
     const p=state.profile||{};
     const link=safeLink(p.profile_link||"");
     $("#profileCard").innerHTML=`
@@ -3204,7 +3206,7 @@
           ${p.bio?`<p class="profile-bio">${escapeHtml(p.bio)}</p>`:""}
           ${link?`<a class="profile-link" href="${escapeHtml(link)}" target="_blank" rel="noopener">${icon("link")}<span>${escapeHtml(p.profile_link)}</span></a>`:""}
           <div class="profile-stats">
-            <div><b>${posts||0}</b><span>منشور</span></div>
+            <div><b>${totalContent}</b><span>منشور + ريلز</span></div>
             <button class="profile-stat-button" id="ownFollowersButton" type="button"><b>${followers||0}</b><span>متابع</span></button>
             <button class="profile-stat-button" id="ownFollowingButton" type="button"><b>${following||0}</b><span>يتابع</span></button>
           </div>
@@ -3250,6 +3252,9 @@
       :([...(item.post_media||[])].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))[0]?.media_id||"");
     const coverId=kind==="reels"?String(item.cover_media_id||""):"";
     const caption=String(item.caption||"");
+    const ownerId=String(item.author_id||"");
+    const pinned=Boolean(item.pinned_at);
+    const viewCount=Number(item.view_count||0);
     let media="";
     if(kind==="reels"){
       if(coverId){
@@ -3259,23 +3264,28 @@
       }else{
         media='<div class="profile-grid-placeholder">'+icon("play")+'</div>';
       }
+      media+='<span class="profile-grid-views">'+icon("eye")+'<b data-profile-reel-views="'+escapeHtml(item.id)+'">'+viewCount+'</b></span>';
     }else{
       media=mediaId
         ?'<img class="profile-grid-media" data-profile-cover="1" data-media-id="'+escapeHtml(mediaId)+'" alt="">'
         :'<div class="profile-grid-placeholder">'+icon("comment")+'</div>';
+      if(pinned)media+='<span class="profile-grid-pinned">'+icon("pin")+'</span>';
     }
     return '<button class="profile-grid-tile" type="button"'+
       ' data-preview-kind="'+kind+'"'+
       ' data-preview-id="'+escapeHtml(item.id)+'"'+
       ' data-preview-media="'+escapeHtml(mediaId)+'"'+
       ' data-preview-caption="'+escapeHtml(caption)+'"'+
-      ' data-preview-comments="'+String(item.comments_enabled!==false)+'">'+
+      ' data-preview-comments="'+String(item.comments_enabled!==false)+'"'+
+      ' data-preview-owner="'+escapeHtml(ownerId)+'"'+
+      ' data-preview-pinned="'+String(pinned)+'"'+
+      ' data-preview-views="'+String(viewCount)+'">'+
       media+
       (saved?'<span class="profile-grid-saved">'+icon("save")+'</span>':"")+
       '</button>';
   }
 
-  async function openProfileContentPreview(kind,id,mediaId,caption="",commentsEnabled=true){
+  async function openProfileContentPreview(kind,id,mediaId,caption="",commentsEnabled=true,ownerId="",pinned=false,viewCount=0){
     const reel=kind==="reels";
     const likeTable=reel?"reel_likes":"post_likes";
     const targetField=reel?"reel_id":"post_id";
@@ -3303,8 +3313,10 @@
       '<div class="profile-preview-actions">'+
       '<button id="previewLikeButton" class="'+(liked?"active":"")+'" type="button">'+icon("like")+'<span>'+likeCount+'</span></button>'+
       (commentsEnabled?'<button id="previewCommentButton" type="button">'+icon("comment")+'<span>'+commentCount+'</span></button>':"")+
+      (reel?'<div class="profile-preview-stat">'+icon("eye")+'<span>'+Number(viewCount||0)+'</span></div>':"")+
       '<button id="previewShareButton" type="button">'+icon("share")+'<span>مشاركة</span></button>'+
       '<button id="previewSaveButton" class="'+(saved?"active":"")+'" type="button">'+icon("save")+'<span>'+(saved?"محفوظ":"حفظ")+'</span></button>'+
+      (ownerId===state.user.id?'<button id="previewManageButton" type="button">'+icon("more")+'<span>إدارة</span></button>':"")+
       '</div></div>');
     await hydrateMedia($("#infoDialogBody"));
     $("#previewLikeButton").onclick=async()=>{
@@ -3328,6 +3340,10 @@
     };
   }
 
+    if($("#previewManageButton"))$("#previewManageButton").onclick=()=>{
+      $("#infoDialog").close();
+      openOwnContentActions(kind,id,caption,commentsEnabled,pinned);
+    };
   function bindProfileGrid(root){
     root.querySelectorAll("[data-preview-id]").forEach(btn=>{
       btn.onclick=()=>{
@@ -3339,7 +3355,10 @@
         btn.dataset.previewId,
         btn.dataset.previewMedia,
         btn.dataset.previewCaption,
-        btn.dataset.previewComments==="true"
+        btn.dataset.previewComments==="true",
+        btn.dataset.previewOwner||"",
+        btn.dataset.previewPinned==="true",
+        Number(btn.dataset.previewViews||0)
       ).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
       };
     });
@@ -3354,7 +3373,7 @@
     try{
       if(kind==="reels"){
         const result=await client.from("reels")
-          .select("id,caption,media_id,cover_media_id,created_at,comments_enabled")
+          .select("id,author_id,caption,media_id,cover_media_id,created_at,comments_enabled,view_count")
           .eq("author_id",state.user.id)
           .order("created_at",{ascending:false});
         if(result.error)throw result.error;
@@ -3373,10 +3392,10 @@
         const reelIds=savedReels.map(x=>x.reel_id);
         const contentResults=await Promise.all([
           postIds.length
-            ?client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").in("id",postIds)
+            ?client.from("posts").select("id,author_id,caption,comments_enabled,pinned_at,post_media(media_id,sort_order)").in("id",postIds)
             :Promise.resolve({data:[],error:null}),
           reelIds.length
-            ?client.from("reels").select("id,caption,media_id,cover_media_id,comments_enabled").in("id",reelIds)
+            ?client.from("reels").select("id,author_id,caption,media_id,cover_media_id,comments_enabled,view_count").in("id",reelIds)
             :Promise.resolve({data:[],error:null})
         ]);
         if(contentResults[0].error)throw contentResults[0].error;
@@ -3391,11 +3410,15 @@
           '<div class="empty profile-grid-empty">لا توجد محفوظات بعد.</div>';
       }else{
         const result=await client.from("posts")
-          .select("id,caption,comments_enabled,post_media(media_id,sort_order)")
+          .select("id,author_id,caption,comments_enabled,pinned_at,created_at,post_media(media_id,sort_order)")
           .eq("author_id",state.user.id)
           .order("created_at",{ascending:false});
         if(result.error)throw result.error;
-        $("#profileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"posts")).join("")||
+        const orderedPosts=[...(result.data||[])].sort((a,b)=>
+          Number(Boolean(b.pinned_at))-Number(Boolean(a.pinned_at)) ||
+          new Date(b.pinned_at||b.created_at)-new Date(a.pinned_at||a.created_at)
+        );
+        $("#profileContent").innerHTML=orderedPosts.map(row=>profileGridTile(row,"posts")).join("")||
           '<div class="empty profile-grid-empty">لم تنشر شيئًا بعد.</div>';
       }
       await hydrateMedia($("#profileContent"));
@@ -3425,7 +3448,7 @@
     try{
       if(kind==="reels"){
         const result=await client.from("reels")
-          .select("id,caption,media_id,cover_media_id,comments_enabled,created_at")
+          .select("id,author_id,caption,media_id,cover_media_id,comments_enabled,created_at,view_count")
           .eq("author_id",uid)
           .order("created_at",{ascending:false})
           .limit(90);
@@ -3455,7 +3478,7 @@
           '<div class="empty profile-grid-empty">لا توجد محفوظات عامة.</div>';
       }else{
         const result=await client.from("posts")
-          .select("id,caption,comments_enabled,created_at,post_media(media_id,sort_order)")
+          .select("id,author_id,caption,comments_enabled,created_at,pinned_at,post_media(media_id,sort_order)")
           .eq("author_id",uid)
           .order("created_at",{ascending:false})
           .limit(90);
@@ -3486,12 +3509,14 @@
       return;
     }
     state.currentPublicProfile=p;
-    const [{count:posts},{count:followers},{count:following},{data:followRow}] = await Promise.all([
+    const [{count:posts},{count:reels},{count:followers},{count:following},{data:followRow}] = await Promise.all([
       client.from("posts").select("*",{count:"exact",head:true}).eq("author_id",uid),
+      client.from("reels").select("*",{count:"exact",head:true}).eq("author_id",uid),
       client.from("follows").select("*",{count:"exact",head:true}).eq("following_id",uid).eq("status","accepted"),
       client.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",uid).eq("status","accepted"),
       client.from("follows").select("status").eq("follower_id",state.user.id).eq("following_id",uid).maybeSingle()
     ]);
+    const totalContent=Number(posts||0)+Number(reels||0);
     const link=safeLink(p.profile_link||"");
     const followText=followRow?.status==="accepted"?"تتابعه":followRow?.status==="pending"?"تم إرسال الطلب":"متابعة";
     $("#publicProfileCard").innerHTML=
@@ -3501,7 +3526,7 @@
       '<div class="profile-username">@'+escapeHtml(p.username||"")+'</div>'+
       (p.bio?'<p class="profile-bio">'+escapeHtml(p.bio)+'</p>':"")+
       (link?'<a class="profile-link" href="'+escapeHtml(link)+'" target="_blank" rel="noopener">'+icon("link")+'<span>'+escapeHtml(p.profile_link)+'</span></a>':"")+
-      '<div class="profile-stats"><div><b>'+Number(posts||0)+'</b><span>منشور</span></div>'+
+      '<div class="profile-stats"><div><b>'+totalContent+'</b><span>منشور + ريلز</span></div>'+
       '<button id="publicFollowersButton" class="profile-stat-button" type="button"><b>'+Number(followers||0)+'</b><span>متابع</span></button>'+
       '<button id="publicFollowingButton" class="profile-stat-button" type="button"><b>'+Number(following||0)+'</b><span>يتابع</span></button></div>'+
       '<div class="profile-actions-public">'+

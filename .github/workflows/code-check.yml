@@ -60,6 +60,7 @@ jobs:
           const fs = require('fs');
           const app = fs.readFileSync('apps/user-web/app.js','utf8');
           const index = fs.readFileSync('apps/user-web/index.html','utf8');
+          const style = fs.readFileSync('apps/user-web/style.css','utf8');
           const core = fs.readFileSync('apps/user-web/core.js','utf8');
           const authCore = fs.readFileSync('apps/user-web/auth-core.js','utf8');
           const profileCore = fs.readFileSync('apps/user-web/profile-core.js','utf8');

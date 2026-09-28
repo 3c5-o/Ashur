@@ -2631,17 +2631,19 @@
     },180);
   }
 
-  function closeChatRealtime(){
+  function closeChatRealtime({resetMessages=true}={}){
     clearInterval(state.chatTimer);
     clearTimeout(state.chatRefreshTimer);
     clearTimeout(state.chatReconnectTimer);
     state.chatTimer=null;
     state.chatRefreshTimer=null;
     state.chatReconnectTimer=null;
-    state.chatMessageIds=new Set();
-    state.chatMessageCache=new Map();
-    state.chatInitialLoaded=false;
-    state.chatLastSyncAt=0;
+    if(resetMessages){
+      state.chatMessageIds=new Set();
+      state.chatMessageCache=new Map();
+      state.chatInitialLoaded=false;
+      state.chatLastSyncAt=0;
+    }
     if(state.chatChannel){
       try{client.removeChannel(state.chatChannel)}catch(_){try{state.chatChannel.unsubscribe?.()}catch(__){}}
       state.chatChannel=null;
@@ -2679,7 +2681,7 @@
   }
 
   function subscribeChatRealtime(){
-    closeChatRealtime();
+    closeChatRealtime({resetMessages:false});
     if(!state.activeConversation)return;
     const conversationId=state.activeConversation;
     setChatConnectionStatus("جارٍ الاتصال...","connecting");

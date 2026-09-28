@@ -36,14 +36,14 @@
       is_private: Boolean(input.is_private)
     };
 
-    if (value.name.length < 1 || value.name.length > 80) {
-      return { ok:false, error:"الاسم يجب أن يكون بين ١ و٨٠ حرفًا.", value };
+    if (value.name.length < 1 || value.name.length > 30) {
+      return { ok:false, error:"الاسم يجب ألا يتجاوز ٣٠ حرفًا.", value };
     }
-    if (!/^[a-z0-9_]{3,24}$/.test(value.username)) {
-      return { ok:false, error:"اسم المستخدم يقبل الحروف الإنجليزية والأرقام والشرطة السفلية، من ٣ إلى ٢٤ خانة.", value };
+    if (!/^[a-z0-9_.]{2,10}$/.test(value.username)) {
+      return { ok:false, error:"اسم المستخدم من ٢ إلى ١٠ خانات ويقبل الحروف الإنجليزية والأرقام والنقطة والشرطة السفلية.", value };
     }
-    if (value.bio.length > 300) {
-      return { ok:false, error:"النبذة يجب ألا تتجاوز ٣٠٠ حرف.", value };
+    if (value.bio.length > 150) {
+      return { ok:false, error:"النبذة يجب ألا تتجاوز ١٥٠ حرفًا.", value };
     }
     try {
       value.profile_link = normalizeProfileLink(input.profile_link);

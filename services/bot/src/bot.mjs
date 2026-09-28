@@ -437,7 +437,10 @@ async function sendAdmins(chatId, actor) {
     ),
   ];
   const keyboard = [
-    [{ text: "إضافة مشرف", callback_data: "add_bot_admin" }],
+    [
+      { text: "إضافة مشرف", callback_data: "add_bot_admin" },
+      ...(actor.role === "owner" ? [{ text: "مالك إدارة التطبيق", callback_data: "set_app_owner" }] : []),
+    ],
     ...(rows || []).slice(0, 8).map((r) => [
       { text: (r.active ? "تعطيل " : "تفعيل ") + r.telegram_user_id, callback_data: "toggle_bot_admin:" + r.telegram_user_id },
       { text: "حذف", callback_data: "delete_bot_admin:" + r.telegram_user_id },
@@ -524,6 +527,52 @@ async function handleText(message) {
     }
   }
 
+  if (p.action === "set_app_owner") {
+    if (actor.role !== "owner") {
+      await clearPending(from.id).catch(() => {});
+      return tg("sendMessage", { chat_id: message.chat.id, text: "هذه العملية للمالك الرئيسي فقط." });
+    }
+    const identifier = text.replace(/^@/, "").trim();
+    let profiles = [];
+    if (/^[0-9a-f-]{36}$/i.test(identifier)) {
+      profiles = await db("/rest/v1/profiles?select=id,name,username&id=eq." + encodeURIComponent(identifier) + "&limit=1");
+    } else {
+      profiles = await db("/rest/v1/profiles?select=id,name,username&username=eq." + encodeURIComponent(identifier) + "&limit=1");
+    }
+    const profile = profiles?.[0];
+    if (!profile) {
+      return tg("sendMessage", {
+        chat_id: message.chat.id,
+        text: "الحساب غير موجود. أرسل اسم المستخدم داخل آشور أو UUID الحساب.",
+      });
+    }
+    const owners = await db("/rest/v1/admins?select=user_id&role=eq.owner&active=eq.true").catch(() => []);
+    for (const row of owners || []) {
+      if (row.user_id === profile.id) continue;
+      await db("/rest/v1/admins?user_id=eq." + encodeURIComponent(row.user_id), {
+        method: "PATCH",
+        body: { role: "secondary_admin", updated_at: new Date().toISOString() },
+        prefer: "return=minimal",
+      }).catch(() => {});
+    }
+    await upsert("admins", {
+      user_id: profile.id,
+      role: "owner",
+      permissions: { all: true },
+      active: true,
+      updated_at: new Date().toISOString(),
+    }, "user_id");
+    await writeBotAudit("set_app_owner", "admin", profile.id, {
+      username: profile.username || "",
+      by: String(from.id),
+    });
+    await clearPending(from.id);
+    return tg("sendMessage", {
+      chat_id: message.chat.id,
+      text: "تم تعيين @" + (profile.username || profile.name || profile.id) + " كمالك رئيسي لتطبيق الإدارة.",
+    });
+  }
+
   if (p.action === "add_bot_admin") {
     if (!hasPermission(actor, "admins")) {
       await clearPending(from.id).catch(() => {});
@@ -588,6 +637,15 @@ async function handleCallback(query) {
     if (data === "errors") return sendErrors(chatId, actor);
     if (data === "logs") return sendLogs(chatId, actor);
     if (data === "admins") return sendAdmins(chatId, actor);
+
+    if (data === "set_app_owner") {
+      if (actor.role !== "owner") throw new Error("هذه العملية للمالك الرئيسي فقط");
+      await setPending(query.from.id, "set_app_owner", {});
+      return tg("sendMessage", {
+        chat_id: chatId,
+        text: "تعيين مالك تطبيق الإدارة\n\nأرسل اسم المستخدم داخل آشور مثل: hamad\nأو UUID الحساب.\n\nللإلغاء أرسل /cancel",
+      });
+    }
 
     if (data === "test_all") {
       await requireActor(query.from, "channels");

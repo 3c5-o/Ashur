@@ -40,6 +40,8 @@
     conversationCreateMode:"direct",
     selectedGroupMembers:new Map(),
     activeConversationMeta:null,
+    viewedReels:new Set(),
+    reelViewTimers:new Map(),
     cameraStream:null,
     cameraFacing:"environment",
     cameraMode:"photo",
@@ -125,7 +127,9 @@
       report:'<path d="M5 21V4m0 1h12l-2 4 2 4H5"/>',
       lock:'<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
       globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
-      play:'<path d="M8 5v14l11-7Z"/>'
+      play:'<path d="M8 5v14l11-7Z"/>',
+      eye:'<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.6"/>',
+      pin:'<path d="m9 3 6 1-1 5 3 3v2H7v-2l3-3Z"/><path d="M12 14v7"/>'
     };
     return '<svg viewBox="0 0 24 24" aria-hidden="true">'+(paths[name]||'')+'</svg>';
   };
@@ -1481,21 +1485,45 @@
     };
   }
 
-  function openOwnContentActions(kind,id,caption="",commentsEnabled=true){
+  function openOwnContentActions(kind,id,caption="",commentsEnabled=true,pinned=false){
     const label=kind==="reels"?"الريلز":kind==="stories"?"القصة":"المنشور";
     const commentsField=kind==="stories"?"":`
       <label class="switch-row">
         <span><b>السماح بالتعليقات</b><small>يمكن تغييرها بأي وقت</small></span>
         <input id="ownContentComments" type="checkbox" ${commentsEnabled!==false?"checked":""}>
       </label>`;
+    const pinAction=kind==="posts"
+      ?`<button id="pinOwnContent" class="secondary-wide content-pin-action ${pinned?"active":""}" type="button">${icon("pin")}<span>${pinned?"إلغاء تثبيت المنشور":"تثبيت في الملف الشخصي"}</span></button>`
+      :"";
     openInfoDialog("إدارة "+label,`
-      <div class="form settings-info">
+      <div class="form settings-info content-manage-sheet">
         <label><span>الوصف</span><textarea id="ownContentCaption" maxlength="2200">${escapeHtml(caption||"")}</textarea></label>
         ${commentsField}
+        ${pinAction}
         <button id="saveOwnContent" class="primary" type="button">حفظ التعديلات</button>
         <button id="deleteOwnContent" class="danger-wide danger-outline" type="button">حذف ${label}</button>
         <p id="ownContentMessage" class="message"></p>
       </div>`);
+
+    if($("#pinOwnContent"))$("#pinOwnContent").onclick=async()=>{
+      const button=$("#pinOwnContent");
+      button.disabled=true;
+      try{
+        const next=!button.classList.contains("active");
+        await api("/v1/social/content/posts/"+id,{
+          method:"PATCH",
+          body:JSON.stringify({pinned:next})
+        });
+        button.classList.toggle("active",next);
+        button.innerHTML=icon("pin")+"<span>"+(next?"إلغاء تثبيت المنشور":"تثبيت في الملف الشخصي")+"</span>";
+        $("#ownContentMessage").textContent=next?"تم تثبيت المنشور في أعلى حسابك.":"تم إلغاء تثبيت المنشور.";
+        pinned=next;
+        if(state.activePage==="profilePage")await loadProfileContent("posts");
+      }catch(error){
+        $("#ownContentMessage").textContent=error.message;
+      }finally{button.disabled=false}
+    };
+
     $("#saveOwnContent").onclick=async()=>{
       $("#saveOwnContent").disabled=true;
       try{
@@ -1516,7 +1544,7 @@
       try{
         await api("/v1/social/content/"+kind+"/"+id,{method:"DELETE"});
         $("#infoDialog").close();
-        if(state.activePage==="profilePage")await loadProfileContent(state.profileTab);
+        if(state.activePage==="profilePage")await loadProfile();
         else if(kind==="reels")await loadReels();
         else await loadFeed();
       }catch(error){
@@ -1525,7 +1553,6 @@
       }
     };
   }
-
 
   function renderSaveButton(kind,button,active){
     if(!button)return;
@@ -1587,7 +1614,7 @@
     article.querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
     article.querySelectorAll("[data-share-post]").forEach(b=>b.onclick=()=>shareContent("post",b.dataset.sharePost));
     article.querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSavedContent("post",b.dataset.savePost,b).catch(()=>{}));
-    article.querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true"));
+    article.querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true",b.dataset.pinned==="true"));
     article.querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
   }
 
@@ -1603,7 +1630,7 @@
     const pageSize=20;
     try{
       const {data,error}=await client.from("posts")
-        .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
+        .select("id,author_id,caption,created_at,comments_enabled,pinned_at,post_media(media_id,sort_order)")
         .order("created_at",{ascending:false})
         .range(start,start+pageSize-1);
 
@@ -1647,7 +1674,7 @@
               <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
               <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
             </button>
-            ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
+            ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" data-pinned="${Boolean(post.pinned_at)}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
           </div>
           ${mediaHtml}
           <div class="post-body">

@@ -83,8 +83,13 @@ jobs:
           const missingProfileCore = !index.includes('./profile-core.js') || !profileCore.includes('validateProfile') || !app.includes('window.AshurProfile');
           const missingProfileMediaGuard = !server.includes('detectProfileImageMime') || !server.includes('kind === "profile_cover"');
           const missingDeleteRevocation = !server.includes('/auth/v1/logout?scope=global');
-          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation) {
-            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation});
+          const missingInteractionLocks = !app.includes('interactionLocks:new Set()') || !app.includes('ASHUR_LIKE_TOGGLE_FAILED');
+          const missingReelPagination = !app.includes('reelOffset:0') || !app.includes('loadReels({append=false}') || !app.includes('loadReels({append:true})');
+          const missingStoryViewersApi = !app.includes('/v1/social/story-viewers/') || !server.includes('async function socialStoryViewers');
+          const missingMediaVisibilityScan = !server.includes('for (const link of links)') || !server.includes('for (const reel of reels || [])');
+          const missingCommentFeedback = !index.includes('id="commentMessage"') || !app.includes('$("#commentMessage")');
+          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation || missingInteractionLocks || missingReelPagination || missingStoryViewersApi || missingMediaVisibilityScan || missingCommentFeedback) {
+            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation,missingInteractionLocks,missingReelPagination,missingStoryViewersApi,missingMediaVisibilityScan,missingCommentFeedback});
             process.exit(1);
           }
           NODE

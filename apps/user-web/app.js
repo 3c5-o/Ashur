@@ -2035,63 +2035,72 @@
   $$(".chip[data-search-type]").forEach(btn=>btn.onclick=()=>setSearchType(btn.dataset.searchType));
 
   async function renderAccountResults(query=""){
+    const clean=String(query||"").trim().replace(/^@/,"").replace(/[,%()]/g,"");
     let request=client.from("profiles")
-      .select("id,name,username,avatar_media_id,is_verified,is_private,created_at")
+      .select("id,name,username,bio,avatar_media_id,is_verified,is_private,created_at")
       .neq("id",state.user.id)
       .order("created_at",{ascending:false})
-      .limit(30);
-    if(query){
-      const safe=query.replace(/[,%()]/g,"");
-      request=request.or(`name.ilike.%${safe}%,username.ilike.%${safe}%`);
-    }
+      .limit(clean?24:8);
+    if(clean)request=request.or(`name.ilike.%${clean}%,username.ilike.%${clean}%`);
     const {data,error}=await request;
     if(error)throw error;
-    const statuses=await followStatusMap((data||[]).map(x=>x.id));
-    return (data||[]).map(p=>`<div class="list-card">
-      ${avatar(p)}
-      <button class="grow profile-result" data-open-profile="${p.id}" type="button">
-        <b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b>
-        <div>@${escapeHtml(p.username||"")}${p.is_private?" · حساب خاص":""}</div>
+    const rows=data||[];
+    const statuses=await followStatusMap(rows.map(x=>x.id));
+    return rows.map(p=>`<article class="search-account-card">
+      <button class="search-account-main" data-open-profile="${p.id}" type="button">
+        ${avatar(p,"search-account-avatar")}
+        <span class="search-account-copy">
+          <b>${escapeHtml(p.name||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}</b>
+          <small>@${escapeHtml(p.username||"")}${p.is_private?" · حساب خاص":""}</small>
+          ${p.bio?`<em>${escapeHtml(p.bio)}</em>`:""}
+        </span>
       </button>
-      <button class="small-button ${statuses[p.id]?"active":""}" data-follow="${p.id}" type="button">${followLabel(statuses[p.id])}</button>
-    </div>`).join("");
+      <button class="search-follow-button ${statuses[p.id]?"active":""}" data-follow="${p.id}" type="button">${followLabel(statuses[p.id])}</button>
+    </article>`).join("");
   }
 
   async function renderPostResults(query=""){
+    const clean=String(query||"").trim().replace(/[,%()]/g,"");
     let request=client.from("posts")
-      .select("id,author_id,caption,created_at,post_media(media_id,sort_order)")
+      .select("id,author_id,caption,comments_enabled,created_at,post_media(media_id,sort_order)")
       .order("created_at",{ascending:false})
-      .limit(30);
-    if(query)request=request.ilike("caption",`%${query.replace(/[,%()]/g,"")}%`);
+      .limit(clean?24:10);
+    if(clean)request=request.ilike("caption",`%${clean}%`);
     const {data,error}=await request;
     if(error)throw error;
-    const profiles=await profilesMap([...new Set((data||[]).map(x=>x.author_id))]);
-    return (data||[]).map(row=>{
+    const rows=data||[];
+    const profiles=await profilesMap([...new Set(rows.map(x=>x.author_id))]);
+    return rows.map(row=>{
       const p=profiles[row.author_id]||{};
-      const media=(row.post_media||[]).sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id;
-      return `<article class="search-post-card">
-        <button class="search-post-owner" data-open-profile="${row.author_id}" type="button">${avatar(p)}<span><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><small>@${escapeHtml(p.username||"")}</small></span></button>
-        ${media?`<img class="search-post-media" data-media-id="${media}" alt="">`:""}
-        ${row.caption?`<p>${richText(row.caption)}</p>`:""}
+      const media=[...(row.post_media||[])].sort((a,b)=>a.sort_order-b.sort_order)[0]?.media_id||"";
+      return `<article class="search-post-card stage4-search-post">
+        <button class="search-post-owner" data-open-profile="${row.author_id}" type="button">${avatar(p)}<span><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><small>@${escapeHtml(p.username||"")} · ${new Date(row.created_at).toLocaleDateString("ar-IQ")}</small></span></button>
+        <button class="search-post-open" data-search-open-post="${row.id}" data-media="${escapeHtml(media)}" data-caption="${escapeHtml(row.caption||"")}" data-owner="${escapeHtml(row.author_id)}" data-comments="${row.comments_enabled!==false}" type="button">
+          ${media?`<img class="search-post-media" data-media-id="${media}" alt="">`:'<span class="search-post-text-placeholder">'+icon("comment")+'</span>'}
+          ${row.caption?`<p>${richText(row.caption)}</p>`:""}
+          <span class="search-open-label">عرض المنشور</span>
+        </button>
       </article>`;
     }).join("");
   }
 
   async function renderReelResults(query=""){
+    const clean=String(query||"").trim().replace(/[,%()]/g,"");
     let request=client.from("reels")
-      .select("id,media_id,cover_media_id,caption,author_id,created_at")
+      .select("id,media_id,cover_media_id,caption,author_id,created_at,view_count")
       .eq("explore_enabled",true)
       .order("created_at",{ascending:false})
-      .limit(12);
-    if(query)request=request.ilike("caption",`%${query.replace(/[,%()]/g,"")}%`);
+      .limit(clean?18:12);
+    if(clean)request=request.ilike("caption",`%${clean}%`);
     const {data,error}=await request;
     if(error)throw error;
     return (data||[]).map(r=>`
-      <button class="explore-tile" data-open-reel="${r.id}" type="button">
+      <button class="explore-tile stage4-reel-tile" data-open-reel="${r.id}" type="button">
         ${r.cover_media_id
           ?`<img class="explore-cover" data-media-id="${r.cover_media_id}" alt="">`
           :`<video muted playsinline preload="metadata" data-video-cover="1" data-media-id="${r.media_id}"></video>`}
-        <span class="explore-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z"/></svg></span>
+        <span class="explore-play">${icon("play")}</span>
+        <span class="explore-views">${icon("eye")}<b>${Number(r.view_count||0)}</b></span>
       </button>`).join("");
   }
 
@@ -2101,45 +2110,73 @@
 
   let searchTimer;
   $("#searchInput").oninput=()=>{
+    const has=Boolean($("#searchInput").value.trim());
+    $("#clearSearchButton").classList.toggle("hidden",!has);
+    $("#searchContextHint").textContent=has?"نتائج مطابقة لما تكتبه":"اكتشف حسابات ومحتوى جديدًا";
     clearTimeout(searchTimer);
-    searchTimer=setTimeout(runSearch,250);
+    searchTimer=setTimeout(runSearch,220);
+  };
+  $("#clearSearchButton").onclick=()=>{
+    $("#searchInput").value="";
+    $("#clearSearchButton").classList.add("hidden");
+    $("#searchContextHint").textContent="اكتشف حسابات ومحتوى جديدًا";
+    $("#searchInput").focus();
+    runSearch();
   };
 
   async function runSearch(){
     const q=$("#searchInput").value.trim();
-    $("#searchResults").innerHTML='<div class="empty">جارٍ التحميل...</div>';
-    $("#searchResults").classList.remove("explore-media-grid");
+    const root=$("#searchResults");
+    root.innerHTML='<div class="search-loading"><i></i><span>جارٍ البحث...</span></div>';
+    root.classList.remove("explore-media-grid");
     try{
       let html="";
       if(state.searchType==="accounts"){
-        html=await renderAccountResults(q);
+        const accounts=await renderAccountResults(q);
+        html='<div class="search-section-head"><b>الحسابات</b><span>'+((q&&"نتائج البحث")||"حسابات مقترحة")+'</span></div><div class="search-account-list">'+accounts+'</div>';
       }else if(state.searchType==="posts"){
-        html=await renderPostResults(q);
+        const posts=await renderPostResults(q);
+        html='<div class="search-section-head"><b>المنشورات</b><span>'+(q?"مطابقة للبحث":"أحدث المنشورات")+'</span></div><div class="search-post-list">'+posts+'</div>';
       }else if(state.searchType==="reels"){
-        $("#searchResults").classList.add("explore-media-grid");
-        html=await renderReelResults(q);
+        const reels=await renderReelResults(q);
+        html='<div class="search-section-head"><b>الريلز</b><span>'+(q?"مطابقة للبحث":"اكتشف الآن")+'</span></div><div class="explore-media-grid stage4-explore-grid">'+reels+'</div>';
       }else if(q){
         const [accounts,posts,reels]=await Promise.all([
           renderAccountResults(q),
           renderPostResults(q),
           renderReelResults(q)
         ]);
-        html=`${accounts?`<div class="search-group-title">الحسابات</div>${accounts}`:""}${posts?`<div class="search-group-title">المنشورات</div>${posts}`:""}${reels?`<div class="search-group-title">الريلز</div><div class="explore-media-grid inline-grid">${reels}</div>`:""}`;
+        html=
+          (accounts?'<section class="search-result-section"><div class="search-section-head"><b>الحسابات</b><span>الأقرب لبحثك</span></div><div class="search-account-list">'+accounts+'</div></section>':"")+
+          (reels?'<section class="search-result-section"><div class="search-section-head"><b>الريلز</b><span>محتوى مطابق</span></div><div class="explore-media-grid stage4-explore-grid">'+reels+'</div></section>':"")+
+          (posts?'<section class="search-result-section"><div class="search-section-head"><b>المنشورات</b><span>محتوى مطابق</span></div><div class="search-post-list">'+posts+'</div></section>':"");
       }else{
-        $("#searchResults").classList.add("explore-media-grid");
-        html=await renderReelResults("");
+        const [accounts,reels]=await Promise.all([renderAccountResults(""),renderReelResults("")]);
+        html=
+          '<section class="search-result-section"><div class="search-section-head"><b>حسابات مقترحة</b><span>اكتشف أشخاصًا جدد</span></div><div class="search-account-list">'+accounts+'</div></section>'+
+          '<section class="search-result-section"><div class="search-section-head"><b>ريلز للاستكشاف</b><span>محتوى حديث</span></div><div class="explore-media-grid stage4-explore-grid">'+reels+'</div></section>';
       }
 
-      $("#searchResults").innerHTML=html||'<div class="empty">لا توجد نتائج.</div>';
-      await hydrateMedia($("#searchResults"));
-      prepareVideoCovers($("#searchResults"));
+      root.innerHTML=html||'<div class="empty search-empty"><b>لا توجد نتائج</b><span>جرّب اسمًا أو يوزر مختلفًا.</span></div>';
+      await hydrateMedia(root);
+      prepareVideoCovers(root);
 
-      $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=e=>{
+      root.querySelectorAll("[data-follow]").forEach(b=>b.onclick=async e=>{
         e.stopPropagation();
-        followUser(b.dataset.follow,b);
+        b.disabled=true;
+        await followUser(b.dataset.follow,b);
+        b.disabled=false;
       });
-      $("#searchResults").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
-      $("#searchResults").querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=async()=>{
+      root.querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+      root.querySelectorAll("[data-search-open-post]").forEach(b=>b.onclick=()=>openProfileContentPreview(
+        "posts",
+        b.dataset.searchOpenPost,
+        b.dataset.media||"",
+        b.dataset.caption||"",
+        b.dataset.comments==="true",
+        b.dataset.owner||""
+      ).catch(error=>openInfoDialog("تعذر فتح المنشور",'<div class="empty error">'+escapeHtml(error.message)+'</div>')));
+      root.querySelectorAll("[data-open-reel]").forEach(b=>b.onclick=async()=>{
         await navigateTo("reelsPage");
         requestAnimationFrame(()=>{
           const target=$(`.reel[data-reel-id="${b.dataset.openReel}"]`);
@@ -2147,8 +2184,7 @@
         });
       });
     }catch(error){
-      $("#searchResults").classList.remove("explore-media-grid");
-      $("#searchResults").innerHTML=errorMarkup(error.message||"تعذر تحميل البحث","searchPage");
+      root.innerHTML=errorMarkup(error.message||"تعذر تحميل البحث","searchPage");
     }
   }
 

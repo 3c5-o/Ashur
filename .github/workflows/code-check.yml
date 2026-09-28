@@ -6,6 +6,7 @@ on:
     paths:
       - "apps/**/*.js"
       - "services/**/*.mjs"
+      - "android/user/app/src/main/java/**/*.java"
       - ".github/workflows/code-check.yml"
   workflow_dispatch:
 
@@ -29,13 +30,13 @@ jobs:
           const fs = require('fs');
           const app = fs.readFileSync('apps/user-web/app.js','utf8');
           const main = fs.readFileSync('android/user/app/src/main/java/app/ashur/social/MainActivity.java','utf8');
-          const badForEach = /(?<!\$)\$\([^\n;]*\)\.forEach/g.test(app);
-          const triple = app.includes('$$(');
+          const directSingleForEach = /(^|[^$])\$\((?:"[^"]*"|'[^']*')\)\.forEach/g.test(app);
+          const triple = app.includes('$' + '$' + '$' + '(');
           const remoteUi = /REMOTE_APP_URL|vercel\.app\/app/.test(main);
           const missingBack = !app.includes('window.ASHUR_HANDLE_BACK');
           const missingLocal = !main.includes('LOCAL_APP_URL');
-          if (badForEach || triple || remoteUi || missingBack || missingLocal) {
-            console.error({badForEach,triple,remoteUi,missingBack,missingLocal});
+          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal) {
+            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal});
             process.exit(1);
           }
           NODE

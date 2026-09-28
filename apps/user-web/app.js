@@ -20,6 +20,9 @@
     reelObserver:null,
     storyTimer:null,
     activePage:"homePage",
+    pageHistory:[],
+    publicProfileTab:"posts",
+    returnPublicProfileId:null,
     previewUrl:null,
     previewUrls:[],
     chatPreviewUrl:null,
@@ -529,12 +532,24 @@
     $("#registerTab").classList.remove("active");
   };
 
-  async function navigateTo(page){
+  function updateTopbarContext(page){
+    const topbar=$(".topbar");
+    if(!topbar)return;
+    topbar.classList.toggle("home-context",page==="homePage");
+  }
+
+  async function navigateTo(page,{fromBack=false,replace=false}={}){
     if(!document.getElementById(page))page="homePage";
+    const previous=state.activePage||$(".page.active")?.id||"homePage";
+    if(!fromBack && !replace && previous!==page){
+      state.pageHistory.push(previous);
+      if(state.pageHistory.length>20)state.pageHistory.shift();
+    }
     closeTransientDialogs();
     state.activePage=page;
-    $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    updateTopbarContext(page);
+    $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
       state.reelObserver?.disconnect?.();
@@ -544,9 +559,9 @@
     if(page==="reelsPage")await loadReels();
     if(page==="messagesPage")await loadConversations();
     if(page==="profilePage")await loadProfile();
-    window.scrollTo({top:0,behavior:"smooth"});
+    window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
   }
-  $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){
@@ -2531,16 +2546,23 @@
       const dialog=openDialogs[openDialogs.length-1];
       if(dialog.id==="systemDialog" && dialog.dataset.blocking==="1")return true;
       if(dialog.id==="chatDialog"){
-        clearInterval(state.chatTimer);
-        state.chatTimer=null;
+        closeChatRealtime();
         state.activeConversation=null;
+        clearChatAttachment();
       }
-      dialog.close();
+      if(dialog.id==="storyViewerDialog")clearTimeout(state.storyTimer);
+      const returnProfile=dialog.id==="infoDialog"?state.returnPublicProfileId:null;
+      state.returnPublicProfileId=null;
+      try{dialog.close()}catch(_){}
+      if(returnProfile){
+        setTimeout(()=>openPublicProfile(returnProfile).catch(()=>{}),0);
+      }
       return true;
     }
     const active=$(".page.active");
     if(active && active.id!=="homePage"){
-      navigateTo("homePage");
+      const previous=state.pageHistory.pop()||"homePage";
+      navigateTo(previous,{fromBack:true,replace:true});
       return true;
     }
     return false;

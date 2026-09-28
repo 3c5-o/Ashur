@@ -311,7 +311,7 @@
 
     const audioLabel=audio.closest(".message-row,.chat-attachment-preview")
       ?"رسالة صوتية"
-      :(access.original_name||"صوتية");
+      :"مقطع صوتي";
 
     wrapper.insertAdjacentHTML("beforeend",
       '<button class="ashur-audio-toggle" type="button" aria-label="تشغيل"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg></button>'+

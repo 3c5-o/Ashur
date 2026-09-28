@@ -274,7 +274,7 @@
       router.reset("homePage");
       state.activePage="homePage";
       store.emit("session:reset",{activePage:"homePage"});
-      $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
       $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }

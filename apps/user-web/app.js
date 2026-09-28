@@ -1145,6 +1145,8 @@
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
       state.reelObserver?.disconnect?.();
       state.reelObserver=null;
+      for(const timer of state.reelViewTimers.values())clearTimeout(timer);
+      state.reelViewTimers.clear();
     }
     if(page!=="messagesPage")closeInboxRealtime();
     if(page==="searchPage")await loadExplore();
@@ -2030,7 +2032,7 @@
 
     try{
       const {data,error}=await client.from("reels")
-        .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled")
+        .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled,view_count")
         .order("created_at",{ascending:false})
         .range(start,start+pageSize-1);
       if(error)throw error;
@@ -2066,11 +2068,12 @@
         const likedNow=likedSet.has(r.id);
         const savedNow=savedSet.has(r.id);
         const metric=counts[r.id]||{likes:0,comments:0};
-        return `<article class="reel is-loading" data-reel-id="${r.id}" data-cover-id="${r.cover_media_id||""}">
+        return `<article class="reel is-loading" data-reel-id="${r.id}" data-cover-id="${r.cover_media_id||""}" data-view-count="${Number(r.view_count||0)}">
           ${r.cover_media_id?`<img class="reel-poster" data-media-id="${r.cover_media_id}" alt="">`:""}
           <video playsinline muted loop preload="none" data-media-id="${r.media_id}"></video>
           <div class="reel-loader" aria-hidden="true"></div>
           <div class="reel-shade"></div>
+          <div class="reel-like-burst" aria-hidden="true">${icon("like")}</div>
           <button class="reel-center-play" type="button" aria-label="تشغيل">
             <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>
           </button>
@@ -2094,6 +2097,9 @@
             ${r.comments_enabled===false
               ? `<button class="reel-action" type="button" disabled><span class="reel-action-icon">${icon("comment")}</span><span>—</span></button>`
               : `<button class="reel-action" data-comment-reel="${r.id}" type="button"><span class="reel-action-icon">${icon("comment")}</span><span>${metric.comments}</span></button>`}
+            <div class="reel-action reel-view-stat" aria-label="المشاهدات">
+              <span class="reel-action-icon">${icon("eye")}</span><span data-reel-view-count>${Number(r.view_count||0)}</span>
+            </div>
             <button class="reel-action" data-share-reel="${r.id}" type="button">
               <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
             </button>
@@ -2121,6 +2127,50 @@
     }
   }
 
+  async function recordReelView(reel){
+    const id=reel?.dataset?.reelId;
+    if(!id||state.viewedReels.has(id)||!state.user)return;
+    state.viewedReels.add(id);
+    try{
+      const result=await api("/v1/social/reel-view/"+encodeURIComponent(id),{method:"POST"});
+      const count=Number(result?.view_count||0);
+      reel.dataset.viewCount=String(count);
+      const label=reel.querySelector("[data-reel-view-count]");
+      if(label)label.textContent=String(count);
+      document.querySelectorAll('[data-profile-reel-views="'+CSS.escape(id)+'"]').forEach(el=>el.textContent=String(count));
+    }catch(error){
+      state.viewedReels.delete(id);
+      console.warn("ASHUR_REEL_VIEW_FAILED",id,error);
+    }
+  }
+
+  function scheduleReelView(reel){
+    const id=reel?.dataset?.reelId;
+    if(!id||state.viewedReels.has(id)||state.reelViewTimers.has(id))return;
+    const timer=setTimeout(()=>{
+      state.reelViewTimers.delete(id);
+      if(reel.dataset.visibleHigh==="1")recordReelView(reel);
+    },1500);
+    state.reelViewTimers.set(id,timer);
+  }
+
+  function cancelReelViewTimer(reel){
+    const id=reel?.dataset?.reelId;
+    if(!id)return;
+    const timer=state.reelViewTimers.get(id);
+    if(timer)clearTimeout(timer);
+    state.reelViewTimers.delete(id);
+  }
+
+  function showReelLikeBurst(reel){
+    const burst=reel?.querySelector(".reel-like-burst");
+    if(!burst)return;
+    burst.classList.remove("show");
+    void burst.offsetWidth;
+    burst.classList.add("show");
+    setTimeout(()=>burst.classList.remove("show"),650);
+  }
+
   function initReelPlayers(){
     state.reelObserver?.disconnect?.();
     state.reelObserver=null;
@@ -2140,12 +2190,16 @@
           }
         }
         if(entry.isIntersecting && entry.intersectionRatio>.72){
+          reel.dataset.visibleHigh="1";
+          scheduleReelView(reel);
           reels.forEach(other=>{
             const ov=other.querySelector("video");
             if(other!==reel && ov && !ov.paused)ov.pause();
           });
           video.play().catch(()=>{});
         }else{
+          reel.dataset.visibleHigh="0";
+          cancelReelViewTimer(reel);
           video.pause();
         }
       });
@@ -2186,8 +2240,29 @@
           play?.classList.add("show");
         }
       };
-      video.addEventListener("click",togglePlay);
-      play?.addEventListener("click",togglePlay);
+      play?.addEventListener("click",e=>{e.stopPropagation();togglePlay()});
+
+      let lastTap=0;
+      let singleTapTimer=null;
+      video.addEventListener("pointerup",()=>{
+        const now=Date.now();
+        if(now-lastTap<280){
+          clearTimeout(singleTapTimer);
+          lastTap=0;
+          showReelLikeBurst(reel);
+          const like=reel.querySelector("[data-like-reel]");
+          if(like&&!like.classList.contains("active"))like.click();
+          return;
+        }
+        lastTap=now;
+        clearTimeout(singleTapTimer);
+        singleTapTimer=setTimeout(()=>{
+          if(lastTap===now){
+            togglePlay();
+            lastTap=0;
+          }
+        },290);
+      });
 
       mute?.addEventListener("click",e=>{
         e.stopPropagation();
@@ -2203,15 +2278,7 @@
         }
       });
 
-      let lastTap=0;
-      video.addEventListener("pointerup",()=>{
-        const now=Date.now();
-        if(now-lastTap<280){
-          const like=reel.querySelector("[data-like-reel]");
-          like?.click();
-        }
-        lastTap=now;
-      });
+
     });
   }
 

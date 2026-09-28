@@ -1296,6 +1296,7 @@ async function socialMentions(req, res) {
 
   for (const profile of profiles || []) {
     if (profile.id === user.id || await isBlockedBetween(user.id, profile.id)) continue;
+    if (type === "story" && !(await isAcceptedFollower(profile.id, user.id))) continue;
 
     if (type === "story") {
       await upsert("story_mentions", {

@@ -3172,6 +3172,9 @@
     state.reelCoverUrl=null;
     state.reelCoverFile=null;
     state.composerFiles=[];
+    state.mediaEdit={rotation:0,scale:1,filter:"none"};
+    $("#composerDialog").classList.remove("has-media");
+    $("#mediaEditToolbar").classList.add("hidden");
     $("#composerPreview").innerHTML="";
     $("#composerPreview").classList.remove("composer-preview-grid");
     $("#composerStage").classList.add("hidden");
@@ -3199,6 +3202,76 @@
   $("#storyOverlayY").oninput=updateStoryOverlayPreview;
   $("#storyOverlayBg").onchange=updateStoryOverlayPreview;
 
+  function mediaFilterCss(filter){
+    return filter==="vivid"?"saturate(1.35) contrast(1.08)":filter==="warm"?"sepia(.16) saturate(1.22) brightness(1.04)":filter==="mono"?"grayscale(1) contrast(1.08)":"none";
+  }
+
+  function applyMediaEditPreview(){
+    const el=$("#composerPreview")?.querySelector(".editable-media");
+    if(!el)return;
+    const edit=state.mediaEdit||{rotation:0,scale:1,filter:"none"};
+    el.style.transform=`rotate(${Number(edit.rotation||0)}deg) scale(${Number(edit.scale||1)})`;
+    el.style.filter=mediaFilterCss(edit.filter);
+  }
+
+  function resetMediaEdit(){
+    state.mediaEdit={rotation:0,scale:1,filter:"none"};
+    if($("#mediaEditFilter"))$("#mediaEditFilter").value="none";
+    applyMediaEditPreview();
+  }
+
+  $("#mediaEditToolbar")?.querySelectorAll("[data-media-edit]").forEach(btn=>btn.onclick=()=>{
+    const action=btn.dataset.mediaEdit;
+    const edit=state.mediaEdit||(state.mediaEdit={rotation:0,scale:1,filter:"none"});
+    if(action==="rotate-left")edit.rotation=(Number(edit.rotation||0)-90)%360;
+    if(action==="rotate-right")edit.rotation=(Number(edit.rotation||0)+90)%360;
+    if(action==="zoom-out")edit.scale=Math.max(1,Number(edit.scale||1)-.1);
+    if(action==="zoom-in")edit.scale=Math.min(2,Number(edit.scale||1)+.1);
+    if(action==="reset")resetMediaEdit();
+    applyMediaEditPreview();
+  });
+  $("#mediaEditFilter")?.addEventListener("change",e=>{
+    const edit=state.mediaEdit||(state.mediaEdit={rotation:0,scale:1,filter:"none"});
+    edit.filter=e.currentTarget.value||"none";
+    applyMediaEditPreview();
+  });
+
+  async function editedImageFile(file){
+    const edit=state.mediaEdit||{rotation:0,scale:1,filter:"none"};
+    if(!file?.type?.startsWith("image/"))return file;
+    if((Number(edit.rotation||0)%360)===0&&Number(edit.scale||1)===1&&(edit.filter||"none")==="none")return file;
+    const url=URL.createObjectURL(file);
+    try{
+      const img=new Image();
+      img.decoding="async";
+      img.src=url;
+      await img.decode();
+      const rotation=((Number(edit.rotation||0)%360)+360)%360;
+      const swap=rotation===90||rotation===270;
+      const outW=swap?img.naturalHeight:img.naturalWidth;
+      const outH=swap?img.naturalWidth:img.naturalHeight;
+      const canvas=document.createElement("canvas");
+      canvas.width=Math.min(2400,outW);
+      canvas.height=Math.max(1,Math.round(canvas.width*(outH/outW)));
+      const ctx=canvas.getContext("2d");
+      ctx.save();
+      ctx.translate(canvas.width/2,canvas.height/2);
+      ctx.rotate(rotation*Math.PI/180);
+      const scale=Number(edit.scale||1);
+      ctx.scale(scale,scale);
+      ctx.filter=mediaFilterCss(edit.filter);
+      const dw=swap?canvas.height:canvas.width;
+      const dh=swap?canvas.width:canvas.height;
+      ctx.drawImage(img,-dw/2,-dh/2,dw,dh);
+      ctx.restore();
+      const type=file.type==="image/png"?"image/png":"image/jpeg";
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,type,type==="image/png"?undefined:.9));
+      if(!blob)return file;
+      const ext=type==="image/png"?"png":"jpg";
+      return new File([blob],"ashur-edited-"+Date.now()+"."+ext,{type,lastModified:Date.now()});
+    }catch{return file}
+    finally{URL.revokeObjectURL(url)}
+  }
   function renderComposerPreview(){
     for(const url of state.previewUrls||[]){
       try{URL.revokeObjectURL(url)}catch(_){}
@@ -3223,6 +3296,14 @@
     $("#composerPreview").innerHTML=html;
     $("#composerPreview").classList.toggle("composer-preview-grid",files.length>1);
     $("#composerStage").classList.remove("hidden");
+    $("#composerDialog").classList.add("has-media");
+    const editable=files.length===1&&files[0].type.startsWith("image/");
+    $("#mediaEditToolbar").classList.toggle("hidden",!editable);
+    if(editable){
+      if(!state.mediaEdit)state.mediaEdit={rotation:0,scale:1,filter:"none"};
+      $("#mediaEditFilter").value=state.mediaEdit.filter||"none";
+      requestAnimationFrame(applyMediaEditPreview);
+    }
     $("#composerFileMeta").textContent=files.length===1
       ?files[0].name+" · "+(files[0].size/1024/1024).toFixed(1)+" MB"
       :files.length+" ملفات · "+(total/1024/1024).toFixed(1)+" MB";
@@ -3252,7 +3333,8 @@
       }
     }
     state.composerFiles=list;
-    $("#composerMessage").textContent=source==="camera"?"تم التقاط الملف. يمكنك معاينته وتعديله قبل النشر.":"";
+    state.mediaEdit={rotation:0,scale:1,filter:"none"};
+    $("#composerMessage").textContent=source==="camera"?"تم التقاط الملف. يمكنك معاينته وتعديله قبل النشر.":"يمكنك تعديل الصورة قبل النشر.";
     renderComposerPreview();
   }
 
@@ -3265,7 +3347,12 @@
     $("#composerFile").multiple=type==="post";
     $("#composerCameraFile").accept=type==="reel"?"video/*":"image/*";
     $("#composerCaption").value="";
-    $("#composerVisibility").value="public";
+    $("#composerCaptionLabel").textContent=type==="story"?"نص القصة":"الوصف";
+    $("#composerCaption").placeholder=type==="story"?"اكتب نص القصة أو استخدم @ لذكر صديق":"اكتب وصفًا... استخدم @ للإشارة إلى حساب و # للهاشتاغ";
+    const privateAccount=Boolean(state.profile?.is_private);
+    const publicOption=$("#composerVisibility").querySelector('option[value="public"]');
+    if(publicOption)publicOption.disabled=privateAccount;
+    $("#composerVisibility").value=privateAccount?"followers":"public";
     $("#composerCommentsEnabled").checked=true;
     $("#composerExploreEnabled").checked=true;
     $("#composerExploreRow").classList.toggle("hidden",type!=="reel");
@@ -3340,7 +3427,7 @@
   };
 
   $("#submitComposer").onclick=async()=>{
-    const files=state.composerFiles||[];
+    let files=[...(state.composerFiles||[])];
     const caption=$("#composerCaption").value.trim();
     if(!files.length)return $("#composerMessage").textContent="اختر ملفًا من الكاميرا أو المكتبة أولًا.";
 
@@ -3359,6 +3446,9 @@
     $("#submitComposer").disabled=true;
     $("#composerMessage").textContent="جارٍ تجهيز المحتوى...";
     try{
+      if(files.length===1&&files[0].type.startsWith("image/")){
+        files[0]=await editedImageFile(files[0]);
+      }
       let reelCoverFile=null;
       if(state.composerType==="reel"){
         reelCoverFile=await generateVideoCover(files[0]);
@@ -3382,7 +3472,7 @@
         reelCover=await uploadFile(reelCoverFile,"reel_cover",{silent:true}).catch(()=>null);
       }
 
-      const visibility=$("#composerVisibility").value==="followers"?"followers":"public";
+      const visibility=state.profile?.is_private?"followers":($("#composerVisibility").value==="followers"?"followers":"public");
       const commentsEnabled=$("#composerCommentsEnabled").checked;
 
       if(state.composerType==="reel"){

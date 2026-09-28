@@ -40,6 +40,16 @@
     conversationCreateMode:"direct",
     selectedGroupMembers:new Map(),
     activeConversationMeta:null,
+    cameraStream:null,
+    cameraFacing:"environment",
+    cameraMode:"photo",
+    cameraTimerSeconds:0,
+    cameraRecorder:null,
+    cameraChunks:[],
+    cameraRecordingStarted:0,
+    cameraRecordingTimer:null,
+    cameraTorch:false,
+    mediaViewerZoom:1,
     reelObserver:null,
     storyTimer:null,
     activePage:"homePage",
@@ -151,6 +161,253 @@
     return (await mediaAccess(mediaId)).url;
   }
 
+  function formatMediaTime(value){
+    const total=Math.max(0,Math.floor(Number(value)||0));
+    const minutes=Math.floor(total/60);
+    const seconds=String(total%60).padStart(2,"0");
+    return minutes+":"+seconds;
+  }
+
+  function mediaCanEnhance(node){
+    if(!node?.isConnected)return false;
+    return !node.closest(".reel,.story-viewer,.camera-studio-dialog,.composer-preview,.profile-grid-tile,.story-shared-card");
+  }
+
+  function updateVideoPlayIcon(button,playing){
+    if(!button)return;
+    button.innerHTML=playing
+      ?'<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7ZM13 5h4v14h-4Z"/></svg>'
+      :'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>';
+    button.setAttribute("aria-label",playing?"إيقاف":"تشغيل");
+  }
+
+  function enhanceVideoPlayer(video){
+    if(!video||video.dataset.ashurPlayer==="1"||!mediaCanEnhance(video))return;
+    video.dataset.ashurPlayer="1";
+    video.controls=false;
+    video.playsInline=true;
+    video.preload=video.preload||"metadata";
+
+    const wrapper=document.createElement("div");
+    wrapper.className="ashur-video-player";
+    video.parentNode.insertBefore(wrapper,video);
+    wrapper.appendChild(video);
+
+    const controls=document.createElement("div");
+    controls.className="ashur-video-controls";
+    controls.innerHTML=
+      '<button class="ashur-video-toggle" type="button" aria-label="تشغيل"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg></button>'+
+      '<span class="ashur-video-time current">0:00</span>'+
+      '<input class="ashur-video-range" type="range" min="0" max="1000" value="0" aria-label="موضع الفيديو">'+
+      '<span class="ashur-video-time duration">0:00</span>'+
+      '<button class="ashur-video-mute" type="button" aria-label="كتم الصوت"><svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="M18 9c1 1 1 5 0 6"/></svg></button>'+
+      '<button class="ashur-video-fullscreen" type="button" aria-label="ملء الشاشة"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>';
+    wrapper.appendChild(controls);
+
+    const center=document.createElement("button");
+    center.className="ashur-video-center";
+    center.type="button";
+    center.setAttribute("aria-label","تشغيل");
+    center.innerHTML='<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>';
+    wrapper.appendChild(center);
+
+    const toggle=controls.querySelector(".ashur-video-toggle");
+    const range=controls.querySelector(".ashur-video-range");
+    const current=controls.querySelector(".current");
+    const duration=controls.querySelector(".duration");
+    const mute=controls.querySelector(".ashur-video-mute");
+    const fullscreen=controls.querySelector(".ashur-video-fullscreen");
+
+    const sync=()=>{
+      const total=Number(video.duration)||0;
+      const now=Number(video.currentTime)||0;
+      current.textContent=formatMediaTime(now);
+      duration.textContent=formatMediaTime(total);
+      range.value=total>0?String(Math.min(1000,Math.round((now/total)*1000))):"0";
+      updateVideoPlayIcon(toggle,!video.paused);
+      center.classList.toggle("hidden",!video.paused);
+      wrapper.classList.toggle("playing",!video.paused);
+    };
+
+    const togglePlay=async()=>{
+      if(video.paused){
+        document.querySelectorAll(".ashur-video-player video").forEach(other=>{if(other!==video)other.pause()});
+        await video.play().catch(()=>{});
+      }else video.pause();
+      sync();
+    };
+
+    toggle.onclick=e=>{e.stopPropagation();togglePlay()};
+    center.onclick=e=>{e.stopPropagation();togglePlay()};
+    video.onclick=e=>{e.stopPropagation();togglePlay()};
+    video.addEventListener("play",sync);
+    video.addEventListener("pause",sync);
+    video.addEventListener("timeupdate",sync);
+    video.addEventListener("loadedmetadata",sync);
+    video.addEventListener("ended",sync);
+
+    range.oninput=e=>{
+      e.stopPropagation();
+      const total=Number(video.duration)||0;
+      if(total>0)video.currentTime=(Number(range.value)/1000)*total;
+    };
+
+    mute.onclick=e=>{
+      e.stopPropagation();
+      video.muted=!video.muted;
+      mute.classList.toggle("active",video.muted);
+      mute.innerHTML=video.muted
+        ?'<svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="m18 9 3 3-3 3"/></svg>'
+        :'<svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="M18 9c1 1 1 5 0 6"/></svg>';
+    };
+
+    fullscreen.onclick=async e=>{
+      e.stopPropagation();
+      try{
+        if(wrapper.requestFullscreen)await wrapper.requestFullscreen();
+        else if(video.webkitEnterFullscreen)video.webkitEnterFullscreen();
+      }catch(_){}
+    };
+    sync();
+  }
+
+  function enhanceAudioPlayer(audio,access={}){
+    if(!audio||audio.dataset.ashurPlayer==="1"||!mediaCanEnhance(audio))return;
+    audio.dataset.ashurPlayer="1";
+    audio.controls=false;
+    audio.preload="metadata";
+
+    const wrapper=document.createElement("div");
+    wrapper.className="ashur-audio-player";
+    audio.parentNode.insertBefore(wrapper,audio);
+    wrapper.appendChild(audio);
+
+    wrapper.insertAdjacentHTML("beforeend",
+      '<button class="ashur-audio-toggle" type="button" aria-label="تشغيل"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg></button>'+
+      '<div class="ashur-audio-main"><div class="ashur-audio-wave" aria-hidden="true">'+
+        Array.from({length:26},(_,i)=>'<i style="--h:'+((i*17)%13+7)+'px"></i>').join("")+
+      '</div><input class="ashur-audio-range" type="range" min="0" max="1000" value="0" aria-label="موضع الصوت">'+
+      '<div class="ashur-audio-meta"><span class="current">0:00</span><b>'+(escapeHtml(access.original_name||"صوتية"))+'</b><span class="duration">0:00</span></div></div>'+
+      '<button class="ashur-audio-speed" type="button" aria-label="سرعة التشغيل">1x</button>'
+    );
+
+    const toggle=wrapper.querySelector(".ashur-audio-toggle");
+    const range=wrapper.querySelector(".ashur-audio-range");
+    const current=wrapper.querySelector(".current");
+    const duration=wrapper.querySelector(".duration");
+    const speed=wrapper.querySelector(".ashur-audio-speed");
+
+    const sync=()=>{
+      const total=Number(audio.duration)||0;
+      const now=Number(audio.currentTime)||0;
+      current.textContent=formatMediaTime(now);
+      duration.textContent=formatMediaTime(total);
+      range.value=total>0?String(Math.min(1000,Math.round((now/total)*1000))):"0";
+      updateVideoPlayIcon(toggle,!audio.paused);
+      wrapper.classList.toggle("playing",!audio.paused);
+    };
+
+    toggle.onclick=async e=>{
+      e.stopPropagation();
+      if(audio.paused){
+        document.querySelectorAll(".ashur-audio-player audio").forEach(other=>{if(other!==audio)other.pause()});
+        await audio.play().catch(()=>{});
+      }else audio.pause();
+      sync();
+    };
+    range.oninput=e=>{
+      e.stopPropagation();
+      const total=Number(audio.duration)||0;
+      if(total>0)audio.currentTime=(Number(range.value)/1000)*total;
+    };
+    speed.onclick=e=>{
+      e.stopPropagation();
+      const speeds=[1,1.5,2];
+      const currentIndex=speeds.indexOf(audio.playbackRate);
+      audio.playbackRate=speeds[(currentIndex+1)%speeds.length];
+      speed.textContent=audio.playbackRate+"x";
+    };
+    audio.addEventListener("timeupdate",sync);
+    audio.addEventListener("loadedmetadata",sync);
+    audio.addEventListener("play",sync);
+    audio.addEventListener("pause",sync);
+    audio.addEventListener("ended",sync);
+    sync();
+  }
+
+  async function openMediaViewer(mediaId,knownAccess=null){
+    if(!mediaId)return;
+    const dialog=$("#mediaViewerDialog");
+    const stage=$("#mediaViewerStage");
+    const toolbar=$("#mediaViewerToolbar");
+    stage.innerHTML='<div class="media-viewer-loading">جارٍ تحميل الوسائط...</div>';
+    toolbar.innerHTML="";
+    toolbar.classList.add("hidden");
+    $("#mediaViewerMeta").textContent="";
+    state.mediaViewerZoom=1;
+    if(!dialog.open)dialog.showModal();
+
+    try{
+      const access=knownAccess||await mediaAccess(mediaId);
+      const mime=String(access.mime_type||"");
+      $("#mediaViewerMeta").textContent=access.original_name||(
+        mime.startsWith("image/")?"صورة":mime.startsWith("video/")?"فيديو":mime.startsWith("audio/")?"صوت":"ملف"
+      );
+
+      if(mime.startsWith("image/")){
+        stage.innerHTML='<div class="media-viewer-image-wrap"><img id="mediaViewerImage" src="'+escapeHtml(access.url)+'" alt=""></div>';
+        toolbar.innerHTML='<button data-viewer-zoom="out" type="button">−</button><button data-viewer-zoom="reset" type="button">100%</button><button data-viewer-zoom="in" type="button">+</button>';
+        toolbar.classList.remove("hidden");
+        const image=$("#mediaViewerImage");
+        const applyZoom=()=>{image.style.transform="scale("+state.mediaViewerZoom+")";toolbar.querySelector('[data-viewer-zoom="reset"]').textContent=Math.round(state.mediaViewerZoom*100)+"%"};
+        toolbar.querySelector('[data-viewer-zoom="out"]').onclick=()=>{state.mediaViewerZoom=Math.max(1,state.mediaViewerZoom-.25);applyZoom()};
+        toolbar.querySelector('[data-viewer-zoom="in"]').onclick=()=>{state.mediaViewerZoom=Math.min(4,state.mediaViewerZoom+.25);applyZoom()};
+        toolbar.querySelector('[data-viewer-zoom="reset"]').onclick=()=>{state.mediaViewerZoom=1;applyZoom()};
+        let startDistance=0,startZoom=1;
+        stage.ontouchstart=e=>{
+          if(e.touches?.length===2){
+            startDistance=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+            startZoom=state.mediaViewerZoom;
+          }
+        };
+        stage.ontouchmove=e=>{
+          if(e.touches?.length===2&&startDistance>0){
+            e.preventDefault();
+            const distance=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+            state.mediaViewerZoom=Math.max(1,Math.min(4,startZoom*(distance/startDistance)));
+            applyZoom();
+          }
+        };
+      }else if(mime.startsWith("video/")){
+        stage.innerHTML='<video class="media-viewer-video" src="'+escapeHtml(access.url)+'" playsinline preload="metadata"></video>';
+        enhanceVideoPlayer(stage.querySelector("video"));
+      }else if(mime.startsWith("audio/")){
+        stage.innerHTML='<div class="media-viewer-audio-shell"><div class="media-viewer-audio-icon"><svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13M9 9l11-2M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM17 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></svg></div><audio src="'+escapeHtml(access.url)+'" preload="metadata"></audio></div>';
+        enhanceAudioPlayer(stage.querySelector("audio"),access);
+      }else{
+        stage.innerHTML='<a class="media-viewer-file" href="'+escapeHtml(access.url)+'" target="_blank" rel="noopener">فتح الملف</a>';
+      }
+    }catch(error){
+      stage.innerHTML='<div class="empty error">'+escapeHtml(error.message||"تعذر تحميل الوسائط")+'</div>';
+    }
+  }
+
+  function enhanceMediaNode(node,access={}){
+    if(!node?.isConnected)return;
+    if(node.tagName==="VIDEO")enhanceVideoPlayer(node);
+    if(node.tagName==="AUDIO")enhanceAudioPlayer(node,access);
+    if(node.tagName==="IMG"&&node.matches(".post-media,.chat-media,.profile-preview-media")){
+      if(node.dataset.ashurViewer==="1")return;
+      node.dataset.ashurViewer="1";
+      node.classList.add("ashur-media-clickable");
+      node.addEventListener("click",event=>{
+        event.preventDefault();
+        event.stopPropagation();
+        openMediaViewer(node.dataset.mediaId,access);
+      });
+    }
+  }
+
   async function hydrateMedia(root=document){
     const nodes=[...root.querySelectorAll("[data-media-id]")].filter(node=>node.dataset.mediaReady!=="1");
     if(!nodes.length)return;
@@ -162,6 +419,7 @@
         try{
           const access=await mediaAccess(node.dataset.mediaId);
           if(!node.isConnected)continue;
+          let finalNode=node;
           if(access.mime_type?.startsWith("video/") && node.tagName==="IMG"){
             const video=document.createElement("video");
             const coverMode=node.dataset.profileCover==="1";
@@ -170,20 +428,22 @@
             video.dataset.mediaReady="1";
             if(coverMode)video.dataset.videoCover="1";
             video.src=access.url+(coverMode?"#t=0.12":"");
-            video.controls=!coverMode;
+            video.controls=false;
             video.muted=coverMode;
             video.playsInline=true;
             video.preload="metadata";
             node.replaceWith(video);
+            finalNode=video;
           }else if(access.mime_type?.startsWith("audio/") && node.tagName==="IMG"){
             const audio=document.createElement("audio");
             audio.className=(node.className+" chat-audio").trim();
             audio.dataset.mediaId=node.dataset.mediaId;
             audio.dataset.mediaReady="1";
             audio.src=access.url;
-            audio.controls=true;
+            audio.controls=false;
             audio.preload="metadata";
             node.replaceWith(audio);
+            finalNode=audio;
           }else if(node.tagName==="IMG" && access.mime_type && !access.mime_type.startsWith("image/")){
             const link=document.createElement("a");
             link.className="chat-file-link";
@@ -193,6 +453,7 @@
             link.rel="noopener";
             link.textContent=access.original_name||"فتح الملف";
             node.replaceWith(link);
+            finalNode=link;
           }else{
             const coverMode=node.dataset.videoCover==="1";
             node.src=access.url+(coverMode?"#t=0.12":"");
@@ -203,7 +464,9 @@
               node.preload="metadata";
             }
             node.dataset.mediaReady="1";
+            finalNode=node;
           }
+          enhanceMediaNode(finalNode,access);
         }catch(_){
           if(node?.isConnected){
             node.removeAttribute("src");
@@ -215,6 +478,16 @@
     const workers=Array.from({length:Math.min(4,nodes.length)},()=>worker());
     await Promise.all(workers);
   }
+
+  $("#closeMediaViewer").onclick=()=>{
+    $("#mediaViewerStage").querySelectorAll("video,audio").forEach(media=>media.pause?.());
+    $("#mediaViewerDialog").close();
+    $("#mediaViewerStage").innerHTML="";
+  };
+  $("#mediaViewerDialog").addEventListener("cancel",event=>{
+    event.preventDefault();
+    $("#closeMediaViewer").click();
+  });
 
   function prepareVideoCovers(root=document){
     root.querySelectorAll('video[data-video-cover="1"]').forEach(video=>{

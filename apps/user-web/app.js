@@ -864,6 +864,16 @@
     }
   }
 
+  async function interactionCounts(kind,ids){
+    if(!ids?.length)return {};
+    const {data,error}=await client.rpc("content_interaction_counts",{p_kind:kind,p_ids:ids});
+    if(error)return {};
+    return Object.fromEntries((data||[]).map(row=>[row.content_id,{
+      likes:Number(row.likes||0),
+      comments:Number(row.comments||0)
+    }]));
+  }
+
   async function loadFeed({append=false}={}){
     if(state.feedLoading)return;
     state.feedLoading=true;
@@ -892,10 +902,11 @@
     state.feedDone=data.length<pageSize;
 
     const postIds=data.map(x=>x.id);
-    const [profiles,{data:liked},{data:saved}] = await Promise.all([
+    const [profiles,{data:liked},{data:saved},counts] = await Promise.all([
       profilesMap([...new Set(data.map(x=>x.author_id))]),
       client.from("post_likes").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
-      client.from("saved_posts").select("post_id").eq("user_id",state.user.id).in("post_id",postIds)
+      client.from("saved_posts").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
+      interactionCounts("post",postIds)
     ]);
     const likedSet=new Set((liked||[]).map(x=>x.post_id));
     const savedSet=new Set((saved||[]).map(x=>x.post_id));
@@ -906,6 +917,7 @@
       const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
       const likedNow=likedSet.has(post.id);
       const savedNow=savedSet.has(post.id);
+      const metric=counts[post.id]||{likes:0,comments:0};
       return `<article class="post" data-post-id="${post.id}">
         <div class="post-head">
           ${avatar(p)}
@@ -918,10 +930,10 @@
         ${mediaHtml}
         <div class="post-body">
           <div class="post-actions">
-            <button class="action icon-action ${likedNow?"active":""}" data-like-post="${post.id}" type="button">${icon("like")}<span>${likedNow?"معجب":"إعجاب"}</span></button>
+            <button class="action icon-action ${likedNow?"active":""}" data-like-post="${post.id}" type="button">${icon("like")}<span data-like-count>${metric.likes}</span></button>
             ${post.comments_enabled===false
-              ? `<button class="action icon-action" type="button" disabled>${icon("comment")}<span>التعليقات مغلقة</span></button>`
-              : `<button class="action icon-action" data-comment-post="${post.id}" type="button">${icon("comment")}<span>تعليق</span></button>`}
+              ? `<button class="action icon-action" type="button" disabled>${icon("comment")}<span>—</span></button>`
+              : `<button class="action icon-action" data-comment-post="${post.id}" type="button">${icon("comment")}<span>${metric.comments}</span></button>`}
             <button class="action icon-action" data-share-post="${post.id}" type="button">${icon("share")}<span>مشاركة</span></button>
             <button class="action icon-action ${savedNow?"active":""}" data-save-post="${post.id}" type="button">${icon("save")}<span>${savedNow?"محفوظ":"حفظ"}</span></button>
           </div>

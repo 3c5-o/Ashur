@@ -1040,7 +1040,7 @@
   async function openSharedContent(type,id){
     if(type==="reel"){
       const result=await client.from("reels")
-        .select("id,caption,media_id,comments_enabled")
+        .select("id,caption,media_id,cover_media_id,comments_enabled")
         .eq("id",id).maybeSingle();
       if(result.error)throw result.error;
       if(!result.data)throw new Error("الريلز غير متاح");
@@ -1287,9 +1287,9 @@
 
   async function loadReels(){
     const {data,error}=await client.from("reels")
-      .select("id,author_id,media_id,caption,created_at,comments_enabled")
+      .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled")
       .order("created_at",{ascending:false})
-      .limit(12);
+      .limit(8);
     if(error){
       $("#reelsFeed").innerHTML=errorMarkup("تعذر تحميل الريلز.","reelsPage");
       return;
@@ -1315,8 +1315,9 @@
       const likedNow=likedSet.has(r.id);
       const savedNow=savedSet.has(r.id);
       const metric=counts[r.id]||{likes:0,comments:0};
-      return `<article class="reel is-loading" data-reel-id="${r.id}">
-        <video playsinline muted loop preload="metadata" data-media-id="${r.media_id}"></video>
+      return `<article class="reel is-loading" data-reel-id="${r.id}" data-cover-id="${r.cover_media_id||""}">
+        ${r.cover_media_id?`<img class="reel-poster" data-media-id="${r.cover_media_id}" alt="">`:""}
+        <video playsinline muted loop preload="none" data-media-id="${r.media_id}"></video>
         <div class="reel-loader" aria-hidden="true"></div>
         <div class="reel-shade"></div>
         <button class="reel-center-play" type="button" aria-label="تشغيل">
@@ -1377,6 +1378,9 @@
         const reel=entry.target;
         const video=reel.querySelector("video");
         if(!video)return;
+        if(entry.isIntersecting && entry.intersectionRatio>.2){
+          video.preload="auto";
+        }
         if(entry.isIntersecting && entry.intersectionRatio>.72){
           reels.forEach(other=>{
             const ov=other.querySelector("video");
@@ -1401,6 +1405,7 @@
 
       const markReady=()=>{
         reel.classList.remove("is-loading","load-error");
+        reel.classList.add("video-ready");
       };
       if(video.readyState>=2)markReady();
       else{
@@ -1999,16 +2004,27 @@
     }
   }
 
+
   function profileGridTile(item,kind,saved=false){
     const mediaId=kind==="reels"
       ?item.media_id
       :([...(item.post_media||[])].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))[0]?.media_id||"");
+    const coverId=kind==="reels"?String(item.cover_media_id||""):"";
     const caption=String(item.caption||"");
-    const media=mediaId
-      ?(kind==="reels"
-        ?'<video class="profile-grid-media" muted playsinline preload="metadata" data-video-cover="1" data-media-id="'+escapeHtml(mediaId)+'"></video><span class="profile-grid-play">'+icon("play")+'</span>'
-        :'<img class="profile-grid-media" data-profile-cover="1" data-media-id="'+escapeHtml(mediaId)+'" alt="">')
-      :'<div class="profile-grid-placeholder">'+icon(kind==="reels"?"play":"comment")+'</div>';
+    let media="";
+    if(kind==="reels"){
+      if(coverId){
+        media='<img class="profile-grid-media" data-media-id="'+escapeHtml(coverId)+'" alt="غلاف الريلز"><span class="profile-grid-play">'+icon("play")+'</span>';
+      }else if(mediaId){
+        media='<video class="profile-grid-media" muted playsinline preload="metadata" data-video-cover="1" data-media-id="'+escapeHtml(mediaId)+'"></video><span class="profile-grid-play">'+icon("play")+'</span>';
+      }else{
+        media='<div class="profile-grid-placeholder">'+icon("play")+'</div>';
+      }
+    }else{
+      media=mediaId
+        ?'<img class="profile-grid-media" data-profile-cover="1" data-media-id="'+escapeHtml(mediaId)+'" alt="">'
+        :'<div class="profile-grid-placeholder">'+icon("comment")+'</div>';
+    }
     return '<button class="profile-grid-tile" type="button"'+
       ' data-preview-kind="'+kind+'"'+
       ' data-preview-id="'+escapeHtml(item.id)+'"'+
@@ -2099,7 +2115,7 @@
     try{
       if(kind==="reels"){
         const result=await client.from("reels")
-          .select("id,caption,media_id,created_at,comments_enabled")
+          .select("id,caption,media_id,cover_media_id,created_at,comments_enabled")
           .eq("author_id",state.user.id)
           .order("created_at",{ascending:false});
         if(result.error)throw result.error;
@@ -2121,7 +2137,7 @@
             ?client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").in("id",postIds)
             :Promise.resolve({data:[],error:null}),
           reelIds.length
-            ?client.from("reels").select("id,caption,media_id,comments_enabled").in("id",reelIds)
+            ?client.from("reels").select("id,caption,media_id,cover_media_id,comments_enabled").in("id",reelIds)
             :Promise.resolve({data:[],error:null})
         ]);
         if(contentResults[0].error)throw contentResults[0].error;

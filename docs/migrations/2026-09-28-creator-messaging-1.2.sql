@@ -22,3 +22,6 @@ alter table public.messages
 create index if not exists reels_cover_media_idx on public.reels(cover_media_id) where cover_media_id is not null;
 create index if not exists messages_shared_idx on public.messages(shared_type,shared_id) where shared_id is not null;
 create index if not exists stories_shared_idx on public.stories(shared_type,shared_id) where shared_id is not null;
+
+
+grant update(saved_visibility) on public.profiles to authenticated;

@@ -124,14 +124,18 @@
 
       <section id="profilePage" class="page profile-page">
         <div id="profileCard" class="profile-card"></div>
-        <div class="profile-tabs">
-          <button class="active" type="button">
+        <div class="profile-tabs" id="ownProfileTabs">
+          <button class="active" data-profile-tab="posts" type="button">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             <span>المنشورات</span>
           </button>
-          <button type="button">
+          <button data-profile-tab="reels" type="button">
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg>
             <span>الريلز</span>
+          </button>
+          <button data-profile-tab="saved" type="button">
+            <svg viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4Z"/></svg>
+            <span>المحفوظات</span>
           </button>
         </div>
         <div id="profileContent" class="feed profile-feed"></div>
@@ -238,7 +242,17 @@
     </div>
     <div class="public-profile-scroll">
       <div id="publicProfileCard" class="profile-card"></div>
-      <div id="publicProfileContent" class="feed profile-feed"></div>
+      <div id="publicProfileTabs" class="profile-tabs public-profile-tabs">
+        <button class="active" data-public-profile-tab="posts" type="button">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <span>المنشورات</span>
+        </button>
+        <button data-public-profile-tab="reels" type="button">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg>
+          <span>الريلز</span>
+        </button>
+      </div>
+      <div id="publicProfileContent" class="profile-media-grid"></div>
     </div>
   </dialog>
 

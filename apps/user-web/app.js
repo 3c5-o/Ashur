@@ -778,7 +778,16 @@
       if(dialog.id==="chatDialog"){
         closeChatRealtime();
         state.activeConversation=null;
+        state.activeConversationMeta=null;
         clearChatAttachment();
+      }
+      if(dialog.id==="cameraStudioDialog"){
+        closeCameraStudio({returnToComposer:false});
+        return;
+      }
+      if(dialog.id==="mediaViewerDialog"){
+        $("#mediaViewerStage")?.querySelectorAll("video,audio").forEach(media=>media.pause?.());
+        $("#mediaViewerStage").innerHTML="";
       }
       try{dialog.close()}catch(_){}
     });
@@ -3949,10 +3958,15 @@
 
   function closeCameraStudio({returnToComposer=true}={}){
     if(state.cameraRecorder?.state==="recording"){
-      try{state.cameraRecorder.stop()}catch(_){}
-      state.cameraRecorder=null;
-      state.cameraChunks=[];
+      try{
+        state.cameraRecorder.ondataavailable=null;
+        state.cameraRecorder.onstop=null;
+        state.cameraRecorder.onerror=null;
+        state.cameraRecorder.stop();
+      }catch(_){}
     }
+    state.cameraRecorder=null;
+    state.cameraChunks=[];
     clearCameraRecordingTimer();
     stopCameraTracks();
     if($("#cameraStudioDialog").open)$("#cameraStudioDialog").close();
@@ -5214,7 +5228,16 @@
       if(dialog.id==="chatDialog"){
         closeChatRealtime();
         state.activeConversation=null;
+        state.activeConversationMeta=null;
         clearChatAttachment();
+      }
+      if(dialog.id==="cameraStudioDialog"){
+        closeCameraStudio({returnToComposer:true});
+        return true;
+      }
+      if(dialog.id==="mediaViewerDialog"){
+        $("#closeMediaViewer")?.click();
+        return true;
       }
       if(dialog.id==="storyViewerDialog")clearTimeout(state.storyTimer);
       const returnProfile=["infoDialog","commentsDialog"].includes(dialog.id)?state.returnPublicProfileId:null;

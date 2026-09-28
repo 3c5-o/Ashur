@@ -309,12 +309,16 @@
     audio.parentNode.insertBefore(wrapper,audio);
     wrapper.appendChild(audio);
 
+    const audioLabel=audio.closest(".message-row,.chat-attachment-preview")
+      ?"رسالة صوتية"
+      :(access.original_name||"صوتية");
+
     wrapper.insertAdjacentHTML("beforeend",
       '<button class="ashur-audio-toggle" type="button" aria-label="تشغيل"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg></button>'+
       '<div class="ashur-audio-main"><div class="ashur-audio-wave" aria-hidden="true">'+
         Array.from({length:26},(_,i)=>'<i style="--h:'+((i*17)%13+7)+'px"></i>').join("")+
       '</div><input class="ashur-audio-range" type="range" min="0" max="1000" value="0" aria-label="موضع الصوت">'+
-      '<div class="ashur-audio-meta"><span class="current">0:00</span><b>'+(escapeHtml(access.original_name||"صوتية"))+'</b><span class="duration">0:00</span></div></div>'+
+      '<div class="ashur-audio-meta"><span class="current">0:00</span><b>'+escapeHtml(audioLabel)+'</b><span class="duration">0:00</span></div></div>'+
       '<button class="ashur-audio-speed" type="button" aria-label="سرعة التشغيل">1x</button>'
     );
 
@@ -377,7 +381,7 @@
     try{
       const access=knownAccess||await mediaAccess(mediaId);
       const mime=String(access.mime_type||"");
-      $("#mediaViewerMeta").textContent=access.original_name||(
+      $("#mediaViewerMeta").textContent=(
         mime.startsWith("image/")?"صورة":mime.startsWith("video/")?"فيديو":mime.startsWith("audio/")?"صوت":"ملف"
       );
 
@@ -478,7 +482,7 @@
             link.href=access.url;
             link.target="_blank";
             link.rel="noopener";
-            link.textContent=access.original_name||"فتح الملف";
+            link.textContent="فتح الملف";
             node.replaceWith(link);
             finalNode=link;
           }else{

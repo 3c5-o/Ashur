@@ -1478,6 +1478,7 @@
     }
   }
 
+
   function closeChatRealtime(){
     clearInterval(state.chatTimer);
     state.chatTimer=null;
@@ -1503,14 +1504,10 @@
         schema:"public",
         table:"message_reads"
       },()=>loadChat({quiet:true,markRead:false}))
-      .subscribe(status=>{
-        if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"){
-          clearInterval(state.chatTimer);
-          state.chatTimer=setInterval(()=>{
-            if($("#chatDialog").open&&state.activeConversation)loadChat({quiet:true});
-          },8000);
-        }
-      });
+      .subscribe();
+    state.chatTimer=setInterval(()=>{
+      if($("#chatDialog").open&&state.activeConversation)loadChat({quiet:true});
+    },12000);
   }
 
   async function openChat(id,title){
@@ -1522,46 +1519,67 @@
     subscribeChatRealtime();
   }
 
+  function sharedMessageMarkup(message){
+    if(!message.shared_type||!message.shared_id)return "";
+    const label=message.shared_type==="post"?"منشور":message.shared_type==="reel"?"ريلز":message.shared_type==="story"?"قصة":"حساب";
+    return '<button class="message-shared-card" data-open-message-share="'+escapeHtml(message.shared_type)+':'+escapeHtml(message.shared_id)+'" type="button">'+
+      icon(message.shared_type==="reel"?"play":"share")+
+      '<span><b>محتوى مشارك</b><small>فتح '+label+'</small></span>'+
+    '</button>';
+  }
+
   async function loadChat({quiet=false,markRead=true}={}){
     if(!state.activeConversation)return;
     const conversationId=state.activeConversation;
-    const {data,error}=await client.from("messages")
-      .select("id,sender_id,body,media_id,reply_to,created_at")
+    const result=await client.from("messages")
+      .select("id,sender_id,body,media_id,reply_to,shared_type,shared_id,created_at")
       .eq("conversation_id",conversationId)
       .eq("is_deleted",false)
       .order("created_at")
-      .limit(200);
-    if(error){
-      if(!quiet)$("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+      .limit(220);
+    if(result.error){
+      if(!quiet)$("#chatMessages").innerHTML='<div class="empty error">'+escapeHtml(result.error.message)+'</div>';
       return;
     }
     if(conversationId!==state.activeConversation)return;
 
-    const ownIds=(data||[]).filter(m=>m.sender_id===state.user.id).map(m=>m.id);
-    const otherUnread=(data||[]).filter(m=>m.sender_id!==state.user.id).map(m=>m.id);
+    const data=result.data||[];
+    const ownIds=data.filter(m=>m.sender_id===state.user.id).map(m=>m.id);
+    const otherUnread=data.filter(m=>m.sender_id!==state.user.id).map(m=>m.id);
     let readSet=new Set();
     if(ownIds.length){
-      const {data:reads}=await client.from("message_reads")
+      const readsResult=await client.from("message_reads")
         .select("message_id,user_id")
         .in("message_id",ownIds);
-      readSet=new Set((reads||[]).filter(r=>r.user_id!==state.user.id).map(r=>r.message_id));
+      readSet=new Set((readsResult.data||[]).filter(r=>r.user_id!==state.user.id).map(r=>r.message_id));
     }
 
-    const byId=new Map((data||[]).map(m=>[m.id,m]));
-    const html=(data||[]).map(m=>{
+    const byId=new Map(data.map(m=>[m.id,m]));
+    const html=data.map(m=>{
       const parent=m.reply_to?byId.get(m.reply_to):null;
       const media=m.media_id?'<img class="chat-media" data-media-id="'+escapeHtml(m.media_id)+'" alt="مرفق">':"";
-      const body=m.body?'<div>'+escapeHtml(m.body)+'</div>':"";
+      const body=m.body?'<div class="message-text">'+escapeHtml(m.body)+'</div>':"";
       const parentHtml=parent?'<div class="comment-parent">'+escapeHtml(parent.body||"مرفق")+'</div>':"";
       const read=m.sender_id===state.user.id&&readSet.has(m.id)?'<span class="message-read">تمت القراءة</span>':"";
-      return '<div class="message-row '+(m.sender_id===state.user.id?"mine":"other")+'"><div class="bubble">'+parentHtml+media+body+
-        '</div><time>'+new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+read+'</div>';
+      return '<div class="message-row '+(m.sender_id===state.user.id?"mine":"other")+'">'+
+        '<div class="bubble">'+parentHtml+sharedMessageMarkup(m)+media+body+'</div>'+
+        '<time>'+new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+read+
+      '</div>';
     }).join("")||'<div class="empty">ابدأ المحادثة برسالة.</div>';
 
-    const nearBottom=$("#chatMessages").scrollHeight-$("#chatMessages").scrollTop-$("#chatMessages").clientHeight<80;
+    const nearBottom=$("#chatMessages").scrollHeight-$("#chatMessages").scrollTop-$("#chatMessages").clientHeight<90;
     if($("#chatMessages").innerHTML!==html){
       $("#chatMessages").innerHTML=html;
       await hydrateMedia($("#chatMessages"));
+      $("#chatMessages").querySelectorAll("[data-open-message-share]").forEach(btn=>btn.onclick=()=>{
+        const raw=btn.dataset.openMessageShare||"";
+        const cut=raw.indexOf(":");
+        if(cut<0)return;
+        const type=raw.slice(0,cut),id=raw.slice(cut+1);
+        $("#chatDialog").close();
+        closeChatRealtime();
+        openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+      });
       if(nearBottom||!quiet)$("#chatMessages").scrollTop=$("#chatMessages").scrollHeight;
     }
 
@@ -1573,11 +1591,52 @@
     }
   }
 
+  function stopVoiceTracks(){
+    if(state.voiceStream){
+      state.voiceStream.getTracks().forEach(track=>track.stop());
+      state.voiceStream=null;
+    }
+  }
+
+  function clearVoiceTimer(){
+    clearInterval(state.voiceTimer);
+    state.voiceTimer=null;
+    state.voiceStartedAt=0;
+    $("#voiceRecordTimer").textContent="0:00";
+    $("#voiceRecordTimer").classList.add("hidden");
+    $("#voiceRecordButton").classList.remove("recording");
+  }
+
+  async function stopVoiceRecording(discard=false){
+    if(state.voiceRecorder&&state.voiceRecorder.state!=="inactive"){
+      await new Promise(resolve=>{
+        const done=state.voiceRecorder.onstop;
+        state.voiceRecorder.addEventListener("stop",()=>resolve(),{once:true});
+        try{state.voiceRecorder.stop()}catch(_){resolve()}
+      }).catch(()=>{});
+    }
+    clearVoiceTimer();
+    stopVoiceTracks();
+    if(discard){
+      state.voiceChunks=[];
+      state.recordedVoiceFile=null;
+    }
+    state.voiceRecorder=null;
+  }
+
   function clearChatAttachment(){
     if(state.chatPreviewUrl){
       URL.revokeObjectURL(state.chatPreviewUrl);
       state.chatPreviewUrl=null;
     }
+    if(state.voiceRecorder?.state==="recording"){
+      try{state.voiceRecorder.stop()}catch(_){}
+    }
+    clearVoiceTimer();
+    stopVoiceTracks();
+    state.voiceRecorder=null;
+    state.voiceChunks=[];
+    state.recordedVoiceFile=null;
     if($("#chatFile"))$("#chatFile").value="";
     if($("#chatAttachmentPreview")){
       $("#chatAttachmentPreview").innerHTML="";
@@ -1585,15 +1644,30 @@
     }
   }
 
+  function showVoicePreview(file){
+    if(state.chatPreviewUrl)URL.revokeObjectURL(state.chatPreviewUrl);
+    state.chatPreviewUrl=URL.createObjectURL(file);
+    $("#chatAttachmentPreview").innerHTML=
+      '<div class="voice-preview"><audio src="'+state.chatPreviewUrl+'" controls preload="metadata"></audio>'+
+      '<div class="grow"><b>رسالة صوتية</b><small>'+(file.size/1024/1024).toFixed(1)+' MB</small></div>'+
+      '<button id="removeChatAttachment" class="small-button" type="button">إزالة</button></div>';
+    $("#chatAttachmentPreview").classList.remove("hidden");
+    $("#removeChatAttachment").onclick=clearChatAttachment;
+  }
+
   $("#chatFile").onchange=()=>{
     const file=$("#chatFile").files[0];
+    if(!file)return;
+    if(state.recordedVoiceFile){
+      state.recordedVoiceFile=null;
+      state.voiceChunks=[];
+    }
     if(state.chatPreviewUrl){
       URL.revokeObjectURL(state.chatPreviewUrl);
       state.chatPreviewUrl=null;
     }
     $("#chatAttachmentPreview").innerHTML="";
     $("#chatAttachmentPreview").classList.add("hidden");
-    if(!file)return;
     const max=Number(state.limits.chat_video_mb||50)*1024*1024;
     if(file.size>max){
       $("#chatAttachmentPreview").textContent="الملف أكبر من الحد المسموح.";
@@ -1606,16 +1680,72 @@
       ?'<img src="'+state.chatPreviewUrl+'" alt="">'
       :file.type.startsWith("video/")
         ?'<video src="'+state.chatPreviewUrl+'" muted playsinline></video>'
-        :'<span>'+escapeHtml(file.name)+'</span>';
+        :file.type.startsWith("audio/")
+          ?'<audio src="'+state.chatPreviewUrl+'" controls></audio>'
+          :'<span>'+escapeHtml(file.name)+'</span>';
     $("#chatAttachmentPreview").innerHTML=preview+'<div class="grow"><b>'+escapeHtml(file.name)+'</b><small>'+((file.size/1024/1024).toFixed(1))+' MB</small></div><button id="removeChatAttachment" class="small-button" type="button">إزالة</button>';
     $("#chatAttachmentPreview").classList.remove("hidden");
     $("#removeChatAttachment").onclick=clearChatAttachment;
   };
 
+  $("#voiceRecordButton").onclick=async()=>{
+    if(state.voiceRecorder?.state==="recording"){
+      try{state.voiceRecorder.stop()}catch(_){}
+      return;
+    }
+    try{
+      if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){
+        throw new Error("التسجيل الصوتي غير مدعوم على هذا الجهاز.");
+      }
+      clearChatAttachment();
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      state.voiceStream=stream;
+      const types=["audio/webm;codecs=opus","audio/webm","audio/mp4"];
+      const mime=types.find(t=>MediaRecorder.isTypeSupported?.(t))||"";
+      const recorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+      state.voiceRecorder=recorder;
+      state.voiceChunks=[];
+      recorder.ondataavailable=e=>{if(e.data?.size)state.voiceChunks.push(e.data)};
+      recorder.onstop=()=>{
+        const type=recorder.mimeType||"audio/webm";
+        const blob=new Blob(state.voiceChunks,{type});
+        stopVoiceTracks();
+        clearVoiceTimer();
+        state.voiceRecorder=null;
+        if(blob.size<800){
+          state.voiceChunks=[];
+          return;
+        }
+        const ext=type.includes("mp4")?"m4a":"webm";
+        state.recordedVoiceFile=new File([blob],"voice-"+Date.now()+"."+ext,{type});
+        showVoicePreview(state.recordedVoiceFile);
+      };
+      recorder.start(250);
+      state.voiceStartedAt=Date.now();
+      $("#voiceRecordButton").classList.add("recording");
+      $("#voiceRecordTimer").classList.remove("hidden");
+      state.voiceTimer=setInterval(()=>{
+        const sec=Math.floor((Date.now()-state.voiceStartedAt)/1000);
+        $("#voiceRecordTimer").textContent=Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0");
+        if(sec>=180){
+          try{recorder.stop()}catch(_){}
+        }
+      },250);
+    }catch(error){
+      clearVoiceTimer();
+      stopVoiceTracks();
+      openInfoDialog("التسجيل الصوتي",'<div class="empty error">'+escapeHtml(error.message||"تعذر الوصول إلى الميكروفون")+'</div>');
+    }
+  };
+
   $("#chatForm").onsubmit=async(e)=>{
     e.preventDefault();
+    if(state.voiceRecorder?.state==="recording"){
+      try{state.voiceRecorder.stop()}catch(_){}
+      return;
+    }
     const body=$("#chatInput").value.trim();
-    const file=$("#chatFile").files[0];
+    const file=state.recordedVoiceFile||$("#chatFile").files[0]||null;
     if((!body&&!file)||!state.activeConversation)return;
     const submit=$("#chatForm button[type='submit']");
     submit.disabled=true;
@@ -1628,13 +1758,10 @@
         const media=await uploadFile(file,kind,{silent:true});
         mediaId=media.id;
       }
-      const {error}=await client.from("messages").insert({
-        conversation_id:state.activeConversation,
-        sender_id:state.user.id,
-        body:body||"",
-        media_id:mediaId
+      await api("/v1/conversations/"+encodeURIComponent(state.activeConversation)+"/messages",{
+        method:"POST",
+        body:JSON.stringify({body,media_id:mediaId})
       });
-      if(error)throw error;
       $("#chatInput").value="";
       clearChatAttachment();
       await loadChat();

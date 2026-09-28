@@ -98,8 +98,35 @@ jobs:
           const missingCameraNative = !manifest.includes('android.permission.CAMERA') || !main.includes('RESOURCE_VIDEO_CAPTURE') || !main.includes('hasCameraPermission()');
           const missingCameraStudio = !index.includes('id="cameraStudioDialog"') || !app.includes('startCameraStream') || !app.includes('captureCameraPhoto') || !app.includes('startCameraRecording');
           const missingMediaViewer = !index.includes('id="mediaViewerDialog"') || !app.includes('enhanceVideoPlayer') || !app.includes('enhanceAudioPlayer') || !app.includes('openMediaViewer');
-          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation || missingInteractionLocks || missingReelPagination || missingStoryViewersApi || missingMediaVisibilityScan || missingCommentFeedback || missingMessageIdempotency || missingMessageApiRead || missingMessagingRealtime || missingChatStatus || directMessageWrites || missingAudioNative || missingConversationSoftDelete || missingCameraNative || missingCameraStudio || missingMediaViewer) {
-            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation,missingInteractionLocks,missingReelPagination,missingStoryViewersApi,missingMediaVisibilityScan,missingCommentFeedback,missingMessageIdempotency,missingMessageApiRead,missingMessagingRealtime,missingChatStatus,directMessageWrites,missingAudioNative,missingConversationSoftDelete,missingCameraNative,missingCameraStudio,missingMediaViewer});
+          const missingReelViews = !app.includes('recordReelView') || !app.includes('data-reel-view-count') || !server.includes('socialRecordReelView') || !server.includes('/rest/v1/rpc/record_reel_view');
+          const missingDoubleTapLike = !app.includes('showReelLikeBurst') || !app.includes('reel-like-burst');
+          const missingPostPins = !app.includes('pinOwnContent') || !app.includes('profile-grid-pinned') || !server.includes('existingPinned >= 3');
+          const missingCommentPins = !app.includes('data-pin-comment') || !server.includes('socialPinComment') || !server.includes('/pin
+            process.exit(1);
+          }
+          NODE
+
+      - name: فحص نسخة الإدارة
+        run: node --check apps/admin-web/app.js
+
+      - name: فحص الموقع
+        run: node --check apps/site/app.js
+
+      - name: فحص بوابة آشور
+        run: |
+          node --check services/api/src/config.mjs
+          node --check services/api/src/supabase.mjs
+          node --check services/api/src/telegram.mjs
+          node --check services/api/src/onesignal.mjs
+          node --check services/api/src/server.mjs
+
+      - name: فحص بوت التخزين
+        run: node --check services/bot/src/bot.mjs
+);
+          const missingMentionDelivery = !server.includes('ensureMentionDirectConversation') || !server.includes('content_mentions') || !server.includes('ذكرتك في هذا المنشور');
+          const missingCombinedProfileCount = !app.includes('const totalContent=Number(posts||0)+Number(reels||0)');
+          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation || missingInteractionLocks || missingReelPagination || missingStoryViewersApi || missingMediaVisibilityScan || missingCommentFeedback || missingMessageIdempotency || missingMessageApiRead || missingMessagingRealtime || missingChatStatus || directMessageWrites || missingAudioNative || missingConversationSoftDelete || missingCameraNative || missingCameraStudio || missingMediaViewer || missingReelViews || missingDoubleTapLike || missingPostPins || missingCommentPins || missingMentionDelivery || missingCombinedProfileCount) {
+            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation,missingInteractionLocks,missingReelPagination,missingStoryViewersApi,missingMediaVisibilityScan,missingCommentFeedback,missingMessageIdempotency,missingMessageApiRead,missingMessagingRealtime,missingChatStatus,directMessageWrites,missingAudioNative,missingConversationSoftDelete,missingCameraNative,missingCameraStudio,missingMediaViewer,missingReelViews,missingDoubleTapLike,missingPostPins,missingCommentPins,missingMentionDelivery,missingCombinedProfileCount});
             process.exit(1);
           }
           NODE

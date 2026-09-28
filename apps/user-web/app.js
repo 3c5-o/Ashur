@@ -3809,6 +3809,319 @@
     renderComposerPreview();
   }
 
+  function stopCameraTracks(){
+    if(state.cameraStream){
+      state.cameraStream.getTracks().forEach(track=>track.stop());
+      state.cameraStream=null;
+    }
+    const preview=$("#cameraPreview");
+    if(preview)preview.srcObject=null;
+  }
+
+  function clearCameraRecordingTimer(){
+    clearInterval(state.cameraRecordingTimer);
+    state.cameraRecordingTimer=null;
+    state.cameraRecordingStarted=0;
+    $("#cameraRecordingBadge")?.classList.add("hidden");
+    if($("#cameraRecordTime"))$("#cameraRecordTime").textContent="0:00";
+    $("#cameraCapture")?.classList.remove("recording");
+  }
+
+  async function ensureCameraPermission(){
+    try{
+      if(window.AshurNative?.hasCameraPermission?.())return true;
+      window.AshurNative?.requestCameraPermission?.();
+      for(let i=0;i<24;i++){
+        await new Promise(resolve=>setTimeout(resolve,125));
+        if(window.AshurNative?.hasCameraPermission?.())return true;
+      }
+      return !window.AshurNative?.hasCameraPermission;
+    }catch{return true}
+  }
+
+  function cameraVideoConstraints(){
+    return {
+      facingMode:{ideal:state.cameraFacing||"environment"},
+      width:{ideal:1080},
+      height:{ideal:1920},
+      aspectRatio:{ideal:9/16}
+    };
+  }
+
+  async function startCameraStream(){
+    const errorBox=$("#cameraError");
+    errorBox.classList.add("hidden");
+    errorBox.textContent="";
+    stopCameraTracks();
+
+    if(!navigator.mediaDevices?.getUserMedia){
+      throw new Error("الكاميرا الداخلية غير مدعومة على هذا الجهاز.");
+    }
+
+    const permitted=await ensureCameraPermission();
+    if(!permitted)throw new Error("يلزم السماح لآشور باستخدام الكاميرا.");
+
+    let stream=null;
+    const attempts=[
+      {video:cameraVideoConstraints(),audio:state.cameraMode==="video"},
+      {video:{facingMode:state.cameraFacing||"environment"},audio:state.cameraMode==="video"},
+      {video:true,audio:state.cameraMode==="video"}
+    ];
+    let lastError=null;
+    for(const constraints of attempts){
+      try{
+        stream=await navigator.mediaDevices.getUserMedia(constraints);
+        if(stream?.getVideoTracks?.().length)break;
+      }catch(error){
+        lastError=error;
+        stream=null;
+      }
+    }
+    if(!stream)throw lastError||new Error("تعذر تشغيل الكاميرا.");
+
+    state.cameraStream=stream;
+    state.cameraTorch=false;
+    const preview=$("#cameraPreview");
+    preview.srcObject=stream;
+    preview.classList.toggle("mirror",state.cameraFacing==="user");
+    await preview.play().catch(()=>{});
+    updateCameraCapabilities();
+  }
+
+  function updateCameraCapabilities(){
+    const track=state.cameraStream?.getVideoTracks?.()[0];
+    const flash=$("#cameraFlash");
+    if(!track||!flash)return;
+    let supportsTorch=false;
+    try{
+      const caps=track.getCapabilities?.()||{};
+      supportsTorch=Boolean(caps.torch);
+    }catch{}
+    flash.disabled=!supportsTorch;
+    flash.classList.toggle("unsupported",!supportsTorch);
+    flash.classList.toggle("active",Boolean(state.cameraTorch));
+    flash.querySelector("span").textContent=supportsTorch?(state.cameraTorch?"فلاش يعمل":"فلاش"):"بدون فلاش";
+  }
+
+  function setCameraMode(mode,{restart=true}={}){
+    const target=state.composerType==="reel"?"video":(mode==="video"?"video":"photo");
+    const changed=state.cameraMode!==target;
+    state.cameraMode=target;
+    $$("#cameraStudioDialog [data-camera-mode]").forEach(button=>{
+      button.classList.toggle("active",button.dataset.cameraMode===target);
+      button.disabled=state.composerType==="reel"&&button.dataset.cameraMode==="photo";
+    });
+    $("#cameraHint").textContent=target==="video"?"اضغط لبدء تسجيل الفيديو":"اضغط لالتقاط صورة";
+    $("#cameraCapture").classList.toggle("video-mode",target==="video");
+    if(changed&&restart&&$("#cameraStudioDialog")?.open){
+      startCameraStream().catch(showCameraError);
+    }
+  }
+
+  function showCameraError(error){
+    const box=$("#cameraError");
+    box.innerHTML='<b>تعذر تشغيل الكاميرا</b><span>'+escapeHtml(error?.message||"تحقق من صلاحية الكاميرا ثم حاول مرة أخرى.")+'</span><button id="cameraFallbackButton" type="button">فتح كاميرا الجهاز</button>';
+    box.classList.remove("hidden");
+    $("#cameraFallbackButton").onclick=()=>{
+      closeCameraStudio({returnToComposer:true});
+      setTimeout(()=>$("#composerCameraFile")?.click(),120);
+    };
+  }
+
+  async function openCameraStudio(){
+    if(state.cameraRecorder?.state==="recording")return;
+    state.cameraFacing="environment";
+    state.cameraTimerSeconds=0;
+    state.cameraTorch=false;
+    $("#cameraTimerLabel").textContent="0ث";
+    $("#cameraGrid").classList.add("hidden");
+    $("#cameraError").classList.add("hidden");
+    setCameraMode(state.composerType==="reel"?"video":"photo",{restart:false});
+    if($("#composerDialog").open)$("#composerDialog").close();
+    const dialog=$("#cameraStudioDialog");
+    if(!dialog.open)dialog.showModal();
+    try{
+      await startCameraStream();
+    }catch(error){
+      showCameraError(error);
+    }
+  }
+
+  function closeCameraStudio({returnToComposer=true}={}){
+    if(state.cameraRecorder?.state==="recording"){
+      try{state.cameraRecorder.stop()}catch(_){}
+      state.cameraRecorder=null;
+      state.cameraChunks=[];
+    }
+    clearCameraRecordingTimer();
+    stopCameraTracks();
+    if($("#cameraStudioDialog").open)$("#cameraStudioDialog").close();
+    if(returnToComposer&&!$("#composerDialog").open){
+      setTimeout(()=>{try{$("#composerDialog").showModal()}catch(_){}},60);
+    }
+  }
+
+  async function cameraCountdown(){
+    const seconds=Number(state.cameraTimerSeconds||0);
+    if(!seconds)return true;
+    const root=$("#cameraCountdown");
+    root.classList.remove("hidden");
+    for(let remaining=seconds;remaining>0;remaining--){
+      root.textContent=String(remaining);
+      await new Promise(resolve=>setTimeout(resolve,1000));
+      if(!$("#cameraStudioDialog").open){root.classList.add("hidden");return false}
+    }
+    root.classList.add("hidden");
+    return true;
+  }
+
+  async function captureCameraPhoto(){
+    const video=$("#cameraPreview");
+    if(!video?.videoWidth||!video?.videoHeight)throw new Error("الكاميرا لم تصبح جاهزة بعد.");
+    const canvas=document.createElement("canvas");
+    const maxWidth=2160;
+    const ratio=Math.min(1,maxWidth/video.videoWidth);
+    canvas.width=Math.round(video.videoWidth*ratio);
+    canvas.height=Math.round(video.videoHeight*ratio);
+    const ctx=canvas.getContext("2d");
+    if(state.cameraFacing==="user"){
+      ctx.translate(canvas.width,0);
+      ctx.scale(-1,1);
+    }
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",.92));
+    if(!blob)throw new Error("تعذر حفظ الصورة.");
+    return new File([blob],"ashur-camera-"+Date.now()+".jpg",{type:"image/jpeg",lastModified:Date.now()});
+  }
+
+  function preferredCameraVideoMime(){
+    const types=[
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "video/mp4"
+    ];
+    return types.find(type=>window.MediaRecorder?.isTypeSupported?.(type))||"";
+  }
+
+  async function startCameraRecording(){
+    if(!state.cameraStream)throw new Error("الكاميرا غير جاهزة.");
+    if(!window.MediaRecorder)throw new Error("تسجيل الفيديو غير مدعوم على هذا الجهاز.");
+
+    const mime=preferredCameraVideoMime();
+    const recorder=new MediaRecorder(state.cameraStream,mime?{mimeType:mime}:undefined);
+    state.cameraRecorder=recorder;
+    state.cameraChunks=[];
+    recorder.ondataavailable=event=>{if(event.data?.size)state.cameraChunks.push(event.data)};
+    recorder.onerror=event=>showCameraError(event.error||new Error("حدث خطأ أثناء تسجيل الفيديو."));
+    recorder.onstop=()=>{
+      const type=recorder.mimeType||mime||"video/webm";
+      const blob=new Blob(state.cameraChunks,{type});
+      const ext=type.includes("mp4")?"mp4":"webm";
+      clearCameraRecordingTimer();
+      state.cameraRecorder=null;
+      state.cameraChunks=[];
+      if(blob.size<1500){
+        showCameraError(new Error("لم يتم تسجيل فيديو صالح."));
+        return;
+      }
+      const file=new File([blob],"ashur-video-"+Date.now()+"."+ext,{type,lastModified:Date.now()});
+      acceptComposerFiles([file],"camera");
+      closeCameraStudio({returnToComposer:true});
+    };
+    recorder.start(300);
+    state.cameraRecordingStarted=Date.now();
+    $("#cameraRecordingBadge").classList.remove("hidden");
+    $("#cameraCapture").classList.add("recording");
+    $("#cameraHint").textContent="اضغط مرة ثانية لإيقاف التسجيل";
+    state.cameraRecordingTimer=setInterval(()=>{
+      const sec=Math.floor((Date.now()-state.cameraRecordingStarted)/1000);
+      $("#cameraRecordTime").textContent=formatMediaTime(sec);
+      if(sec>=180&&recorder.state==="recording")recorder.stop();
+    },250);
+  }
+
+  $("#openCameraStudio").onclick=openCameraStudio;
+  $("#closeCameraStudio").onclick=()=>closeCameraStudio({returnToComposer:true});
+  $("#cameraStudioDialog").addEventListener("cancel",event=>{
+    event.preventDefault();
+    closeCameraStudio({returnToComposer:true});
+  });
+
+  $$("#cameraStudioDialog [data-camera-mode]").forEach(button=>button.onclick=()=>{
+    if(state.cameraRecorder?.state==="recording")return;
+    setCameraMode(button.dataset.cameraMode);
+  });
+
+  async function switchCameraFacing(){
+    if(state.cameraRecorder?.state==="recording")return;
+    state.cameraFacing=state.cameraFacing==="environment"?"user":"environment";
+    try{await startCameraStream()}catch(error){showCameraError(error)}
+  }
+  $("#cameraSwitch").onclick=switchCameraFacing;
+  $("#cameraFacingQuick").onclick=switchCameraFacing;
+
+  $("#cameraGridToggle").onclick=()=>{
+    const grid=$("#cameraGrid");
+    grid.classList.toggle("hidden");
+    $("#cameraGridToggle").classList.toggle("active",!grid.classList.contains("hidden"));
+  };
+
+  $("#cameraTimer").onclick=()=>{
+    const values=[0,3,10];
+    const index=values.indexOf(Number(state.cameraTimerSeconds||0));
+    state.cameraTimerSeconds=values[(index+1)%values.length];
+    $("#cameraTimerLabel").textContent=state.cameraTimerSeconds+"ث";
+    $("#cameraTimer").classList.toggle("active",state.cameraTimerSeconds>0);
+  };
+
+  $("#cameraFlash").onclick=async()=>{
+    const track=state.cameraStream?.getVideoTracks?.()[0];
+    if(!track)return;
+    try{
+      const caps=track.getCapabilities?.()||{};
+      if(!caps.torch)return;
+      state.cameraTorch=!state.cameraTorch;
+      await track.applyConstraints({advanced:[{torch:state.cameraTorch}]});
+      updateCameraCapabilities();
+    }catch{
+      state.cameraTorch=false;
+      updateCameraCapabilities();
+    }
+  };
+
+  $("#cameraGallery").onclick=()=>{
+    closeCameraStudio({returnToComposer:true});
+    setTimeout(()=>$("#composerFile")?.click(),150);
+  };
+
+  $("#cameraCapture").onclick=async()=>{
+    const button=$("#cameraCapture");
+    if(state.cameraMode==="video"&&state.cameraRecorder?.state==="recording"){
+      button.disabled=true;
+      try{state.cameraRecorder.stop()}catch(_){}
+      setTimeout(()=>button.disabled=false,500);
+      return;
+    }
+
+    button.disabled=true;
+    try{
+      const proceed=await cameraCountdown();
+      if(!proceed)return;
+      if(state.cameraMode==="video"){
+        await startCameraRecording();
+      }else{
+        const file=await captureCameraPhoto();
+        acceptComposerFiles([file],"camera");
+        closeCameraStudio({returnToComposer:true});
+      }
+    }catch(error){
+      showCameraError(error);
+    }finally{
+      button.disabled=false;
+    }
+  };
+
   function openComposer(type){
     state.composerType=type;
     $("#publishDialog").close();

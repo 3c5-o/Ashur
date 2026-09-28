@@ -48,6 +48,13 @@
 
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const initials = (name="آشور") => escapeHtml(name.trim().slice(0,1) || "آ");
+  const richText = (value="") => {
+    const escaped=escapeHtml(value);
+    return escaped
+      .replace(/(^|\s)@([A-Za-z0-9_.]{2,24})/g,'$1<button class="inline-tag mention-tag" type="button" data-inline-mention="$2">@$2</button>')
+      .replace(/(^|\s)#([\p{L}\p{N}_]{2,50})/gu,'$1<button class="inline-tag hashtag-tag" type="button" data-inline-hashtag="$2">#$2</button>')
+      .replace(/\n/g,"<br>");
+  };
   const safeLink = (value="") => {
     const raw=String(value||"").trim();
     if(!raw)return "";
@@ -995,7 +1002,7 @@
             <button class="action icon-action" data-share-post="${post.id}" type="button">${icon("share")}<span>مشاركة</span></button>
             <button class="action icon-action ${savedNow?"active":""}" data-save-post="${post.id}" type="button">${icon("save")}<span>${savedNow?"محفوظ":"حفظ"}</span></button>
           </div>
-          ${post.caption?`<p class="caption">${escapeHtml(post.caption)}</p>`:""}
+          ${post.caption?`<p class="caption">${richText(post.caption)}</p>`:""}
         </div>
       </article>`;
     }).join("");
@@ -1176,7 +1183,7 @@
       return `<article class="search-post-card">
         <button class="search-post-owner" data-open-profile="${row.author_id}" type="button">${avatar(p)}<span><b>${escapeHtml(p.name||p.username||"مستخدم")}</b><small>@${escapeHtml(p.username||"")}</small></span></button>
         ${media?`<img class="search-post-media" data-media-id="${media}" alt="">`:""}
-        ${row.caption?`<p>${escapeHtml(row.caption)}</p>`:""}
+        ${row.caption?`<p>${richText(row.caption)}</p>`:""}
       </article>`;
     }).join("");
   }
@@ -1334,7 +1341,7 @@
             </button>
             ${r.author_id!==state.user.id?`<button class="reel-follow ${statuses[r.author_id]?"active":""}" data-follow-reel="${r.author_id}" type="button">${followLabel(statuses[r.author_id])}</button>`:""}
           </div>
-          <p>${escapeHtml(r.caption||"")}</p>
+          <p>${richText(r.caption||"")}</p>
         </div>
         <div class="reel-actions">
           <button class="reel-action ${likedNow?"active":""}" data-like-reel="${r.id}" type="button">
@@ -2060,7 +2067,7 @@
       :"";
     openInfoDialog(reel?"ريلز":"منشور",
       '<div class="profile-preview">'+media+
-      (caption?'<p class="profile-preview-caption">'+escapeHtml(caption)+'</p>':"")+
+      (caption?'<p class="profile-preview-caption">'+richText(caption)+'</p>':"")+
       '<div class="profile-preview-actions">'+
       '<button id="previewLikeButton" class="'+(liked?"active":"")+'" type="button">'+icon("like")+'<span>'+likeCount+'</span></button>'+
       (commentsEnabled?'<button id="previewCommentButton" type="button">'+icon("comment")+'<span>'+commentCount+'</span></button>':"")+
@@ -3202,6 +3209,25 @@
     });
   }
 
+
+  document.addEventListener("click",async e=>{
+    const mention=e.target.closest?.("[data-inline-mention]");
+    if(mention){
+      e.preventDefault();e.stopPropagation();
+      const username=String(mention.dataset.inlineMention||"").toLowerCase();
+      const result=await client.from("profiles").select("id").eq("username",username).maybeSingle();
+      if(result.data?.id)openPublicProfile(result.data.id);
+      return;
+    }
+    const hashtag=e.target.closest?.("[data-inline-hashtag]");
+    if(hashtag){
+      e.preventDefault();e.stopPropagation();
+      await navigateTo("searchPage");
+      $("#searchInput").value="#"+hashtag.dataset.inlineHashtag;
+      setSearchType("posts");
+      await runSearch();
+    }
+  });
 
   document.addEventListener("click",e=>{
     const link=e.target.closest?.("a[href]");

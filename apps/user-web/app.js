@@ -1909,28 +1909,49 @@
   async function loadConversations(){
     try{
       const list=await api("/v1/conversations");
+      state.conversationCache=new Map((list.items||[]).map(row=>[row.id,row]));
       const query=($("#messagesSearchInput")?.value||"").trim().toLowerCase();
+      const filter=state.messageFilter||"all";
       const items=(list.items||[]).filter(row=>{
+        const profile=row.peer_profile||{};
+        if(filter==="unread"&&Number(row.unread_count||0)<=0)return false;
+        if(filter==="groups"&&row.kind!=="group")return false;
         if(!query)return true;
-        return String(row.title||"").toLowerCase().includes(query) ||
-          String(row.last_message||"").toLowerCase().includes(query);
+        return [
+          row.title,
+          row.last_message,
+          profile.name,
+          profile.username
+        ].some(value=>String(value||"").toLowerCase().includes(query));
       });
+
       $("#conversationList").innerHTML=items.map(row=>{
         const p=row.peer_profile||{};
-        const avatarHtml=p.avatar_media_id
-          ? '<img class="conversation-avatar" data-media-id="'+escapeHtml(p.avatar_media_id)+'" alt="">'
-          : '<div class="conversation-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">'+initials(row.title||"م")+'</div>';
+        const isGroup=row.kind==="group";
+        const avatarHtml=isGroup
+          ?(row.image_media_id
+            ?'<img class="conversation-avatar group-avatar" data-media-id="'+escapeHtml(row.image_media_id)+'" alt="">'
+            :'<div class="conversation-avatar group-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">'+initials(row.title||"م")+'</div>')
+          :(p.avatar_media_id
+            ?'<img class="conversation-avatar" data-media-id="'+escapeHtml(p.avatar_media_id)+'" alt="">'
+            :'<div class="conversation-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">'+initials(row.title||p.name||"م")+'</div>');
         const unread=row.unread_count?'<span class="conversation-unread">'+Number(row.unread_count||0)+'</span>':"";
+        const badge=isGroup?'<span class="conversation-kind-badge">مجموعة</span>':"";
         const updated=row.updated_at?new Date(row.updated_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"}):"";
-        return '<button class="conversation-item" data-conversation="'+escapeHtml(row.id)+'" data-title="'+escapeHtml(row.title||"محادثة")+'" type="button">'+
+        const preview=escapeHtml(row.last_message|| (isGroup?"ابدأ الحديث في المجموعة":"ابدأ المحادثة"));
+        return '<button class="conversation-item" data-conversation="'+escapeHtml(row.id)+'" type="button">'+
           avatarHtml+
-          '<div class="conversation-main"><div class="conversation-title-row"><b>'+escapeHtml(row.title||"محادثة")+unread+'</b><time>'+updated+'</time></div>'+
-          '<div class="conversation-preview">'+escapeHtml(row.last_message||"ابدأ المحادثة")+'</div></div></button>';
+          '<div class="conversation-main"><div class="conversation-title-row"><b>'+escapeHtml(row.title||p.name||"محادثة")+'</b>'+badge+unread+'<time>'+updated+'</time></div>'+
+          '<div class="conversation-preview">'+preview+'</div></div></button>';
       }).join("")||'<div class="empty">لا توجد محادثات مطابقة.</div>';
+
       await hydrateMedia($("#conversationList"));
-      $("#conversationList").querySelectorAll("[data-conversation]").forEach(b=>b.onclick=()=>openChat(b.dataset.conversation,b.dataset.title));
-    }catch(e){
-      $("#conversationList").innerHTML=errorMarkup(e.message,"messagesPage");
+      $("#conversationList").querySelectorAll("[data-conversation]").forEach(button=>button.onclick=()=>{
+        const row=state.conversationCache.get(button.dataset.conversation);
+        if(row)openChat(row.id,row.title,row);
+      });
+    }catch(error){
+      $("#conversationList").innerHTML=errorMarkup(error.message,"messagesPage");
     }
   }
 
@@ -2045,17 +2066,170 @@
     },15000);
   }
 
-  async function openChat(id,title){
+  function renderChatHeader(meta={}){
+    const isGroup=meta.kind==="group";
+    const profile=meta.peer_profile||{};
+    const title=meta.title||profile.name||profile.username||"المحادثة";
+    $("#chatTitle").textContent=title;
+    $("#chatHeaderSubtitle").textContent=isGroup
+      ?(meta.member_count?meta.member_count+" أعضاء":"مجموعة")
+      :(profile.username?"@"+profile.username:"محادثة خاصة");
+
+    const avatarRoot=$("#chatHeaderAvatar");
+    if(isGroup){
+      avatarRoot.classList.add("group-avatar");
+      avatarRoot.innerHTML=meta.image_media_id
+        ?'<img data-media-id="'+escapeHtml(meta.image_media_id)+'" alt="">'
+        :initials(title);
+    }else{
+      avatarRoot.classList.remove("group-avatar");
+      avatarRoot.innerHTML=profile.avatar_media_id
+        ?'<img data-media-id="'+escapeHtml(profile.avatar_media_id)+'" alt="">'
+        :initials(title);
+    }
+    hydrateMedia(avatarRoot).catch(()=>{});
+  }
+
+  async function fetchConversationDetails(id,{refresh=false}={}){
+    if(!refresh&&state.activeConversationMeta?.id===id&&state.activeConversationMeta?.members)return state.activeConversationMeta;
+    const details=await api("/v1/conversations/"+encodeURIComponent(id));
+    state.activeConversationMeta=details;
+    const cached=state.conversationCache.get(id)||{};
+    state.conversationCache.set(id,{...cached,...details});
+    return details;
+  }
+
+  async function openChat(id,title,meta=null){
     closeChatRealtime();
     state.activeConversation=id;
+    state.activeConversationMeta=meta?{...meta}:null;
     state.chatLoadSeq++;
-    $("#chatTitle").textContent=title||"المحادثة";
+    renderChatHeader(meta||{id,title});
     $("#chatMessage").textContent="";
     clearChatAttachment();
     openDialog($("#chatDialog"));
+
+    fetchConversationDetails(id).then(details=>{
+      if(state.activeConversation===id)renderChatHeader(details);
+    }).catch(()=>{});
+
     await loadChat();
     if(state.activeConversation===id)subscribeChatRealtime();
   }
+
+  async function openConversationInfo(){
+    if(!state.activeConversation)return;
+    const body=$("#conversationInfoBody");
+    $("#conversationInfoTitle").textContent="معلومات المحادثة";
+    body.innerHTML='<div class="empty">جارٍ تحميل المعلومات...</div>';
+    if(!$("#conversationInfoDialog").open)$("#conversationInfoDialog").showModal();
+
+    try{
+      const details=await fetchConversationDetails(state.activeConversation,{refresh:true});
+      const isGroup=details.kind==="group";
+      const peer=details.peer_profile||{};
+      const title=isGroup?(details.title||"مجموعة"):(peer.name||peer.username||details.title||"مستخدم");
+      const avatarHtml=isGroup
+        ?(details.image_media_id
+          ?'<div class="conversation-info-avatar group"><img data-media-id="'+escapeHtml(details.image_media_id)+'" alt=""></div>'
+          :'<div class="conversation-info-avatar group">'+initials(title)+'</div>')
+        :(peer.avatar_media_id
+          ?'<div class="conversation-info-avatar"><img data-media-id="'+escapeHtml(peer.avatar_media_id)+'" alt=""></div>'
+          :'<div class="conversation-info-avatar">'+initials(title)+'</div>');
+
+      const membersHtml=isGroup
+        ?'<div class="settings-group"><div class="settings-group-title"><div><span class="eyebrow">الأعضاء</span><h4>'+Number(details.member_count||0)+' أعضاء</h4></div></div>'+
+          '<div class="conversation-info-members">'+(details.members||[]).map(member=>{
+            const profile=member.profile||{};
+            return '<button class="conversation-member-row" data-info-profile="'+escapeHtml(member.user_id)+'" type="button">'+
+              avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||profile.username||"مستخدم")+'</b><small>@'+escapeHtml(profile.username||"")+(member.role==="owner"?" · المالك":member.role==="admin"?" · مشرف":"")+'</small></span>'+
+            '</button>';
+          }).join("")+'</div></div>'
+        :"";
+
+      const groupEdit=isGroup&&["owner","admin"].includes(String(details.my_role||""))
+        ?'<div class="settings-group"><div class="settings-group-title"><div><span class="eyebrow">المجموعة</span><h4>اسم المجموعة</h4></div></div>'+
+          '<div class="conversation-title-editor"><input id="conversationTitleInput" maxlength="80" value="'+escapeHtml(details.title||"")+'"><button id="saveConversationTitle" class="small-button" type="button">حفظ</button></div></div>'
+        :"";
+
+      body.innerHTML=
+        '<div class="conversation-info-hero">'+avatarHtml+'<h4>'+escapeHtml(title)+'</h4>'+
+          '<p>'+(isGroup?"مجموعة آشور":("@"+escapeHtml(peer.username||"")))+'</p></div>'+
+        '<div class="conversation-info-actions">'+
+          (!isGroup?'<button id="conversationViewProfile" type="button">عرض الملف الشخصي</button>':"")+
+          '<button id="conversationMuteButton" type="button">'+(details.muted?"إلغاء كتم الإشعارات":"كتم الإشعارات")+'</button>'+
+        '</div>'+
+        groupEdit+membersHtml+
+        '<p id="conversationInfoMessage" class="message" aria-live="polite"></p>';
+
+      await hydrateMedia(body);
+
+      if($("#conversationViewProfile"))$("#conversationViewProfile").onclick=()=>{
+        const userId=peer.id;
+        $("#conversationInfoDialog").close();
+        $("#chatDialog").close();
+        closeChatRealtime();
+        state.activeConversation=null;
+        state.activeConversationMeta=null;
+        if(userId)openPublicProfile(userId);
+      };
+
+      $("#conversationMuteButton").onclick=async()=>{
+        const button=$("#conversationMuteButton");
+        button.disabled=true;
+        try{
+          const next=!Boolean(details.muted);
+          await api("/v1/conversations/"+encodeURIComponent(details.id),{
+            method:"PATCH",
+            body:JSON.stringify({muted:next})
+          });
+          details.muted=next;
+          button.textContent=next?"إلغاء كتم الإشعارات":"كتم الإشعارات";
+          $("#conversationInfoMessage").textContent=next?"تم كتم إشعارات المحادثة.":"تم تفعيل إشعارات المحادثة.";
+        }catch(error){
+          $("#conversationInfoMessage").textContent=error.message;
+        }finally{button.disabled=false}
+      };
+
+      if($("#saveConversationTitle"))$("#saveConversationTitle").onclick=async()=>{
+        const button=$("#saveConversationTitle");
+        const next=$("#conversationTitleInput").value.trim();
+        if(next.length<2)return $("#conversationInfoMessage").textContent="اكتب اسمًا أوضح للمجموعة.";
+        button.disabled=true;
+        try{
+          await api("/v1/conversations/"+encodeURIComponent(details.id),{
+            method:"PATCH",
+            body:JSON.stringify({title:next})
+          });
+          details.title=next;
+          state.activeConversationMeta=details;
+          renderChatHeader(details);
+          $("#conversationInfoTitle").textContent=next;
+          $("#conversationInfoMessage").textContent="تم تحديث اسم المجموعة.";
+          await loadConversations();
+        }catch(error){
+          $("#conversationInfoMessage").textContent=error.message;
+        }finally{button.disabled=false}
+      };
+
+      body.querySelectorAll("[data-info-profile]").forEach(button=>button.onclick=()=>{
+        const userId=button.dataset.infoProfile;
+        if(userId===state.user.id)return;
+        $("#conversationInfoDialog").close();
+        $("#chatDialog").close();
+        closeChatRealtime();
+        state.activeConversation=null;
+        state.activeConversationMeta=null;
+        openPublicProfile(userId);
+      });
+    }catch(error){
+      body.innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
+    }
+  }
+
+  $("#chatContactButton").onclick=openConversationInfo;
+  $("#chatHeaderAction").onclick=openConversationInfo;
+  $("#closeConversationInfo").onclick=()=>$("#conversationInfoDialog").close();
 
   function sharedMessageMarkup(message){
     if(!message.shared_type||!message.shared_id)return "";
@@ -2450,6 +2624,7 @@
   $("#closeChat").onclick=()=>{
     closeChatRealtime();
     state.activeConversation=null;
+    state.activeConversationMeta=null;
     state.chatLoadSeq++;
     clearChatAttachment();
     $("#chatMessage").textContent="";
@@ -3604,49 +3779,142 @@
   }
 
   let messagesSearchTimer;
+  let conversationUserSearchTimer;
+
   $("#messagesSearchInput").oninput=()=>{
     clearTimeout(messagesSearchTimer);
-    messagesSearchTimer=setTimeout(()=>loadConversations(),180);
+    messagesSearchTimer=setTimeout(()=>loadConversations(),160);
   };
 
-  $("#newMessageButton").onclick=()=>{
+  $$(".messages-filter-tabs [data-message-filter]").forEach(button=>button.onclick=()=>{
+    state.messageFilter=button.dataset.messageFilter||"all";
+    $$(".messages-filter-tabs [data-message-filter]").forEach(item=>item.classList.toggle("active",item===button));
+    loadConversations();
+  });
+
+  function setConversationCreateMode(mode){
+    state.conversationCreateMode=mode==="group"?"group":"direct";
+    state.selectedGroupMembers=new Map();
+    $$(".conversation-create-tabs [data-create-mode]").forEach(button=>button.classList.toggle("active",button.dataset.createMode===state.conversationCreateMode));
+    $("#groupTitleField").classList.toggle("hidden",state.conversationCreateMode!=="group");
+    $("#selectedGroupMembers").classList.toggle("hidden",state.conversationCreateMode!=="group");
+    $("#createGroupButton").classList.toggle("hidden",state.conversationCreateMode!=="group");
     $("#newConversationUsername").value="";
-    $("#newConversationResult").innerHTML="";
-    openDialog($("#newConversationDialog"));
-  };
-  $("#closeNewConversation").onclick=()=>$("#newConversationDialog").close();
+    $("#newConversationResult").innerHTML='<div class="empty">'+(state.conversationCreateMode==="group"?"ابحث واختر شخصين على الأقل.":"ابحث عن الشخص الذي تريد مراسلته.")+'</div>';
+    $("#newConversationMessage").textContent="";
+    renderSelectedGroupMembers();
+  }
 
-  $("#findConversationUser").onclick=async()=>{
-    const username=$("#newConversationUsername").value.trim().toLowerCase();
-    if(!username){
-      $("#newConversationResult").innerHTML='<div class="empty">اكتب اسم المستخدم.</div>';
+  function renderSelectedGroupMembers(){
+    const root=$("#selectedGroupMembers");
+    if(!root)return;
+    const members=[...state.selectedGroupMembers.values()];
+    root.innerHTML=members.map(profile=>
+      '<span class="selected-member-chip">'+avatar(profile)+'<b>@'+escapeHtml(profile.username||"")+'</b><button type="button" data-remove-group-member="'+escapeHtml(profile.id)+'" aria-label="إزالة">×</button></span>'
+    ).join("");
+    root.classList.toggle("hidden",state.conversationCreateMode!=="group"||!members.length);
+    hydrateMedia(root).catch(()=>{});
+    root.querySelectorAll("[data-remove-group-member]").forEach(button=>button.onclick=()=>{
+      state.selectedGroupMembers.delete(button.dataset.removeGroupMember);
+      renderSelectedGroupMembers();
+      searchConversationUsers();
+    });
+  }
+
+  async function searchConversationUsers(){
+    const root=$("#newConversationResult");
+    const raw=$("#newConversationUsername").value.trim();
+    if(!raw){
+      root.innerHTML='<div class="empty">'+(state.conversationCreateMode==="group"?"ابحث بالاسم أو اليوزر ثم اختر الأعضاء.":"اكتب اسم الحساب أو اليوزر.")+'</div>';
       return;
     }
+    const safe=raw.replace(/[,%()]/g,"").slice(0,40);
     const {data,error}=await client.from("profiles")
       .select("id,name,username,avatar_media_id,is_verified")
-      .eq("username",username)
       .neq("id",state.user.id)
-      .limit(1);
-    if(error||!data?.length){
-      $("#newConversationResult").innerHTML='<div class="empty">لم يتم العثور على الحساب.</div>';
+      .eq("is_banned",false)
+      .or("name.ilike.%"+safe+"%,username.ilike.%"+safe+"%")
+      .limit(20);
+    if(error){
+      root.innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
       return;
     }
-    const p=data[0];
-    $("#newConversationResult").innerHTML=`<div class="list-card">${avatar(p)}<div class="grow"><b>${escapeHtml(p.name||"مستخدم")}</b><div>@${escapeHtml(p.username||"")}</div></div><button class="small-button" data-start-chat="${p.id}">بدء المحادثة</button></div>`;
-    await hydrateMedia($("#newConversationResult"));
-    $("#newConversationResult").querySelector("[data-start-chat]").onclick=async()=>{
+    const rows=data||[];
+    root.innerHTML=rows.map(profile=>{
+      const selected=state.selectedGroupMembers.has(profile.id);
+      return '<button class="list-card '+(selected?"selected":"")+'" data-conversation-user="'+escapeHtml(profile.id)+'" type="button">'+
+        avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||"مستخدم")+(profile.is_verified?'<span class="verified-inline">✓</span>':"")+'</b><small>@'+escapeHtml(profile.username||"")+'</small></span>'+
+        (state.conversationCreateMode==="group"?'<span class="conversation-user-check">✓</span>':'<span class="share-send-label">مراسلة</span>')+
+      '</button>';
+    }).join("")||'<div class="empty">لم يتم العثور على حسابات.</div>';
+    await hydrateMedia(root);
+    root.querySelectorAll("[data-conversation-user]").forEach(button=>button.onclick=async()=>{
+      const profile=rows.find(row=>row.id===button.dataset.conversationUser);
+      if(!profile)return;
+      if(state.conversationCreateMode==="group"){
+        if(state.selectedGroupMembers.has(profile.id))state.selectedGroupMembers.delete(profile.id);
+        else state.selectedGroupMembers.set(profile.id,profile);
+        renderSelectedGroupMembers();
+        searchConversationUsers();
+        return;
+      }
+      button.disabled=true;
       try{
         const conversation=await api("/v1/conversations",{
           method:"POST",
-          body:JSON.stringify({kind:"direct",target_user_id:p.id})
+          body:JSON.stringify({kind:"direct",target_user_id:profile.id})
         });
         $("#newConversationDialog").close();
         await loadConversations();
-        await openChat(conversation.id,p.name||p.username||"محادثة");
+        await openChat(conversation.id,profile.name||profile.username||"محادثة",{
+          ...conversation,
+          kind:"direct",
+          title:profile.name||profile.username||"محادثة",
+          peer_profile:profile
+        });
       }catch(error){
-        $("#newConversationResult").innerHTML=`<div class="empty error">${escapeHtml(error.message)}</div>`;
+        $("#newConversationMessage").textContent=error.message;
+        button.disabled=false;
       }
-    };
+    });
+  }
+
+  $("#newMessageButton").onclick=()=>{
+    $("#newGroupTitle").value="";
+    openDialog($("#newConversationDialog"));
+    setConversationCreateMode("direct");
+    setTimeout(()=>$("#newConversationUsername").focus(),120);
+  };
+
+  $("#closeNewConversation").onclick=()=>$("#newConversationDialog").close();
+
+  $$(".conversation-create-tabs [data-create-mode]").forEach(button=>button.onclick=()=>setConversationCreateMode(button.dataset.createMode));
+
+  $("#newConversationUsername").oninput=()=>{
+    clearTimeout(conversationUserSearchTimer);
+    conversationUserSearchTimer=setTimeout(()=>searchConversationUsers(),170);
+  };
+
+  $("#createGroupButton").onclick=async()=>{
+    const button=$("#createGroupButton");
+    const title=$("#newGroupTitle").value.trim();
+    const memberIds=[...state.selectedGroupMembers.keys()];
+    if(title.length<2)return $("#newConversationMessage").textContent="اكتب اسمًا للمجموعة.";
+    if(memberIds.length<2)return $("#newConversationMessage").textContent="اختر شخصين على الأقل لإنشاء المجموعة.";
+    button.disabled=true;
+    $("#newConversationMessage").textContent="جارٍ إنشاء المجموعة...";
+    try{
+      const conversation=await api("/v1/conversations",{
+        method:"POST",
+        body:JSON.stringify({kind:"group",title,member_ids:memberIds})
+      });
+      $("#newConversationDialog").close();
+      state.selectedGroupMembers=new Map();
+      await loadConversations();
+      await openChat(conversation.id,title,{...conversation,kind:"group",title,member_count:memberIds.length+1});
+    }catch(error){
+      $("#newConversationMessage").textContent=error.message;
+    }finally{button.disabled=false}
   };
 
   let editAvatarObjectUrl="";

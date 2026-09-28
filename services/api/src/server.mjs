@@ -2425,7 +2425,13 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { ok: true, readiness: readiness() });
+      return json(res, 200, {
+        ok: true,
+        api_version: "1.2.0",
+        messaging_revision: "E2",
+        commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
+        readiness: readiness()
+      });
     }
     if (req.method === "GET" && url.pathname === "/health/details") {
       return healthDetails(res);

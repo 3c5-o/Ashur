@@ -896,6 +896,108 @@ async function listConversations(req, res) {
   json(res, 200, { items });
 }
 
+async function conversationDetails(req, res, conversationId) {
+  const user = await currentUser(req);
+  const memberships = await select(
+    "conversation_members",
+    "select=user_id,role,muted,joined_at&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const ownMembership = memberships?.[0];
+  if (!ownMembership) return json(res, 403, { error: "لست عضوًا في هذه المحادثة" });
+
+  const rows = await select(
+    "conversations",
+    "select=id,kind,title,image_media_id,created_by,created_at,updated_at,is_deleted&id=eq." +
+      encodeURIComponent(conversationId) + "&is_deleted=eq.false&limit=1",
+  );
+  const conversation = rows?.[0];
+  if (!conversation) return json(res, 404, { error: "المحادثة غير موجودة" });
+
+  const members = await select(
+    "conversation_members",
+    "select=user_id,role,muted,joined_at&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&order=joined_at.asc&limit=250",
+  );
+  const ids = [...new Set((members || []).map((member) => member.user_id).filter(Boolean))];
+  const profiles = ids.length
+    ? await select(
+        "profiles",
+        "select=id,name,username,avatar_media_id,is_verified,is_private&id=in.(" + ids.map(encodeURIComponent).join(",") + ")",
+      )
+    : [];
+  const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const enrichedMembers = (members || []).map((member) => ({
+    ...member,
+    profile: profileMap.get(member.user_id) || null,
+  }));
+
+  const peer = conversation.kind === "direct"
+    ? enrichedMembers.find((member) => member.user_id !== user.id)?.profile || null
+    : null;
+
+  json(res, 200, {
+    ...conversation,
+    muted: Boolean(ownMembership.muted),
+    my_role: ownMembership.role,
+    member_count: enrichedMembers.length,
+    peer_profile: peer,
+    members: enrichedMembers,
+  });
+}
+
+async function updateConversationSettings(req, res, conversationId) {
+  const user = await currentUser(req);
+  const memberships = await select(
+    "conversation_members",
+    "select=user_id,role,muted&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const ownMembership = memberships?.[0];
+  if (!ownMembership) return json(res, 403, { error: "لست عضوًا في هذه المحادثة" });
+
+  const conversations = await select(
+    "conversations",
+    "select=id,kind,title,created_by,is_deleted&id=eq." + encodeURIComponent(conversationId) +
+      "&is_deleted=eq.false&limit=1",
+  );
+  const conversation = conversations?.[0];
+  if (!conversation) return json(res, 404, { error: "المحادثة غير موجودة" });
+
+  const body = await readJson(req);
+  const response = { ok: true };
+
+  if (typeof body.muted === "boolean") {
+    await update(
+      "conversation_members",
+      "conversation_id=eq." + encodeURIComponent(conversationId) +
+        "&user_id=eq." + encodeURIComponent(user.id),
+      { muted: body.muted },
+      { returning: false },
+    );
+    response.muted = body.muted;
+  }
+
+  if (body.title !== undefined) {
+    if (conversation.kind !== "group") return json(res, 400, { error: "لا يمكن تغيير اسم المحادثة الخاصة" });
+    if (!["owner","admin"].includes(String(ownMembership.role || ""))) {
+      return json(res, 403, { error: "لا تملك صلاحية تعديل اسم المجموعة" });
+    }
+    const title = String(body.title || "").trim().slice(0, 80);
+    if (title.length < 2) return json(res, 400, { error: "اسم المجموعة قصير جدًا" });
+    await update(
+      "conversations",
+      "id=eq." + encodeURIComponent(conversationId),
+      { title, updated_at: new Date().toISOString() },
+      { returning: false },
+    );
+    response.title = title;
+  }
+
+  json(res, 200, response);
+}
+
+
 async function createConversation(req, res) {
   const user = await currentUser(req);
   const body = await readJson(req);
@@ -2593,6 +2695,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/conversations") {
       if (req.method === "GET") return listConversations(req, res);
       if (req.method === "POST") return createConversation(req, res);
+    }
+    const conversationDetailsMatch = /^\/v1\/conversations\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (conversationDetailsMatch && req.method === "GET") {
+      return conversationDetails(req, res, conversationDetailsMatch[1]);
+    }
+    if (conversationDetailsMatch && req.method === "PATCH") {
+      return updateConversationSettings(req, res, conversationDetailsMatch[1]);
     }
     const conversationMessageMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/messages$/.exec(url.pathname);
     if (req.method === "GET" && conversationMessageMatch) {

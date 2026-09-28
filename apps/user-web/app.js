@@ -249,8 +249,8 @@
     if(!loggedIn){
       closeTransientDialogs();
       state.activePage="homePage";
-      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
-      $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+      $$$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      $$$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
 
@@ -580,8 +580,8 @@
     closeTransientDialogs();
     state.activePage=page;
     updateTopbarContext(page);
-    $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
       state.reelObserver?.disconnect?.();
@@ -593,7 +593,7 @@
     if(page==="profilePage")await loadProfile();
     window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
   }
-  $(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){

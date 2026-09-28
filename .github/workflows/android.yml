@@ -29,13 +29,17 @@ jobs:
       - name: جلب المشروع
         uses: actions/checkout@v4
 
-      - name: تجهيز مكتبة Supabase داخل APK
+      - name: إعداد نود
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: تجهيز مكتبة Supabase محليًا داخل APK
         run: |
           set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
           mkdir -p apps/user-web/vendor apps/admin-web/vendor
-          curl --fail --location --retry 4 --retry-delay 2 \
-            "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js" \
-            --output apps/user-web/vendor/supabase.min.js
+          cp node_modules/@supabase/supabase-js/dist/umd/supabase.min.js apps/user-web/vendor/supabase.min.js
           cp apps/user-web/vendor/supabase.min.js apps/admin-web/vendor/supabase.min.js
           test -s apps/user-web/vendor/supabase.min.js
           test -s apps/admin-web/vendor/supabase.min.js

@@ -736,21 +736,21 @@ async function listConversations(req, res) {
   const user = await currentUser(req);
   const memberships = await select(
     "conversation_members",
-    \`select=conversation_id,role,muted&user_id=eq.\${encodeURIComponent(user.id)}&order=joined_at.desc&limit=100\`,
+    `select=conversation_id,role,muted&user_id=eq.${encodeURIComponent(user.id)}&order=joined_at.desc&limit=100`,
   );
   if (!memberships?.length) return json(res, 200, { items: [] });
 
   const ids = memberships.map((x) => x.conversation_id);
   const conversations = await select(
     "conversations",
-    \`select=id,kind,title,image_media_id,updated_at&id=in.(\${ids.join(",")})&order=updated_at.desc\`,
+    `select=id,kind,title,image_media_id,updated_at&id=in.(${ids.join(",")})&order=updated_at.desc`,
   );
 
   const items = [];
   for (const conversation of conversations || []) {
     const messages = await select(
       "messages",
-      \`select=id,sender_id,body,media_id,shared_type,shared_id,created_at&conversation_id=eq.\${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=100\`,
+      `select=id,sender_id,body,media_id,shared_type,shared_id,created_at&conversation_id=eq.${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=100`,
     );
     const latest = messages?.[0] || null;
     const incomingIds = (messages || []).filter((m) => m.sender_id !== user.id).map((m) => m.id);
@@ -758,7 +758,7 @@ async function listConversations(req, res) {
     if (incomingIds.length) {
       const reads = await select(
         "message_reads",
-        \`select=message_id&user_id=eq.\${encodeURIComponent(user.id)}&message_id=in.(\${incomingIds.join(",")})\`,
+        `select=message_id&user_id=eq.${encodeURIComponent(user.id)}&message_id=in.(${incomingIds.join(",")})`,
       ).catch(() => []);
       const readSet = new Set((reads || []).map((r) => r.message_id));
       unreadCount = incomingIds.filter((id) => !readSet.has(id)).length;
@@ -769,12 +769,12 @@ async function listConversations(req, res) {
     if (conversation.kind === "direct") {
       const members = await select(
         "conversation_members",
-        \`select=user_id&conversation_id=eq.\${encodeURIComponent(conversation.id)}&user_id=neq.\${encodeURIComponent(user.id)}&limit=1\`,
+        `select=user_id&conversation_id=eq.${encodeURIComponent(conversation.id)}&user_id=neq.${encodeURIComponent(user.id)}&limit=1`,
       );
       if (members?.[0]) {
         const profiles = await select(
           "profiles",
-          \`select=id,name,username,avatar_media_id,is_verified&id=eq.\${encodeURIComponent(members[0].user_id)}&limit=1\`,
+          `select=id,name,username,avatar_media_id,is_verified&id=eq.${encodeURIComponent(members[0].user_id)}&limit=1`,
         );
         peerProfile = profiles?.[0] || null;
         if (!title) title = peerProfile?.name || peerProfile?.username || "محادثة";

@@ -51,6 +51,10 @@
     feedOffset:0,
     feedLoading:false,
     feedDone:false,
+    reelOffset:0,
+    reelLoading:false,
+    reelDone:false,
+    interactionLocks:new Set(),
     features:{},
     limits:{}
   });
@@ -840,12 +844,18 @@
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){
-    $("#homeStatus").textContent="جارٍ تحميل أحدث المحتوى...";
-    const tasks=[loadFeed()];
-    if(state.features.stories!==false)tasks.push(loadStories());
-    else $("#stories").innerHTML="";
-    await Promise.all(tasks);
-    $("#homeStatus").textContent="";
+    const status=$("#homeStatus");
+    if(status)status.textContent="جارٍ تحميل أحدث المحتوى...";
+    try{
+      const tasks=[loadFeed()];
+      if(state.features.stories!==false)tasks.push(loadStories());
+      else $("#stories").innerHTML="";
+      const results=await Promise.allSettled(tasks);
+      const failed=results.find(result=>result.status==="rejected");
+      if(failed)console.warn("ASHUR_HOME_PARTIAL_LOAD",failed.reason);
+    }finally{
+      if(status)status.textContent="";
+    }
   }
 
   async function loadStories(){
@@ -880,14 +890,8 @@
     closeStoryViewer();
     openInfoDialog("مشاهدو القصة",'<div id="storyViewersList" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
     try{
-      const result=await client.from("story_views")
-        .select("user_id,viewed_at")
-        .eq("story_id",storyId)
-        .order("viewed_at",{ascending:false})
-        .limit(500);
-      if(result.error)throw result.error;
-      const profiles=await profilesMap([...new Set((result.data||[]).map(v=>v.user_id))]);
-      const items=(result.data||[]).map(v=>profiles[v.user_id]?Object.assign({},profiles[v.user_id],{viewed_at:v.viewed_at}):null).filter(Boolean);
+      const result=await api("/v1/social/story-viewers/"+encodeURIComponent(storyId));
+      const items=result.items||[];
       $("#storyViewersList").innerHTML=items.map(p=>
         '<button class="list-card" data-story-viewer-profile="'+escapeHtml(p.id)+'" type="button">'+
           avatar(p)+'<span class="grow"><b>'+escapeHtml(p.name||"مستخدم")+'</b><small>@'+escapeHtml(p.username||"")+'</small></span>'+
@@ -1120,38 +1124,46 @@
   }
 
 
+  function renderSaveButton(kind,button,active){
+    if(!button)return;
+    button.classList.toggle("active",active);
+    button.classList.remove("save-error");
+    if(kind==="reel"){
+      button.innerHTML='<span class="reel-action-icon">'+icon("save")+'</span><span>'+(active?"محفوظ":"حفظ")+'</span>';
+    }else{
+      button.innerHTML=icon("save")+'<span>'+(active?"محفوظ":"حفظ")+'</span>';
+    }
+  }
+
   async function toggleSavedContent(kind,id,button,forceState=null){
+    const key="save:"+kind+":"+id;
+    if(state.interactionLocks.has(key))return button?.classList.contains("active")||false;
+    state.interactionLocks.add(key);
+
     const table=kind==="reel"?"saved_reels":"saved_posts";
     const field=kind==="reel"?"reel_id":"post_id";
     const current=button?.classList.contains("active")||false;
     const next=forceState===null?!current:Boolean(forceState);
-    if(button)button.disabled=true;
+    if(button){
+      button.disabled=true;
+      renderSaveButton(kind,button,next);
+    }
+
     try{
-      if(next){
-        const result=await client.from(table).upsert({
-          user_id:state.user.id,
-          [field]:id
-        },{onConflict:"user_id,"+field});
-        if(result.error)throw result.error;
-      }else{
-        const result=await client.from(table).delete()
-          .eq("user_id",state.user.id)
-          .eq(field,id);
-        if(result.error)throw result.error;
-      }
-      if(button){
-        button.classList.toggle("active",next);
-        if(kind==="reel"){
-          button.innerHTML='<span class="reel-action-icon">'+icon("save")+'</span><span>'+(next?"محفوظ":"حفظ")+'</span>';
-        }else{
-          button.innerHTML=icon("save")+'<span>'+(next?"محفوظ":"حفظ")+'</span>';
-        }
-      }
+      const result=next
+        ?await client.from(table).upsert({user_id:state.user.id,[field]:id},{onConflict:"user_id,"+field})
+        :await client.from(table).delete().eq("user_id",state.user.id).eq(field,id);
+      if(result.error)throw result.error;
       return next;
     }catch(error){
-      if(button)button.classList.toggle("save-error",true);
+      if(button){
+        renderSaveButton(kind,button,current);
+        button.classList.add("save-error");
+      }
+      console.warn("ASHUR_SAVE_TOGGLE_FAILED",kind,id,error);
       throw error;
     }finally{
+      state.interactionLocks.delete(key);
       if(button)button.disabled=false;
     }
   }
@@ -1166,109 +1178,145 @@
     }]));
   }
 
+  function bindFeedArticle(article){
+    if(!article)return;
+    article.querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
+    article.querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
+    article.querySelectorAll("[data-share-post]").forEach(b=>b.onclick=()=>shareContent("post",b.dataset.sharePost));
+    article.querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSavedContent("post",b.dataset.savePost,b).catch(()=>{}));
+    article.querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true"));
+    article.querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+  }
+
   async function loadFeed({append=false}={}){
-    if(state.feedLoading)return;
+    if(state.feedLoading || (append&&state.feedDone))return;
     state.feedLoading=true;
     if(!append){
       state.feedOffset=0;
       state.feedDone=false;
     }
+
     const start=append?state.feedOffset:0;
     const pageSize=20;
-    const {data,error}=await client.from("posts")
-      .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
-      .order("created_at",{ascending:false})
-      .range(start,start+pageSize-1);
-    if(error){
-      if(!append)$("#feed").innerHTML=errorMarkup(error.message,"homePage");
-      state.feedLoading=false;
-      return;
-    }
-    if(!data?.length){
-      if(!append)$("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';
-      state.feedDone=true;
-      state.feedLoading=false;
-      return;
-    }
-    state.feedOffset=start+data.length;
-    state.feedDone=data.length<pageSize;
+    try{
+      const {data,error}=await client.from("posts")
+        .select("id,author_id,caption,created_at,comments_enabled,post_media(media_id,sort_order)")
+        .order("created_at",{ascending:false})
+        .range(start,start+pageSize-1);
 
-    const postIds=data.map(x=>x.id);
-    const [profiles,{data:liked},{data:saved},counts] = await Promise.all([
-      profilesMap([...new Set(data.map(x=>x.author_id))]),
-      client.from("post_likes").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
-      client.from("saved_posts").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
-      interactionCounts("post",postIds)
-    ]);
-    const likedSet=new Set((liked||[]).map(x=>x.post_id));
-    const savedSet=new Set((saved||[]).map(x=>x.post_id));
+      if(error)throw error;
 
-    const chunk=data.map(post=>{
-      const p=profiles[post.author_id]||{};
-      const mediaHtml=postMediaMarkup(post.post_media||[]);
-      const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
-      const likedNow=likedSet.has(post.id);
-      const savedNow=savedSet.has(post.id);
-      const metric=counts[post.id]||{likes:0,comments:0};
-      return `<article class="post" data-post-id="${post.id}">
-        <div class="post-head">
-          ${avatar(p)}
-          <button class="post-user" data-open-profile="${post.author_id}" type="button">
-            <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
-            <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
-          </button>
-          ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
-        </div>
-        ${mediaHtml}
-        <div class="post-body">
-          <div class="post-actions">
-            <button class="action icon-action ${likedNow?"active":""}" data-like-post="${post.id}" type="button">${icon("like")}<span data-like-count>${metric.likes}</span></button>
-            ${post.comments_enabled===false
-              ? `<button class="action icon-action" type="button" disabled>${icon("comment")}<span>—</span></button>`
-              : `<button class="action icon-action" data-comment-post="${post.id}" type="button">${icon("comment")}<span>${metric.comments}</span></button>`}
-            <button class="action icon-action" data-share-post="${post.id}" type="button">${icon("share")}<span>مشاركة</span></button>
-            <button class="action icon-action ${savedNow?"active":""}" data-save-post="${post.id}" type="button">${icon("save")}<span>${savedNow?"محفوظ":"حفظ"}</span></button>
+      if(!data?.length){
+        if(!append)$("#feed").innerHTML='<div class="empty">لا توجد منشورات بعد. كن أول من يشارك شيئًا.</div>';
+        state.feedDone=true;
+        return;
+      }
+
+      state.feedOffset=start+data.length;
+      state.feedDone=data.length<pageSize;
+      const postIds=data.map(x=>x.id);
+
+      const side=await Promise.allSettled([
+        profilesMap([...new Set(data.map(x=>x.author_id))]),
+        client.from("post_likes").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
+        client.from("saved_posts").select("post_id").eq("user_id",state.user.id).in("post_id",postIds),
+        interactionCounts("post",postIds)
+      ]);
+
+      const profiles=side[0].status==="fulfilled"?side[0].value:{};
+      const likedRows=side[1].status==="fulfilled"&&!side[1].value.error?(side[1].value.data||[]):[];
+      const savedRows=side[2].status==="fulfilled"&&!side[2].value.error?(side[2].value.data||[]):[];
+      const counts=side[3].status==="fulfilled"?side[3].value:{};
+      const likedSet=new Set(likedRows.map(x=>x.post_id));
+      const savedSet=new Set(savedRows.map(x=>x.post_id));
+
+      const chunk=data.map(post=>{
+        const p=profiles[post.author_id]||{};
+        const mediaHtml=postMediaMarkup(post.post_media||[]);
+        const verified=p.is_verified?'<span class="verified-inline">✓</span>':"";
+        const likedNow=likedSet.has(post.id);
+        const savedNow=savedSet.has(post.id);
+        const metric=counts[post.id]||{likes:0,comments:0};
+        return `<article class="post" data-post-id="${post.id}">
+          <div class="post-head">
+            ${avatar(p)}
+            <button class="post-user" data-open-profile="${post.author_id}" type="button">
+              <b>${escapeHtml(p.name||"مستخدم")}${verified}</b>
+              <small>@${escapeHtml(p.username||"")} · ${new Date(post.created_at).toLocaleDateString("ar-IQ")}</small>
+            </button>
+            ${post.author_id===state.user.id?`<button class="profile-more-button" data-own-post="${post.id}" data-caption="${escapeHtml(post.caption||"")}" data-comments="${post.comments_enabled!==false}" type="button" aria-label="إدارة المنشور">${icon("more")}</button>`:""}
           </div>
-          ${post.caption?`<p class="caption">${richText(post.caption)}</p>`:""}
-        </div>
-      </article>`;
-    }).join("");
-    if(append){
-      $("#feedLoadMore")?.remove();
-      $("#feed").insertAdjacentHTML("beforeend",chunk);
-    }else{
-      $("#feed").innerHTML=chunk;
-    }
-    if(!state.feedDone){
-      $("#feed").insertAdjacentHTML("beforeend",'<button id="feedLoadMore" class="secondary-wide feed-load-more" type="button">تحميل المزيد</button>');
-      $("#feedLoadMore").onclick=()=>loadFeed({append:true});
-    }
+          ${mediaHtml}
+          <div class="post-body">
+            <div class="post-actions">
+              <button class="action icon-action ${likedNow?"active":""}" data-like-post="${post.id}" type="button">${icon("like")}<span data-like-count>${metric.likes}</span></button>
+              ${post.comments_enabled===false
+                ? `<button class="action icon-action" type="button" disabled>${icon("comment")}<span>—</span></button>`
+                : `<button class="action icon-action" data-comment-post="${post.id}" type="button">${icon("comment")}<span>${metric.comments}</span></button>`}
+              <button class="action icon-action" data-share-post="${post.id}" type="button">${icon("share")}<span>مشاركة</span></button>
+              <button class="action icon-action ${savedNow?"active":""}" data-save-post="${post.id}" type="button">${icon("save")}<span>${savedNow?"محفوظ":"حفظ"}</span></button>
+            </div>
+            ${post.caption?`<p class="caption">${richText(post.caption)}</p>`:""}
+          </div>
+        </article>`;
+      }).join("");
 
-    await hydrateMedia($("#feed"));
-    $("#feed").querySelectorAll("[data-like-post]").forEach(b=>b.onclick=()=>toggleLike("post",b.dataset.likePost,b));
-    $("#feed").querySelectorAll("[data-comment-post]").forEach(b=>b.onclick=()=>openComments("post",b.dataset.commentPost));
-    $("#feed").querySelectorAll("[data-share-post]").forEach(b=>b.onclick=()=>shareContent("post",b.dataset.sharePost));
-    $("#feed").querySelectorAll("[data-save-post]").forEach(b=>b.onclick=()=>toggleSavedContent("post",b.dataset.savePost,b));
-    $("#feed").querySelectorAll("[data-own-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.ownPost,b.dataset.caption,b.dataset.comments==="true"));
-    $("#feed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
-    state.feedLoading=false;
+      $("#feedLoadMore")?.remove();
+      if(append)$("#feed").insertAdjacentHTML("beforeend",chunk);
+      else $("#feed").innerHTML=chunk;
+
+      const articles=postIds.map(id=>$("#feed").querySelector('[data-post-id="'+CSS.escape(id)+'"]')).filter(Boolean);
+      await Promise.allSettled(articles.map(article=>hydrateMedia(article)));
+      articles.forEach(bindFeedArticle);
+
+      if(!state.feedDone){
+        $("#feed").insertAdjacentHTML("beforeend",'<button id="feedLoadMore" class="secondary-wide feed-load-more" type="button">تحميل المزيد</button>');
+        $("#feedLoadMore").onclick=()=>loadFeed({append:true});
+      }
+    }catch(error){
+      console.error("ASHUR_FEED_LOAD_FAILED",error);
+      if(!append)$("#feed").innerHTML=errorMarkup(error.message||"تعذر تحميل المنشورات.","homePage");
+      else{
+        $("#feedLoadMore")?.remove();
+        $("#feed").insertAdjacentHTML("beforeend",'<button id="feedLoadMore" class="secondary-wide feed-load-more" type="button">تعذر التحميل — إعادة المحاولة</button>');
+        $("#feedLoadMore").onclick=()=>loadFeed({append:true});
+      }
+    }finally{
+      state.feedLoading=false;
+    }
   }
 
   async function toggleLike(type,id,button){
-    if(!state.user)return;
+    if(!state.user||!button)return;
+    const key="like:"+type+":"+id;
+    if(state.interactionLocks.has(key))return;
+    state.interactionLocks.add(key);
+
     const table=type==="post"?"post_likes":"reel_likes";
     const target=type==="post"?"post_id":"reel_id";
-    const {data}=await client.from(table).select(target).eq(target,id).eq("user_id",state.user.id).maybeSingle();
-    const active=!data;
-    if(data) await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);
-    else await client.from(table).insert({[target]:id,user_id:state.user.id});
-    button.classList.toggle("active",active);
+    const previous=button.classList.contains("active");
+    const next=!previous;
     const count=button.querySelector("[data-like-count]");
-    if(count){
-      count.textContent=String(Math.max(0,Number(count.textContent||0)+(active?1:-1)));
+    const previousCount=Number(count?.textContent||0);
+
+    button.disabled=true;
+    button.classList.toggle("active",next);
+    if(count)count.textContent=String(Math.max(0,previousCount+(next?1:-1)));
+
+    try{
+      const result=next
+        ?await client.from(table).upsert({[target]:id,user_id:state.user.id},{onConflict:target+",user_id"})
+        :await client.from(table).delete().eq(target,id).eq("user_id",state.user.id);
+      if(result.error)throw result.error;
+    }catch(error){
+      button.classList.toggle("active",previous);
+      if(count)count.textContent=String(previousCount);
+      console.warn("ASHUR_LIKE_TOGGLE_FAILED",type,id,error);
+    }finally{
+      state.interactionLocks.delete(key);
+      button.disabled=false;
     }
   }
-
 
 
   async function openSharedContent(type,id){
@@ -1521,86 +1569,120 @@
     }
   }
 
-  async function loadReels(){
-    const {data,error}=await client.from("reels")
-      .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled")
-      .order("created_at",{ascending:false})
-      .limit(8);
-    if(error){
-      $("#reelsFeed").innerHTML=errorMarkup("تعذر تحميل الريلز.","reelsPage");
-      return;
-    }
-    if(!data?.length){
-      $("#reelsFeed").innerHTML='<div class="empty">لا توجد ريلز بعد.</div>';
-      return;
+  function bindReelActions(root=$("#reelsFeed")){
+    root.querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
+    root.querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
+    root.querySelectorAll("[data-share-reel]").forEach(b=>b.onclick=()=>shareContent("reel",b.dataset.shareReel));
+    root.querySelectorAll("[data-save-reel]").forEach(b=>b.onclick=()=>toggleSavedContent("reel",b.dataset.saveReel,b).catch(()=>{}));
+    root.querySelectorAll("[data-own-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.ownReel,b.dataset.caption,b.dataset.comments==="true"));
+    root.querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
+    root.querySelectorAll("[data-follow-reel]").forEach(b=>b.onclick=()=>followUser(b.dataset.followReel,b));
+  }
+
+  async function loadReels({append=false}={}){
+    if(state.reelLoading || (append&&state.reelDone))return;
+    state.reelLoading=true;
+    if(!append){
+      state.reelOffset=0;
+      state.reelDone=false;
+      state.reelObserver?.disconnect?.();
+      state.reelObserver=null;
     }
 
-    const reelIds=data.map(x=>x.id);
-    const [ps,statuses,{data:liked},{data:saved},counts] = await Promise.all([
-      profilesMap([...new Set(data.map(x=>x.author_id))]),
-      followStatusMap(data.map(x=>x.author_id)),
-      client.from("reel_likes").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
-      client.from("saved_reels").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
-      interactionCounts("reel",reelIds)
-    ]);
-    const likedSet=new Set((liked||[]).map(x=>x.reel_id));
-    const savedSet=new Set((saved||[]).map(x=>x.reel_id));
+    const start=append?state.reelOffset:0;
+    const pageSize=8;
 
-    $("#reelsFeed").innerHTML=data.map(r=>{
-      const p=ps[r.author_id]||{};
-      const likedNow=likedSet.has(r.id);
-      const savedNow=savedSet.has(r.id);
-      const metric=counts[r.id]||{likes:0,comments:0};
-      return `<article class="reel is-loading" data-reel-id="${r.id}" data-cover-id="${r.cover_media_id||""}">
-        ${r.cover_media_id?`<img class="reel-poster" data-media-id="${r.cover_media_id}" alt="">`:""}
-        <video playsinline muted loop preload="none" data-media-id="${r.media_id}"></video>
-        <div class="reel-loader" aria-hidden="true"></div>
-        <div class="reel-shade"></div>
-        <button class="reel-center-play" type="button" aria-label="تشغيل">
-          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>
-        </button>
-        <button class="reel-mute" type="button" aria-label="الصوت">
-          <svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="m18 9 3 3-3 3"/></svg>
-        </button>
-        <div class="reel-overlay">
-          <div class="reel-owner">
-            ${avatar(p,"reel-owner-avatar")}
-            <button class="reel-user" data-open-profile="${r.author_id}" type="button">
-              ${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}
-            </button>
-            ${r.author_id!==state.user.id?`<button class="reel-follow ${statuses[r.author_id]?"active":""}" data-follow-reel="${r.author_id}" type="button">${followLabel(statuses[r.author_id])}</button>`:""}
+    try{
+      const {data,error}=await client.from("reels")
+        .select("id,author_id,media_id,cover_media_id,caption,created_at,comments_enabled")
+        .order("created_at",{ascending:false})
+        .range(start,start+pageSize-1);
+      if(error)throw error;
+
+      if(!data?.length){
+        if(!append)$("#reelsFeed").innerHTML='<div class="empty">لا توجد ريلز بعد.</div>';
+        state.reelDone=true;
+        return;
+      }
+
+      state.reelOffset=start+data.length;
+      state.reelDone=data.length<pageSize;
+      const reelIds=data.map(x=>x.id);
+
+      const side=await Promise.allSettled([
+        profilesMap([...new Set(data.map(x=>x.author_id))]),
+        followStatusMap(data.map(x=>x.author_id)),
+        client.from("reel_likes").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
+        client.from("saved_reels").select("reel_id").eq("user_id",state.user.id).in("reel_id",reelIds),
+        interactionCounts("reel",reelIds)
+      ]);
+
+      const ps=side[0].status==="fulfilled"?side[0].value:{};
+      const statuses=side[1].status==="fulfilled"?side[1].value:{};
+      const likedRows=side[2].status==="fulfilled"&&!side[2].value.error?(side[2].value.data||[]):[];
+      const savedRows=side[3].status==="fulfilled"&&!side[3].value.error?(side[3].value.data||[]):[];
+      const counts=side[4].status==="fulfilled"?side[4].value:{};
+      const likedSet=new Set(likedRows.map(x=>x.reel_id));
+      const savedSet=new Set(savedRows.map(x=>x.reel_id));
+
+      const chunk=data.map(r=>{
+        const p=ps[r.author_id]||{};
+        const likedNow=likedSet.has(r.id);
+        const savedNow=savedSet.has(r.id);
+        const metric=counts[r.id]||{likes:0,comments:0};
+        return `<article class="reel is-loading" data-reel-id="${r.id}" data-cover-id="${r.cover_media_id||""}">
+          ${r.cover_media_id?`<img class="reel-poster" data-media-id="${r.cover_media_id}" alt="">`:""}
+          <video playsinline muted loop preload="none" data-media-id="${r.media_id}"></video>
+          <div class="reel-loader" aria-hidden="true"></div>
+          <div class="reel-shade"></div>
+          <button class="reel-center-play" type="button" aria-label="تشغيل">
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>
+          </button>
+          <button class="reel-mute" type="button" aria-label="الصوت">
+            <svg viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6L9 10Z"/><path d="m18 9 3 3-3 3"/></svg>
+          </button>
+          <div class="reel-overlay">
+            <div class="reel-owner">
+              ${avatar(p,"reel-owner-avatar")}
+              <button class="reel-user" data-open-profile="${r.author_id}" type="button">
+                ${escapeHtml(p.name||p.username||"مستخدم")}${p.is_verified?'<span class="verified-inline">✓</span>':""}
+              </button>
+              ${r.author_id!==state.user.id?`<button class="reel-follow ${statuses[r.author_id]?"active":""}" data-follow-reel="${r.author_id}" type="button">${followLabel(statuses[r.author_id])}</button>`:""}
+            </div>
+            <p>${richText(r.caption||"")}</p>
           </div>
-          <p>${richText(r.caption||"")}</p>
-        </div>
-        <div class="reel-actions">
-          <button class="reel-action ${likedNow?"active":""}" data-like-reel="${r.id}" type="button">
-            <span class="reel-action-icon">${icon("like")}</span><span data-like-count>${metric.likes}</span>
-          </button>
-          ${r.comments_enabled===false
-            ? `<button class="reel-action" type="button" disabled><span class="reel-action-icon">${icon("comment")}</span><span>—</span></button>`
-            : `<button class="reel-action" data-comment-reel="${r.id}" type="button"><span class="reel-action-icon">${icon("comment")}</span><span>${metric.comments}</span></button>`}
-          <button class="reel-action" data-share-reel="${r.id}" type="button">
-            <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
-          </button>
-          <button class="reel-action ${savedNow?"active":""}" data-save-reel="${r.id}" type="button">
-            <span class="reel-action-icon">${icon("save")}</span><span>${savedNow?"محفوظ":"حفظ"}</span>
-          </button>
-          ${r.author_id===state.user.id?`<button class="reel-action" data-own-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" type="button"><span class="reel-action-icon">${icon("more")}</span><span>إدارة</span></button>`:""}
-        </div>
-        <div class="reel-progress"><span></span></div>
-      </article>`;
-    }).join("");
+          <div class="reel-actions">
+            <button class="reel-action ${likedNow?"active":""}" data-like-reel="${r.id}" type="button">
+              <span class="reel-action-icon">${icon("like")}</span><span data-like-count>${metric.likes}</span>
+            </button>
+            ${r.comments_enabled===false
+              ? `<button class="reel-action" type="button" disabled><span class="reel-action-icon">${icon("comment")}</span><span>—</span></button>`
+              : `<button class="reel-action" data-comment-reel="${r.id}" type="button"><span class="reel-action-icon">${icon("comment")}</span><span>${metric.comments}</span></button>`}
+            <button class="reel-action" data-share-reel="${r.id}" type="button">
+              <span class="reel-action-icon">${icon("share")}</span><span>مشاركة</span>
+            </button>
+            <button class="reel-action ${savedNow?"active":""}" data-save-reel="${r.id}" type="button">
+              <span class="reel-action-icon">${icon("save")}</span><span>${savedNow?"محفوظ":"حفظ"}</span>
+            </button>
+            ${r.author_id===state.user.id?`<button class="reel-action" data-own-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" type="button"><span class="reel-action-icon">${icon("more")}</span><span>إدارة</span></button>`:""}
+          </div>
+          <div class="reel-progress"><span></span></div>
+        </article>`;
+      }).join("");
 
-    await hydrateMedia($("#reelsFeed"));
-    initReelPlayers();
+      if(append)$("#reelsFeed").insertAdjacentHTML("beforeend",chunk);
+      else $("#reelsFeed").innerHTML=chunk;
 
-    $("#reelsFeed").querySelectorAll("[data-like-reel]").forEach(b=>b.onclick=()=>toggleLike("reel",b.dataset.likeReel,b));
-    $("#reelsFeed").querySelectorAll("[data-comment-reel]").forEach(b=>b.onclick=()=>openComments("reel",b.dataset.commentReel));
-    $("#reelsFeed").querySelectorAll("[data-share-reel]").forEach(b=>b.onclick=()=>shareContent("reel",b.dataset.shareReel));
-    $("#reelsFeed").querySelectorAll("[data-save-reel]").forEach(b=>b.onclick=()=>toggleSavedContent("reel",b.dataset.saveReel,b));
-    $("#reelsFeed").querySelectorAll("[data-own-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.ownReel,b.dataset.caption,b.dataset.comments==="true"));
-    $("#reelsFeed").querySelectorAll("[data-open-profile]").forEach(b=>b.onclick=()=>openPublicProfile(b.dataset.openProfile));
-    $("#reelsFeed").querySelectorAll("[data-follow-reel]").forEach(b=>b.onclick=()=>followUser(b.dataset.followReel,b));
+      const newReels=reelIds.map(id=>$("#reelsFeed").querySelector('[data-reel-id="'+CSS.escape(id)+'"]')).filter(Boolean);
+      await Promise.allSettled(newReels.map(reel=>hydrateMedia(reel)));
+      bindReelActions($("#reelsFeed"));
+      initReelPlayers();
+    }catch(error){
+      console.error("ASHUR_REELS_LOAD_FAILED",error);
+      if(!append)$("#reelsFeed").innerHTML=errorMarkup(error.message||"تعذر تحميل الريلز.","reelsPage");
+    }finally{
+      state.reelLoading=false;
+    }
   }
 
   function initReelPlayers(){
@@ -1616,6 +1698,10 @@
         if(!video)return;
         if(entry.isIntersecting && entry.intersectionRatio>.2){
           video.preload="auto";
+          const last=reels[reels.length-1];
+          if(reel===last && !state.reelDone && !state.reelLoading){
+            loadReels({append:true}).catch(()=>{});
+          }
         }
         if(entry.isIntersecting && entry.intersectionRatio>.72){
           reels.forEach(other=>{
@@ -1638,6 +1724,8 @@
       if(!video)return;
 
       observer.observe(reel);
+      if(reel.dataset.playerBound==="1")return;
+      reel.dataset.playerBound="1";
 
       const markReady=()=>{
         reel.classList.remove("is-loading","load-error");
@@ -2119,21 +2207,36 @@
   $("#commentForm").onsubmit=async(e)=>{
     e.preventDefault();
     if(!state.commentTarget)return;
-    const body=$("#commentInput").value.trim();
-    if(!body)return;
-    const payload={
-      author_id:state.user.id,
-      body,
-      parent_id:state.commentReply?.id||null,
-      post_id:state.commentTarget.type==="post"?state.commentTarget.id:null,
-      reel_id:state.commentTarget.type==="reel"?state.commentTarget.id:null
-    };
-    const {error}=await client.from("comments").insert(payload);
-    if(!error){
-      $("#commentInput").value="";
+    const input=$("#commentInput");
+    const submit=$("#commentForm button[type='submit']");
+    const message=$("#commentMessage");
+    const body=input.value.trim().slice(0,2000);
+    if(!body){
+      if(message)message.textContent="اكتب تعليقًا أولًا.";
+      return;
+    }
+
+    submit.disabled=true;
+    if(message)message.textContent="جارٍ الإرسال...";
+    try{
+      const payload={
+        author_id:state.user.id,
+        body,
+        parent_id:state.commentReply?.id||null,
+        post_id:state.commentTarget.type==="post"?state.commentTarget.id:null,
+        reel_id:state.commentTarget.type==="reel"?state.commentTarget.id:null
+      };
+      const {error}=await client.from("comments").insert(payload);
+      if(error)throw error;
+      input.value="";
       state.commentReply=null;
       updateCommentReplyBar();
+      if(message)message.textContent="";
       await loadComments();
+    }catch(error){
+      if(message)message.textContent=error.message||"تعذر إرسال التعليق.";
+    }finally{
+      submit.disabled=false;
     }
   };
   $("#closeComments").onclick=()=>{

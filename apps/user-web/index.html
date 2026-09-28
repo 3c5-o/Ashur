@@ -109,16 +109,27 @@
         <div id="reelsFeed" class="reels-feed"></div>
       </section>
 
-      <section id="messagesPage" class="page">
+      <section id="messagesPage" class="page messages-page">
         <div class="section-head messages-head">
-          <div><span class="eyebrow">تواصل</span><h2>الرسائل</h2></div>
-          <button id="newMessageButton" class="round-primary" aria-label="محادثة جديدة">
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-          </button>
+          <div>
+            <span class="eyebrow">تواصل</span>
+            <h2>الرسائل</h2>
+            <small>محادثاتك الخاصة والمجموعات</small>
+          </div>
         </div>
-        <div class="messages-search">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-          <input id="messagesSearchInput" type="search" autocomplete="off" placeholder="ابحث في المحادثات">
+        <div class="messages-toolbar">
+          <div class="messages-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            <input id="messagesSearchInput" type="search" autocomplete="off" placeholder="ابحث في المحادثات">
+            <button id="newMessageButton" class="messages-create-inline" type="button" aria-label="إنشاء محادثة أو مجموعة">
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          <div class="messages-filter-tabs" role="tablist" aria-label="تصفية المحادثات">
+            <button class="active" data-message-filter="all" type="button">الكل</button>
+            <button data-message-filter="unread" type="button">غير المقروء</button>
+            <button data-message-filter="groups" type="button">المجموعات</button>
+          </div>
         </div>
         <div id="conversationList" class="list conversation-list"></div>
       </section>
@@ -258,7 +269,22 @@
   </dialog>
 
   <dialog id="chatDialog" class="panel-dialog chat-dialog">
-    <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3><small id="chatConnectionStatus" class="chat-connection-status"></small></div><button id="closeChat" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="chat-topbar">
+      <button id="closeChat" class="chat-back-button" type="button" aria-label="رجوع">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <button id="chatContactButton" class="chat-contact-button" type="button" aria-label="معلومات المحادثة">
+        <span id="chatHeaderAvatar" class="chat-header-avatar"></span>
+        <span class="chat-header-copy">
+          <b id="chatTitle">الرسائل</b>
+          <small id="chatHeaderSubtitle">محادثة</small>
+          <small id="chatConnectionStatus" class="chat-connection-status"></small>
+        </span>
+      </button>
+      <button id="chatHeaderAction" class="chat-header-action" type="button" aria-label="معلومات المحادثة">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+      </button>
+    </div>
     <div id="chatMessages" class="chat-messages"></div>
     <div id="chatAttachmentPreview" class="chat-attachment-preview hidden"></div>
     <p id="chatMessage" class="message chat-send-message" aria-live="polite"></p>
@@ -337,13 +363,41 @@
     </form>
   </dialog>
 
-  <dialog id="newConversationDialog" class="panel-dialog">
-    <div class="dialog-head"><div><span class="eyebrow">تواصل</span><h3>محادثة جديدة</h3></div><button id="closeNewConversation" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
-    <div class="dialog-body">
-      <div class="search-box standalone"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="newConversationUsername" placeholder="اكتب اسم المستخدم"></div>
-      <button id="findConversationUser" class="primary" type="button">بحث عن الحساب</button>
-      <div id="newConversationResult" class="list"></div>
+  <dialog id="newConversationDialog" class="panel-dialog conversation-create-dialog">
+    <div class="dialog-head">
+      <div><span class="eyebrow">تواصل</span><h3>إنشاء محادثة</h3></div>
+      <button id="closeNewConversation" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
+    <div class="dialog-body conversation-create-body">
+      <div class="conversation-create-tabs">
+        <button class="active" data-create-mode="direct" type="button">محادثة خاصة</button>
+        <button data-create-mode="group" type="button">مجموعة جديدة</button>
+      </div>
+
+      <label id="groupTitleField" class="conversation-group-title hidden">
+        <span>اسم المجموعة</span>
+        <input id="newGroupTitle" maxlength="80" placeholder="مثال: أصدقاء آشور">
+      </label>
+
+      <div class="search-box standalone conversation-user-search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+        <input id="newConversationUsername" autocomplete="off" placeholder="ابحث بالاسم أو اليوزر">
+      </div>
+
+      <div id="selectedGroupMembers" class="selected-group-members hidden"></div>
+      <div id="newConversationResult" class="list conversation-search-results"></div>
+      <p id="newConversationMessage" class="message" aria-live="polite"></p>
+
+      <button id="createGroupButton" class="primary hidden" type="button">إنشاء المجموعة</button>
+    </div>
+  </dialog>
+
+  <dialog id="conversationInfoDialog" class="panel-dialog conversation-info-dialog">
+    <div class="dialog-head">
+      <div><span class="eyebrow">المحادثة</span><h3 id="conversationInfoTitle">معلومات جهة الاتصال</h3></div>
+      <button id="closeConversationInfo" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div id="conversationInfoBody" class="dialog-body conversation-info-body"></div>
   </dialog>
 
   <dialog id="editProfileDialog" class="panel-dialog">

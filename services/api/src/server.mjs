@@ -434,6 +434,40 @@ async function receiveFile(req, maxBytes, jobId = null) {
   }
 }
 
+async function detectProfileImageMime(filePath) {
+  const handle = await fsp.open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(32);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const b = buffer.subarray(0, bytesRead);
+
+    if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+      return "image/jpeg";
+    }
+    if (
+      b.length >= 8 &&
+      b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+      b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a
+    ) {
+      return "image/png";
+    }
+    if (
+      b.length >= 12 &&
+      b.subarray(0, 4).toString("ascii") === "RIFF" &&
+      b.subarray(8, 12).toString("ascii") === "WEBP"
+    ) {
+      return "image/webp";
+    }
+    if (b.length >= 12 && b.subarray(4, 8).toString("ascii") === "ftyp") {
+      const brand = b.subarray(8, 12).toString("ascii");
+      if (brand === "avif" || brand === "avis") return "image/avif";
+    }
+    return "";
+  } finally {
+    await handle.close();
+  }
+}
+
 async function handleUpload(req, res, url) {
   const user = await currentUser(req);
   const profile = await profileFor(user.id);
@@ -473,7 +507,9 @@ async function handleUpload(req, res, url) {
   const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "ملف"));
   const mimeType = String(req.headers["content-type"] || "application/octet-stream");
   const clientUploadId = String(req.headers["x-upload-id"] || crypto.randomUUID()).slice(0, 120);
+  const isProfileImage = kind === "profile" || kind === "profile_cover";
 
+  let verifiedMimeType = mimeType;
   let job = null;
   let received = null;
   try {
@@ -524,6 +560,17 @@ async function handleUpload(req, res, url) {
     }
 
     received = await receiveFile(req, maxBytes, job?.id || null);
+
+    if (isProfileImage) {
+      const detectedMime = await detectProfileImageMime(received.filePath);
+      if (!detectedMime) {
+        const error = new Error("صيغة صورة الحساب غير مدعومة. استخدم JPG أو PNG أو WebP أو AVIF");
+        error.statusCode = 415;
+        throw error;
+      }
+      verifiedMimeType = detectedMime;
+    }
+
     if (job?.id) {
       await update(
         "upload_jobs",
@@ -576,7 +623,7 @@ async function handleUpload(req, res, url) {
       telegram_message_id: uploaded.messageId,
       telegram_file_id: uploaded.storageRef,
       original_name: originalName.slice(0, 250),
-      mime_type: mimeType.slice(0, 150),
+      mime_type: verifiedMimeType.slice(0, 150),
       size_bytes: received.size,
       sha256: received.sha256,
       status: "ready",
@@ -1355,15 +1402,26 @@ async function socialEditComment(req, res, commentId) {
 }
 
 async function socialDeleteAccount(req, res) {
+  const token = bearer(req);
   const user = await currentUser(req);
   const body = await readJson(req);
   if (String(body.confirm || "") !== "DELETE") return json(res, 400, { error: "تأكيد حذف الحساب غير صحيح" });
+
   await update("profiles", "id=eq." + encodeURIComponent(user.id), {
     deleted_at: new Date().toISOString(),
     is_banned: true,
     ban_reason: "account_deleted",
   }, { returning: false }).catch(() => {});
+
   await writeAudit(user.id, "delete_own_account", "profile", user.id, {});
+
+  if (token) {
+    await serviceRequest("/auth/v1/logout?scope=global", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token },
+    }).catch(() => {});
+  }
+
   await serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(user.id), { method: "DELETE" });
   json(res, 200, { ok: true });
 }

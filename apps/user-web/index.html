@@ -245,9 +245,10 @@
   </dialog>
 
   <dialog id="chatDialog" class="panel-dialog chat-dialog">
-    <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3></div><button id="closeChat" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3><small id="chatConnectionStatus" class="chat-connection-status"></small></div><button id="closeChat" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div id="chatMessages" class="chat-messages"></div>
     <div id="chatAttachmentPreview" class="chat-attachment-preview hidden"></div>
+    <p id="chatMessage" class="message chat-send-message" aria-live="polite"></p>
     <form id="chatForm" class="chat-form">
       <label class="chat-attach-button" aria-label="إرفاق ملف">
         <input id="chatFile" type="file" accept="image/*,video/*,audio/*,*/*">

@@ -26,12 +26,15 @@ jobs:
       - name: فحص نسخة المستخدم
         run: |
           node --check apps/user-web/core.js
+          node --check apps/user-web/auth-core.js
           node --check apps/user-web/app.js
           node <<'NODE'
           const fs = require('fs');
           const app = fs.readFileSync('apps/user-web/app.js','utf8');
           const index = fs.readFileSync('apps/user-web/index.html','utf8');
           const core = fs.readFileSync('apps/user-web/core.js','utf8');
+          const authCore = fs.readFileSync('apps/user-web/auth-core.js','utf8');
+          const manifest = fs.readFileSync('android/user/app/src/main/AndroidManifest.xml','utf8');
           const main = fs.readFileSync('android/user/app/src/main/java/app/ashur/social/MainActivity.java','utf8');
           const directSingleForEach = /(^|[^$])\$\((?:"[^"]*"|'[^']*')\)\.forEach/g.test(app);
           const triple = app.includes('$' + '$' + '$' + '(');
@@ -42,8 +45,13 @@ jobs:
           const missingLocalVendor = !index.includes('./vendor/supabase.min.js');
           const missingCore = !index.includes('./core.js') || !core.includes('createStore') || !core.includes('createRouter');
           const appNotUsingCore = !app.includes('AshurCore.createStore') || !app.includes('AshurCore.createRouter');
-          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore) {
-            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore});
+          const missingAuthCore = !index.includes('./auth-core.js') || !authCore.includes('parseAuthLink') || !authCore.includes('errorMessage');
+          const unsafeUrlDetection = app.includes('detectSessionInUrl: true');
+          const missingAuthReady = !main.includes('void authReady()') || !app.includes('AshurNative?.authReady');
+          const missingSingleTask = !manifest.includes('android:launchMode="singleTask"');
+          const missingLocalLogout = !app.includes('signOut({scope:"local"})');
+          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout) {
+            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout});
             process.exit(1);
           }
           NODE

@@ -4132,6 +4132,13 @@
     $("#storyTextOverlay").classList.add("hidden");
     $("#composerCameraFile").value="";
     $("#composerFile").value="";
+    const upload=$("#uploadProgress");
+    if(upload){
+      upload.classList.add("hidden");
+      const bar=upload.querySelector(".progress>div");
+      if(bar)bar.style.width="0%";
+    }
+    if($("#uploadProgressText"))$("#uploadProgressText").textContent="0%";
   }
 
   function updateStoryOverlayPreview(){
@@ -4256,7 +4263,19 @@
     $("#composerStage").classList.remove("hidden");
     $("#composerDialog").classList.add("has-media");
 
-    preview.querySelectorAll("video").forEach(video=>enhanceVideoPlayer(video));
+    preview.querySelectorAll("video").forEach(video=>{
+      enhanceVideoPlayer(video);
+      const index=Number(video.closest("[data-composer-index]")?.dataset.composerIndex||0);
+      const file=files[index];
+      if(file?.type?.startsWith("video/")){
+        generateVideoCover(file).then(cover=>{
+          if(!cover||!video.isConnected)return;
+          const posterUrl=URL.createObjectURL(cover);
+          state.previewUrls.push(posterUrl);
+          video.poster=posterUrl;
+        }).catch(()=>{});
+      }
+    });
 
     const editable=files.length===1&&files[0].type.startsWith("image/");
     $("#mediaEditToolbar").classList.toggle("hidden",!editable);

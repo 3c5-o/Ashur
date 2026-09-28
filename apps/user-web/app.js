@@ -2909,6 +2909,115 @@
       '<span><b>محتوى مشارك</b><small>فتح '+label+'</small></span>'+
     '</button>';
   }
+  function chatMessageSignature(message,parent=null){
+    return JSON.stringify([
+      message.id,message.sender_id,message.body||"",message.media_id||"",message.reply_to||"",
+      message.shared_type||"",message.shared_id||"",message.created_at||"",
+      Boolean(message.read_by_other),
+      parent?.id||"",parent?.body||"",parent?.media_id||"",parent?.shared_type||"",parent?.shared_id||""
+    ]);
+  }
+
+  function chatMessageRowMarkup(message,byId){
+    const parent=message.reply_to?byId.get(message.reply_to):null;
+    const media=message.media_id
+      ?'<img class="chat-media chat-media-pending" data-media-id="'+escapeHtml(message.media_id)+'" alt="مرفق">'
+      :"";
+    const body=message.body
+      ?'<div class="message-text">'+chatTextMarkup(message.body)+'</div>'
+      :"";
+    const parentHtml=parent
+      ?'<div class="message-reply-preview"><span>رد على رسالة</span><b>'+escapeHtml(parent.body||"مرفق")+'</b></div>'
+      :"";
+    const delivery=message.sender_id===state.user.id
+      ?'<span class="message-read">'+(message.read_by_other?"تمت القراءة":"تم الإرسال")+'</span>'
+      :"";
+    const signature=chatMessageSignature(message,parent);
+    return '<div class="message-row '+(message.sender_id===state.user.id?"mine":"other")+'" data-message-id="'+escapeHtml(message.id)+'" data-message-signature="'+escapeHtml(signature)+'">'+
+      '<div class="bubble">'+parentHtml+sharedMessageMarkup(message)+media+body+'</div>'+
+      '<div class="message-meta-line"><time>'+new Date(message.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+delivery+'</div>'+
+    '</div>';
+  }
+
+  function createChatMessageNode(message,byId){
+    const template=document.createElement("template");
+    template.innerHTML=chatMessageRowMarkup(message,byId).trim();
+    return template.content.firstElementChild;
+  }
+
+  async function reconcileChatMessages(messages,{quiet=false,fromRealtime=false}={}){
+    const root=$("#chatMessages");
+    if(!root)return;
+    const sorted=[...(messages||[])].sort((a,b)=>new Date(a.created_at||0)-new Date(b.created_at||0));
+    const byId=new Map(sorted.map(message=>[String(message.id),message]));
+    const incomingIds=new Set(byId.keys());
+    const wasNearBottom=root.scrollHeight-root.scrollTop-root.clientHeight<110;
+    const changed=[];
+
+    root.querySelector(".chat-empty-state")?.remove();
+
+    root.querySelectorAll("[data-message-id]").forEach(node=>{
+      if(!incomingIds.has(String(node.dataset.messageId||"")))node.remove();
+    });
+
+    let previous=null;
+    for(const message of sorted){
+      const id=String(message.id);
+      const signature=chatMessageSignature(message,message.reply_to?byId.get(String(message.reply_to)):null);
+      let node=root.querySelector('[data-message-id="'+CSS.escape(id)+'"]');
+
+      if(!node){
+        node=createChatMessageNode(message,byId);
+        if(previous?.nextSibling)root.insertBefore(node,previous.nextSibling);
+        else if(previous)root.appendChild(node);
+        else root.insertBefore(node,root.firstChild);
+        changed.push(node);
+      }else if(node.dataset.messageSignature!==signature){
+        const replacement=createChatMessageNode(message,byId);
+        node.replaceWith(replacement);
+        node=replacement;
+        changed.push(node);
+      }
+
+      if(previous&&node.previousElementSibling!==previous){
+        root.insertBefore(node,previous.nextSibling);
+      }
+      previous=node;
+    }
+
+    if(!sorted.length){
+      root.innerHTML='<div class="empty chat-empty-state">ابدأ المحادثة برسالة.</div>';
+    }
+
+    state.chatMessageCache=new Map(sorted.map(message=>[String(message.id),message]));
+    state.chatMessageIds=new Set(state.chatMessageCache.keys());
+    state.chatLastSyncAt=Date.now();
+
+    for(const node of changed){
+      await hydrateMedia(node).catch(()=>{});
+    }
+
+    if(!state.chatInitialLoaded||!quiet||(fromRealtime&&wasNearBottom)){
+      root.scrollTop=root.scrollHeight;
+    }
+    state.chatInitialLoaded=true;
+  }
+
+  $("#chatMessages").addEventListener("click",event=>{
+    const btn=event.target.closest?.("[data-open-message-share]");
+    if(!btn)return;
+    const raw=btn.dataset.openMessageShare||"";
+    const cut=raw.indexOf(":");
+    if(cut<0)return;
+    const type=raw.slice(0,cut),id=raw.slice(cut+1);
+    $("#chatDialog").close();
+    closeChatRealtime();
+    state.activeConversation=null;
+    state.activeConversationMeta=null;
+    openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+  });
+
+
 
   async function loadChat({quiet=false,markRead=true}={}){
     if(!state.activeConversation)return;
@@ -2949,40 +3058,8 @@
 
     if(conversationId!==state.activeConversation||seq!==state.chatLoadSeq)return;
 
-    state.chatMessageIds=new Set(data.map(m=>m.id));
     const otherUnread=data.filter(m=>m.sender_id!==state.user.id).map(m=>m.id);
-    const byId=new Map(data.map(m=>[m.id,m]));
-
-    const html=data.map(m=>{
-      const parent=m.reply_to?byId.get(m.reply_to):null;
-      const media=m.media_id?'<img class="chat-media" data-media-id="'+escapeHtml(m.media_id)+'" alt="مرفق">':"";
-      const body=m.body?'<div class="message-text">'+escapeHtml(m.body)+'</div>':"";
-      const parentHtml=parent?'<div class="comment-parent">رد على: '+escapeHtml(parent.body||"مرفق")+'</div>':"";
-      const delivery=m.sender_id===state.user.id
-        ?'<span class="message-read">'+(m.read_by_other?"تمت القراءة":"تم الإرسال")+'</span>'
-        :"";
-      return '<div class="message-row '+(m.sender_id===state.user.id?"mine":"other")+'" data-message-id="'+escapeHtml(m.id)+'">'+
-        '<div class="bubble">'+parentHtml+sharedMessageMarkup(m)+media+body+'</div>'+
-        '<time>'+new Date(m.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+delivery+
-      '</div>';
-    }).join("")||'<div class="empty">ابدأ المحادثة برسالة.</div>';
-
-    const nearBottom=$("#chatMessages").scrollHeight-$("#chatMessages").scrollTop-$("#chatMessages").clientHeight<90;
-    if($("#chatMessages").innerHTML!==html){
-      $("#chatMessages").innerHTML=html;
-      await hydrateMedia($("#chatMessages"));
-      $("#chatMessages").querySelectorAll("[data-open-message-share]").forEach(btn=>btn.onclick=()=>{
-        const raw=btn.dataset.openMessageShare||"";
-        const cut=raw.indexOf(":");
-        if(cut<0)return;
-        const type=raw.slice(0,cut),id=raw.slice(cut+1);
-        $("#chatDialog").close();
-        closeChatRealtime();
-        state.activeConversation=null;
-        openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
-      });
-      if(nearBottom||!quiet)$("#chatMessages").scrollTop=$("#chatMessages").scrollHeight;
-    }
+    await reconcileChatMessages(data,{quiet});
 
     if(markRead&&otherUnread.length){
       api("/v1/social/message-read",{

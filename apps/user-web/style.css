@@ -1313,3 +1313,43 @@ html,body,.app,.main-shell,.page{max-width:100vw;overflow-x:hidden}
   .reel-actions{left:5px!important}
   .reel-overlay{left:61px!important}
 }
+
+
+/* Settings hierarchy and phone spacing */
+#settingsDialog .settings-form{
+  display:flex!important;
+  flex-direction:column;
+  gap:10px!important;
+  padding:10px 10px calc(24px + var(--safe-bottom))!important;
+}
+#settingsDialog .settings-group{
+  gap:8px!important;
+  padding:11px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  background:linear-gradient(180deg,#0b100c,#080b09);
+}
+#settingsDialog .settings-group-title{
+  margin-bottom:1px;
+}
+#settingsDialog .settings-group-title h4{
+  margin:2px 0 0!important;
+  color:var(--text)!important;
+  font-size:13px!important;
+}
+#settingsDialog .settings-row,
+#settingsDialog .switch-row{
+  min-height:56px!important;
+  border-radius:12px!important;
+}
+#settingsDialog .settings-row b,
+#settingsDialog .switch-row b{font-size:12px!important}
+#settingsDialog .settings-row small,
+#settingsDialog .switch-row small{font-size:10px!important;line-height:1.45}
+#settingsDialog .settings-row-switch{
+  background:var(--surface-2);
+}
+#settingsDialog .settings-save-button{width:100%;min-height:46px}
+#settingsDialog .danger-zone{
+  border-color:rgba(255,112,122,.18);
+}

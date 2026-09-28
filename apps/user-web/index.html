@@ -33,6 +33,7 @@
         <label><span>كلمة المرور</span><input id="loginPassword" type="password" required autocomplete="current-password" placeholder="اكتب كلمة المرور"></label>
         <button class="primary" type="submit">دخول</button>
         <button class="link-button" id="forgotPassword" type="button">نسيت كلمة المرور؟</button>
+        <button class="link-button hidden" id="resendConfirmation" type="button">إعادة إرسال رسالة التحقق</button>
       </form>
 
       <form id="passwordRecoveryForm" class="form hidden">
@@ -54,7 +55,7 @@
         <label><span>تأكيد كلمة المرور</span><input id="registerPassword2" type="password" minlength="8" required autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></label>
         <button class="primary" type="submit">إنشاء الحساب</button>
       </form>
-      <p id="authMessage" class="message"></p>
+      <p id="authMessage" class="message" aria-live="polite"></p>
     </section>
   </div>
 
@@ -409,6 +410,7 @@
 
   <script src="./config.js"></script>
   <script src="./core.js"></script>
+  <script src="./auth-core.js"></script>
   <script>
     (() => {
       let finished = false;
@@ -429,6 +431,7 @@
       const loadApp = () => {
         if (!window.supabase?.createClient) return fail();
         if (!window.AshurCore?.createStore || !window.AshurCore?.createRouter) return fail();
+        if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
         const script = document.createElement("script");
         script.src = "./app.js?v=1.2.0";
         script.onload = () => { finished = true; };

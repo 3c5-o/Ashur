@@ -1,0 +1,60 @@
+name: بناء Release الأدمن غير الموقعة
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-admin-release-unsigned.yml"
+      - "android/admin/**"
+      - "apps/admin-web/**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المشروع
+        uses: actions/checkout@v4
+
+      - name: إعداد جافا
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: تثبيت حزم أندرويد
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: إعداد Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: بناء Release الأدمن غير الموقعة
+        env:
+          ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
+          ASHUR_REQUIRE_RELEASE_SIGNING: "false"
+        run: gradle -p android/admin :app:assembleRelease --stacktrace
+
+      - name: التحقق من ملف Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find android/admin/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          test -n "$APK" && test -s "$APK"
+          echo "APK=$APK"
+          sha256sum "$APK"
+
+      - name: حفظ Release الأدمن غير الموقعة
+        uses: actions/upload-artifact@v4
+        with:
+          name: ashur-admin-release-unsigned-1.2.0
+          path: android/admin/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

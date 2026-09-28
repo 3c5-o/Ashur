@@ -1052,7 +1052,7 @@
     if(error)throw error;
     return (data||[]).map(r=>`
       <button class="explore-tile" data-open-reel="${r.id}" type="button">
-        <video muted playsinline preload="metadata" data-media-id="${r.media_id}"></video>
+        <video muted playsinline preload="metadata" data-video-cover="1" data-media-id="${r.media_id}"></video>
         <span class="explore-play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7Z"/></svg></span>
       </button>`).join("");
   }
@@ -1094,6 +1094,7 @@
 
       $("#searchResults").innerHTML=html||'<div class="empty">لا توجد نتائج.</div>';
       await hydrateMedia($("#searchResults"));
+      prepareVideoCovers($("#searchResults"));
 
       $("#searchResults").querySelectorAll("[data-follow]").forEach(b=>b.onclick=e=>{
         e.stopPropagation();

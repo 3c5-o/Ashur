@@ -3338,12 +3338,12 @@
       $("#previewSaveButton").classList.toggle("active",!active);
       $("#previewSaveButton span").textContent=!active?"محفوظ":"حفظ";
     };
-  }
-
     if($("#previewManageButton"))$("#previewManageButton").onclick=()=>{
       $("#infoDialog").close();
       openOwnContentActions(kind,id,caption,commentsEnabled,pinned);
     };
+  }
+
   function bindProfileGrid(root){
     root.querySelectorAll("[data-preview-id]").forEach(btn=>{
       btn.onclick=()=>{

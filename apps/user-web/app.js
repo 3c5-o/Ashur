@@ -2637,11 +2637,43 @@
     state.chatRefreshTimer=null;
     state.chatReconnectTimer=null;
     state.chatMessageIds=new Set();
+    state.chatMessageCache=new Map();
+    state.chatInitialLoaded=false;
+    state.chatLastSyncAt=0;
     if(state.chatChannel){
       try{client.removeChannel(state.chatChannel)}catch(_){try{state.chatChannel.unsubscribe?.()}catch(__){}}
       state.chatChannel=null;
     }
     setChatConnectionStatus("");
+  }
+
+  function applyChatReadReceipt(messageId){
+    if(!messageId)return;
+    const row=$("#chatMessages")?.querySelector('[data-message-id="'+CSS.escape(String(messageId))+'"]');
+    if(!row)return;
+    const receipt=row.querySelector(".message-read");
+    if(receipt)receipt.textContent="تمت القراءة";
+    const cached=state.chatMessageCache.get(String(messageId));
+    if(cached)state.chatMessageCache.set(String(messageId),{...cached,read_by_other:true});
+  }
+
+  async function appendRealtimeMessage(message){
+    if(!message?.id||message.conversation_id!==state.activeConversation)return;
+    const existing=state.chatMessageCache.get(String(message.id));
+    if(existing){
+      state.chatMessageCache.set(String(message.id),{...existing,...message});
+      await reconcileChatMessages([...state.chatMessageCache.values()],{quiet:true});
+      return;
+    }
+    const next={...message,read_by_other:false};
+    state.chatMessageCache.set(String(message.id),next);
+    await reconcileChatMessages([...state.chatMessageCache.values()],{quiet:true,fromRealtime:true});
+    if(message.sender_id!==state.user.id){
+      api("/v1/social/message-read",{
+        method:"POST",
+        body:JSON.stringify({message_ids:[message.id]})
+      }).then(scheduleInboxRefresh).catch(()=>{});
+    }
   }
 
   function subscribeChatRealtime(){
@@ -2652,20 +2684,33 @@
 
     state.chatChannel=client.channel("ashur-chat-"+conversationId)
       .on("postgres_changes",{
-        event:"*",
+        event:"INSERT",
+        schema:"public",
+        table:"messages",
+        filter:"conversation_id=eq."+conversationId
+      },payload=>{
+        const message=payload?.new||null;
+        appendRealtimeMessage(message).catch(()=>scheduleChatRefresh({markRead:true}));
+      })
+      .on("postgres_changes",{
+        event:"UPDATE",
         schema:"public",
         table:"messages",
         filter:"conversation_id=eq."+conversationId
       },()=>scheduleChatRefresh({markRead:true}))
       .on("postgres_changes",{
-        event:"*",
+        event:"DELETE",
+        schema:"public",
+        table:"messages",
+        filter:"conversation_id=eq."+conversationId
+      },()=>scheduleChatRefresh({markRead:false}))
+      .on("postgres_changes",{
+        event:"INSERT",
         schema:"public",
         table:"message_reads"
       },payload=>{
-        const messageId=payload?.new?.message_id||payload?.old?.message_id||"";
-        if(messageId&&state.chatMessageIds.has(messageId)){
-          scheduleChatRefresh({markRead:false});
-        }
+        const messageId=payload?.new?.message_id||"";
+        if(messageId&&state.chatMessageIds.has(messageId))applyChatReadReceipt(messageId);
       })
       .subscribe(status=>{
         if(conversationId!==state.activeConversation)return;
@@ -2686,9 +2731,9 @@
 
     state.chatTimer=setInterval(()=>{
       if($("#chatDialog").open&&state.activeConversation===conversationId){
-        loadChat({quiet:true}).catch(()=>{});
+        loadChat({quiet:true,markRead:false}).catch(()=>{});
       }
-    },15000);
+    },45000);
   }
 
   function renderChatHeader(meta={}){

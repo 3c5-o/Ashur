@@ -42,6 +42,7 @@
     activeConversationMeta:null,
     viewedReels:new Set(),
     reelViewTimers:new Map(),
+    composerPublishing:false,
     cameraStream:null,
     cameraFacing:"environment",
     cameraMode:"photo",
@@ -174,7 +175,7 @@
 
   function mediaCanEnhance(node){
     if(!node?.isConnected)return false;
-    return !node.closest(".reel,.story-viewer,.camera-studio-dialog,.composer-preview,.profile-grid-tile,.story-shared-card");
+    return !node.closest(".reel,.story-viewer,.camera-studio-dialog,.profile-grid-tile,.story-shared-card");
   }
 
   function updateVideoPlayIcon(button,playing){
@@ -1304,7 +1305,22 @@
   function updateTopbarContext(page){
     const topbar=$(".topbar");
     if(!topbar)return;
-    topbar.classList.toggle("home-context",page==="homePage");
+    const labels={
+      homePage:"آشور",
+      searchPage:"البحث",
+      reelsPage:"الريلز",
+      messagesPage:"الرسائل",
+      profilePage:"حسابي"
+    };
+    const home=page==="homePage";
+    topbar.classList.toggle("home-context",home);
+    topbar.dataset.page=page||"homePage";
+    const brand=$("#brandButton");
+    const logo=brand?.querySelector("img");
+    const label=brand?.querySelector("span");
+    if(label)label.textContent=labels[page]||"آشور";
+    if(logo)logo.classList.toggle("hidden",!home);
+    if(brand)brand.setAttribute("aria-label",home?"الرئيسية":(labels[page]||"آشور"));
   }
 
   async function navigateTo(page,{fromBack=false,replace=false}={}){
@@ -4210,25 +4226,38 @@
     }
     state.previewUrls=[];
     const files=state.composerFiles||[];
+    const meta=$("#composerFileMeta");
+    if(meta){
+      meta.textContent="";
+      meta.classList.add("hidden");
+    }
     if(!files.length){
       $("#composerStage").classList.add("hidden");
       return;
     }
-    let total=0;
-    const html=files.map(file=>{
+
+    const html=files.map((file,index)=>{
       const url=URL.createObjectURL(file);
       state.previewUrls.push(url);
-      total+=file.size;
       if(file.type.startsWith("video/")){
-        return '<video src="'+url+'" controls playsinline preload="metadata"></video>';
+        return '<div class="composer-media-frame composer-video-frame" data-composer-index="'+index+'">'+
+          '<video class="composer-video-preview" src="'+url+'" playsinline preload="metadata"></video>'+
+        '</div>';
       }
-      return '<img src="'+url+'" alt="معاينة">';
+      return '<div class="composer-media-frame composer-image-frame" data-composer-index="'+index+'">'+
+        '<img class="'+(files.length===1?"editable-media ":"")+'composer-image-preview" src="'+url+'" alt="معاينة المحتوى">'+
+      '</div>';
     }).join("");
+
     state.previewUrl=state.previewUrls[0]||null;
-    $("#composerPreview").innerHTML=html;
-    $("#composerPreview").classList.toggle("composer-preview-grid",files.length>1);
+    const preview=$("#composerPreview");
+    preview.innerHTML=html;
+    preview.classList.toggle("composer-preview-grid",files.length>1);
     $("#composerStage").classList.remove("hidden");
     $("#composerDialog").classList.add("has-media");
+
+    preview.querySelectorAll("video").forEach(video=>enhanceVideoPlayer(video));
+
     const editable=files.length===1&&files[0].type.startsWith("image/");
     $("#mediaEditToolbar").classList.toggle("hidden",!editable);
     if(editable){
@@ -4236,10 +4265,6 @@
       $("#mediaEditFilter").value=state.mediaEdit.filter||"none";
       requestAnimationFrame(applyMediaEditPreview);
     }
-    $("#composerFileMeta").textContent=files.length===1
-      ?files[0].name+" · "+(files[0].size/1024/1024).toFixed(1)+" MB"
-      :files.length+" ملفات · "+(total/1024/1024).toFixed(1)+" MB";
-    $("#composerFileMeta").classList.remove("hidden");
     updateStoryOverlayPreview();
   }
 
@@ -4266,7 +4291,9 @@
     }
     state.composerFiles=list;
     state.mediaEdit={rotation:0,scale:1,filter:"none"};
-    $("#composerMessage").textContent=source==="camera"?"تم التقاط الملف. يمكنك معاينته وتعديله قبل النشر.":"يمكنك تعديل الصورة قبل النشر.";
+    $("#composerMessage").textContent=source==="camera"
+      ?"المحتوى جاهز. راجعه ثم أضف الوصف واضغط نشر."
+      :(list.length>1?list.length+" وسائط جاهزة للنشر.":"المحتوى جاهز للنشر.");
     renderComposerPreview();
   }
 
@@ -4676,10 +4703,31 @@
     $("#composerDialog").close();
   };
 
+  function setComposerPublishState(active,label="نشر"){
+    state.composerPublishing=Boolean(active);
+    const button=$("#submitComposer");
+    button.disabled=Boolean(active);
+    button.classList.toggle("is-publishing",Boolean(active));
+    button.textContent=active?(label||"جارٍ النشر"):"نشر";
+    $("#cancelComposer").disabled=Boolean(active);
+  }
+
+  function setComposerOverallProgress(percent,text=""){
+    const progress=$("#uploadProgress");
+    const bar=progress?.querySelector(".progress>div");
+    const progressText=$("#uploadProgressText");
+    if(!progress)return;
+    progress.classList.remove("hidden");
+    const safe=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
+    if(bar)bar.style.width=safe+"%";
+    if(progressText)progressText.textContent=text||(safe+"%");
+  }
+
   $("#submitComposer").onclick=async()=>{
+    if(state.composerPublishing)return;
     let files=[...(state.composerFiles||[])];
     const caption=$("#composerCaption").value.trim();
-    if(!files.length)return $("#composerMessage").textContent="اختر ملفًا من الكاميرا أو المكتبة أولًا.";
+    if(!files.length)return $("#composerMessage").textContent="اختر صورة أو فيديو قبل النشر.";
 
     for(const file of files){
       const uploadLimit=state.composerType==="story"
@@ -4688,42 +4736,68 @@
           ?Number(state.limits.image_mb||10)
           :Number(state.limits.max_upload_mb||cfg.maxUploadMb||60);
       if(file.size>uploadLimit*1024*1024){
-        $("#composerMessage").textContent="الملف "+file.name+" أكبر من الحد "+uploadLimit+" ميغابايت.";
+        $("#composerMessage").textContent="حجم أحد ملفات المحتوى يتجاوز الحد المسموح ("+uploadLimit+" ميغابايت).";
         return;
       }
     }
 
-    $("#submitComposer").disabled=true;
-    $("#composerMessage").textContent="جارٍ تجهيز المحتوى...";
+    setComposerPublishState(true,"تجهيز...");
+    $("#composerMessage").textContent="جارٍ تجهيز المحتوى للنشر...";
+    setComposerOverallProgress(2,"تجهيز");
     try{
       if(files.length===1&&files[0].type.startsWith("image/")){
         files[0]=await editedImageFile(files[0]);
       }
+
       let reelCoverFile=null;
       if(state.composerType==="reel"){
+        setComposerPublishState(true,"تجهيز الغلاف");
         reelCoverFile=await generateVideoCover(files[0]);
       }
 
+      const totalBytes=Math.max(1,files.reduce((sum,file)=>sum+Number(file.size||0),0));
+      let completedBytes=0;
       const uploaded=[];
+
       for(let i=0;i<files.length;i++){
         const file=files[i];
-        $("#composerMessage").textContent="جارٍ رفع "+(i+1)+" من "+files.length+"...";
         const kind=state.composerType==="reel"
           ?"reel"
           :state.composerType==="story"
             ?"story"
             :file.type.startsWith("video/")?"post_video":"post_image";
-        uploaded.push(await uploadFile(file,kind));
+
+        setComposerPublishState(true,files.length>1?("رفع "+(i+1)+"/"+files.length):"جارٍ الرفع");
+        $("#composerMessage").textContent=files.length>1
+          ?"جارٍ رفع الوسائط "+(i+1)+" من "+files.length+"..."
+          :"جارٍ رفع المحتوى بأمان...";
+
+        const media=await uploadFile(file,kind,{
+          silent:true,
+          onProgress:({loaded})=>{
+            const ratio=(completedBytes+Math.min(Number(loaded||0),Number(file.size||0)))/totalBytes;
+            const percent=5+(ratio*83);
+            setComposerOverallProgress(percent,Math.round(percent)+"%");
+          }
+        });
+        uploaded.push(media);
+        completedBytes+=Number(file.size||0);
+        setComposerOverallProgress(5+(completedBytes/totalBytes)*83,Math.round(5+(completedBytes/totalBytes)*83)+"%");
       }
 
       let reelCover=null;
       if(reelCoverFile){
-        $("#composerMessage").textContent="جارٍ تجهيز غلاف الريلز...";
+        setComposerPublishState(true,"تجهيز الريلز");
+        $("#composerMessage").textContent="جارٍ إنهاء تجهيز الريلز...";
+        setComposerOverallProgress(90,"90%");
         reelCover=await uploadFile(reelCoverFile,"reel_cover",{silent:true}).catch(()=>null);
       }
 
       const visibility=state.profile?.is_private?"followers":($("#composerVisibility").value==="followers"?"followers":"public");
       const commentsEnabled=$("#composerCommentsEnabled").checked;
+      setComposerPublishState(true,"حفظ...");
+      $("#composerMessage").textContent="جارٍ حفظ المحتوى ونشره...";
+      setComposerOverallProgress(94,"94%");
 
       if(state.composerType==="reel"){
         const result=await client.from("reels").insert({
@@ -4763,18 +4837,23 @@
         await notifyMentions(caption,"post",result.data.id);
       }
 
+      setComposerOverallProgress(100,"تم النشر");
+      $("#composerMessage").textContent="تم نشر المحتوى بنجاح.";
+      setComposerPublishState(true,"تم");
+      await new Promise(resolve=>setTimeout(resolve,280));
       clearComposerPreview();
       $("#composerDialog").close();
       await loadHome();
       if(state.activePage==="profilePage")await loadProfile();
     }catch(error){
-      $("#composerMessage").textContent=(error.message||"فشل النشر")+" — احتفظنا بالملف في الاستوديو لتعيد المحاولة.";
+      $("#composerMessage").textContent=(error.message||"فشل النشر")+" — بقي المحتوى داخل الاستوديو لتعيد المحاولة.";
+      $("#uploadProgress").classList.add("hidden");
     }finally{
-      $("#submitComposer").disabled=false;
+      setComposerPublishState(false);
     }
   };
 
-  async function uploadFile(file,kind,{silent=false}={}){
+  async function uploadFile(file,kind,{silent=false,onProgress=null}={}){
     const token=await accessToken();
     if(!token)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
     const progress=silent?null:$("#uploadProgress");
@@ -4803,6 +4882,9 @@
             const percent=Math.min(100,Math.round((event.loaded/event.total)*100));
             if(bar)bar.style.width=percent+"%";
             if(progressText)progressText.textContent=percent+"%";
+            if(typeof onProgress==="function"){
+              try{onProgress({loaded:event.loaded,total:event.total,percent})}catch(_){}
+            }
             if(silent&&$("#chatAttachmentPreview")&&!$("#chatAttachmentPreview").classList.contains("hidden")){
               const small=$("#chatAttachmentPreview").querySelector("small");
               if(small)small.textContent=percent+"% · "+(file.size/1024/1024).toFixed(1)+" MB";

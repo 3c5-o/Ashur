@@ -1651,15 +1651,29 @@
             <button class="profile-stat-button" id="ownFollowingButton" type="button"><b>${following||0}</b><span>يتابع</span></button>
           </div>
           <div class="profile-buttons">
-            <button id="editProfileButton" class="small-button">${icon("edit")} تعديل الحساب</button>
-            <button id="settingsButton" class="small-button">${icon("settings")} الإعدادات</button>
-            <button id="logoutButton" class="small-button">${icon("logout")} تسجيل الخروج</button>
+            <button id="editProfileButton" class="small-button" type="button">${icon("edit")}<span>تعديل الملف</span></button>
+            <button id="profilePrivacyButton" class="small-button privacy-button" type="button">${icon(p.is_private?"lock":"globe")}<span>${p.is_private?"خاص":"عام"}</span></button>
           </div>
         </div>
       </div>`;
-    $("#logoutButton").onclick=()=>client.auth.signOut();
     $("#editProfileButton").onclick=openEditProfile;
-    $("#settingsButton").onclick=openSettings;
+    $("#profilePrivacyButton").onclick=async()=>{
+      const next=!Boolean(state.profile?.is_private);
+      const label=next?"خاص":"عام";
+      if(!confirm("تغيير الحساب إلى "+label+"؟"))return;
+      $("#profilePrivacyButton").disabled=true;
+      const {error}=await client.from("profiles").update({
+        is_private:next,
+        updated_at:new Date().toISOString()
+      }).eq("id",state.user.id);
+      if(error){
+        alert(error.message);
+        $("#profilePrivacyButton").disabled=false;
+        return;
+      }
+      await refreshProfile();
+      await loadProfile();
+    };
     $("#ownFollowersButton").onclick=()=>openFollowList(state.user.id,"followers","المتابعون");
     $("#ownFollowingButton").onclick=()=>openFollowList(state.user.id,"following","الحسابات التي تتابعها");
     await hydrateMedia($("#profileCard"));

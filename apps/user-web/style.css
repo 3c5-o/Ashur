@@ -538,6 +538,13 @@ dialog::backdrop{background:rgba(0,0,0,.72)}
 /* Chat / comments */
 dialog[open].chat-dialog{display:flex;flex-direction:column}
 .chat-messages{flex:1;overflow-y:auto;padding:12px 10px;display:flex;flex-direction:column;gap:7px}
+
+.chat-connection-status{display:block;min-height:12px;margin-top:2px;font-size:8px;color:var(--muted)}
+.chat-connection-status.online{color:var(--brand)}
+.chat-connection-status.connecting{color:var(--muted)}
+.chat-connection-status.offline{color:var(--danger)}
+.chat-send-message{margin:0;padding:4px 12px;min-height:18px;font-size:9px}
+.chat-form[aria-busy="true"]{opacity:.72}
 .message-row{display:flex;flex-direction:column;gap:3px;max-width:80%}
 .message-row.mine{align-self:flex-end;align-items:flex-end}
 .message-row.other{align-self:flex-start;align-items:flex-start}

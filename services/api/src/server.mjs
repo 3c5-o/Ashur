@@ -234,6 +234,23 @@ async function canViewOwner(user, ownerId) {
   return Boolean(follows?.length);
 }
 
+async function canViewContentOwner(user, ownerId, visibility = "public") {
+  if (!ownerId) return false;
+  if (user?.id === ownerId) return true;
+  const owner = await profileFor(ownerId);
+  if (profileIsBanned(owner)) return false;
+  if (user?.id && await isBlockedBetween(user.id, ownerId)) return false;
+  if (!owner.is_private && visibility === "public") return true;
+  if (!user) return false;
+  const rows = await select(
+    "follows",
+    "select=status&follower_id=eq." + encodeURIComponent(user.id) +
+      "&following_id=eq." + encodeURIComponent(ownerId) +
+      "&status=eq.accepted&limit=1",
+  );
+  return Boolean(rows?.length);
+}
+
 async function canReadMedia(user, media) {
   if (!media) return false;
   if (user?.id && media.owner_id === user.id) return true;
@@ -257,25 +274,31 @@ async function canReadMedia(user, media) {
     if (!links?.length) return false;
     const posts = await select(
       "posts",
-      `select=author_id&id=eq.${encodeURIComponent(links[0].post_id)}&limit=1`,
+      `select=author_id,visibility,moderation_status,deleted_at&id=eq.${encodeURIComponent(links[0].post_id)}&limit=1`,
     );
-    return posts?.[0] ? canViewOwner(user, posts[0].author_id) : false;
+    const post = posts?.[0];
+    if (!post || post.deleted_at || post.moderation_status !== "active") return false;
+    return canViewContentOwner(user, post.author_id, post.visibility || "public");
   }
 
   if (media.kind === "reel") {
     const reels = await select(
       "reels",
-      `select=author_id&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,visibility,moderation_status,deleted_at&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
     );
-    return reels?.[0] ? canViewOwner(user, reels[0].author_id) : false;
+    const reel = reels?.[0];
+    if (!reel || reel.deleted_at || reel.moderation_status !== "active") return false;
+    return canViewContentOwner(user, reel.author_id, reel.visibility || "public");
   }
 
   if (media.kind === "reel_cover") {
     const reels = await select(
       "reels",
-      `select=author_id&cover_media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,visibility,moderation_status,deleted_at&cover_media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
     );
-    return reels?.[0] ? canViewOwner(user, reels[0].author_id) : false;
+    const reel = reels?.[0];
+    if (!reel || reel.deleted_at || reel.moderation_status !== "active") return false;
+    return canViewContentOwner(user, reel.author_id, reel.visibility || "public");
   }
 
   if (media.kind === "story") {

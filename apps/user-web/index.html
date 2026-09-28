@@ -305,8 +305,26 @@
   <dialog id="settingsDialog" class="panel-dialog">
     <div class="dialog-head"><div><span class="eyebrow">التحكم</span><h3>الإعدادات</h3></div><button id="closeSettings" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <form id="notificationSettingsForm" class="dialog-body form settings-form">
+      <div class="settings-group settings-account-group">
+        <div class="settings-group-title"><div><span class="eyebrow">حسابك</span><h4>الحساب والخصوصية</h4></div></div>
+        <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <label class="switch-row settings-row-switch"><span><b>حساب خاص</b><small>طلبات المتابعة تحتاج موافقتك</small></span><input id="settingsPrivateToggle" type="checkbox"></label>
+        <button type="button" class="settings-row" id="blockedAccountsButton"><span><b>الحسابات المحظورة</b><small>إدارة الأشخاص الذين حظرتهم</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="securitySessionsButton"><span><b>الأمان والجلسات</b><small>كلمة المرور والبريد والجلسات</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+
+      <div class="settings-group follow-requests">
+        <div class="settings-group-title"><div><span class="eyebrow">المتابعة</span><h4>طلبات المتابعة</h4></div></div>
+        <div id="followRequestsList" class="list compact"></div>
+      </div>
+
       <div class="settings-group">
-        <h4>الإشعارات</h4>
+        <div class="settings-group-title"><div><span class="eyebrow">محتواك</span><h4>المحتوى</h4></div></div>
+        <button type="button" class="settings-row" id="savedContentButton"><span><b>المحفوظات</b><small>المنشورات والريلز المحفوظة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+
+      <div class="settings-group settings-notifications-group">
+        <div class="settings-group-title"><div><span class="eyebrow">التنبيهات</span><h4>الإشعارات</h4></div></div>
         <label class="switch-row"><span><b>الرسائل</b><small>الرسائل الخاصة الجديدة</small></span><input id="notifyMessages" type="checkbox"></label>
         <label class="switch-row"><span><b>المجموعات</b><small>تنبيهات المجموعات</small></span><input id="notifyGroups" type="checkbox"></label>
         <label class="switch-row"><span><b>الإعجابات</b><small>إعجابات المنشورات والريلز</small></span><input id="notifyLikes" type="checkbox"></label>
@@ -315,30 +333,18 @@
         <label class="switch-row"><span><b>القصص</b><small>تفاعلات القصص</small></span><input id="notifyStories" type="checkbox"></label>
         <label class="switch-row"><span><b>إشعارات النظام</b><small>التحديثات والتنبيهات المهمة</small></span><input id="notifySystem" type="checkbox"></label>
         <label class="switch-row"><span><b>معاينة الرسالة</b><small>إظهار جزء من النص في الإشعار</small></span><input id="notifyPreview" type="checkbox"></label>
+        <button class="primary settings-save-button" type="submit">حفظ إعدادات الإشعارات</button>
       </div>
-      <button class="primary" type="submit">حفظ إعدادات الإشعارات</button>
-      <div class="settings-group secondary-settings">
-        <h4>الحساب والخصوصية</h4>
-        <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
-        <button type="button" class="settings-row" id="blockedAccountsButton"><span><b>الحسابات المحظورة</b><small>إدارة الأشخاص الذين حظرتهم</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
-        <button type="button" class="settings-row" id="securitySessionsButton"><span><b>الأمان والجلسات</b><small>الأجهزة وتسجيلات الدخول</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
-      </div>
-      <div class="settings-group secondary-settings">
-        <h4>المحتوى</h4>
-        <button type="button" class="settings-row" id="savedContentButton"><span><b>المحفوظات</b><small>المنشورات والريلز المحفوظة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
-      </div>
-      <div class="settings-group secondary-settings follow-requests">
-        <div class="settings-group-title"><div><span class="eyebrow">الخصوصية</span><h4>طلبات المتابعة</h4></div></div>
-        <div id="followRequestsList" class="list compact"></div>
-      </div>
-      <div class="settings-group secondary-settings">
-        <h4>الدعم</h4>
+
+      <div class="settings-group">
+        <div class="settings-group-title"><div><span class="eyebrow">المساعدة</span><h4>الدعم</h4></div></div>
         <button type="button" class="settings-row" id="supportTicketsButton"><span><b>الدعم الفني</b><small>إرسال مشكلة ومتابعة الرد</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
         <button type="button" class="settings-row" id="helpButton"><span><b>المساعدة</b><small>الأسئلة الشائعة واستخدام التطبيق</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
         <button type="button" class="settings-row" id="aboutButton"><span><b>حول آشور</b><small>الإصدار ومعلومات المنصة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
+
       <div class="settings-group danger-zone">
-        <h4>إدارة الحساب</h4>
+        <div class="settings-group-title"><div><span class="eyebrow">الحساب</span><h4>إدارة الحساب</h4></div></div>
         <button id="settingsLogoutButton" class="danger-wide" type="button">تسجيل الخروج</button>
         <button id="deleteAccountButton" class="danger-wide danger-outline" type="button">حذف الحساب نهائيًا</button>
       </div>

@@ -2160,84 +2160,172 @@
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
 
+
   function clearComposerPreview(){
     for(const url of state.previewUrls||[]){
       try{URL.revokeObjectURL(url)}catch(_){}
     }
-    if(state.previewUrl){
-      try{URL.revokeObjectURL(state.previewUrl)}catch(_){}
+    if(state.reelCoverUrl){
+      try{URL.revokeObjectURL(state.reelCoverUrl)}catch(_){}
     }
     state.previewUrl=null;
     state.previewUrls=[];
+    state.reelCoverUrl=null;
+    state.reelCoverFile=null;
+    state.composerFiles=[];
     $("#composerPreview").innerHTML="";
-    $("#composerPreview").classList.add("hidden");
+    $("#composerPreview").classList.remove("composer-preview-grid");
+    $("#composerStage").classList.add("hidden");
     $("#composerFileMeta").textContent="";
     $("#composerFileMeta").classList.add("hidden");
+    $("#storyTextOverlay").innerHTML="";
+    $("#storyTextOverlay").classList.add("hidden");
+    $("#composerCameraFile").value="";
+    $("#composerFile").value="";
+  }
+
+  function updateStoryOverlayPreview(){
+    const overlay=$("#storyTextOverlay");
+    if(!overlay)return;
+    const text=$("#storyOverlayInput").value.trim();
+    overlay.classList.toggle("hidden",!text||state.composerType!=="story");
+    overlay.classList.toggle("with-bg",$("#storyOverlayBg").checked);
+    overlay.style.color=$("#storyOverlayColor").value||"#ffffff";
+    overlay.style.top=String(Number($("#storyOverlayY").value||50))+"%";
+    overlay.innerHTML=text?'<span>'+escapeHtml(text)+'</span>':"";
+  }
+
+  $("#storyOverlayInput").oninput=updateStoryOverlayPreview;
+  $("#storyOverlayColor").oninput=updateStoryOverlayPreview;
+  $("#storyOverlayY").oninput=updateStoryOverlayPreview;
+  $("#storyOverlayBg").onchange=updateStoryOverlayPreview;
+
+  function renderComposerPreview(){
+    for(const url of state.previewUrls||[]){
+      try{URL.revokeObjectURL(url)}catch(_){}
+    }
+    state.previewUrls=[];
+    const files=state.composerFiles||[];
+    if(!files.length){
+      $("#composerStage").classList.add("hidden");
+      return;
+    }
+    let total=0;
+    const html=files.map(file=>{
+      const url=URL.createObjectURL(file);
+      state.previewUrls.push(url);
+      total+=file.size;
+      if(file.type.startsWith("video/")){
+        return '<video src="'+url+'" controls playsinline preload="metadata"></video>';
+      }
+      return '<img src="'+url+'" alt="معاينة">';
+    }).join("");
+    state.previewUrl=state.previewUrls[0]||null;
+    $("#composerPreview").innerHTML=html;
+    $("#composerPreview").classList.toggle("composer-preview-grid",files.length>1);
+    $("#composerStage").classList.remove("hidden");
+    $("#composerFileMeta").textContent=files.length===1
+      ?files[0].name+" · "+(files[0].size/1024/1024).toFixed(1)+" MB"
+      :files.length+" ملفات · "+(total/1024/1024).toFixed(1)+" MB";
+    $("#composerFileMeta").classList.remove("hidden");
+    updateStoryOverlayPreview();
+  }
+
+  function acceptComposerFiles(files,source="library"){
+    const list=[...files].filter(Boolean);
+    if(!list.length)return;
+    if(state.composerType!=="post"&&list.length>1){
+      $("#composerMessage").textContent="هذا النوع يقبل ملفًا واحدًا فقط.";
+      return;
+    }
+    if(state.composerType==="post"&&list.length>10){
+      $("#composerMessage").textContent="يمكن إضافة 10 ملفات كحد أقصى للمنشور.";
+      return;
+    }
+    for(const file of list){
+      if(state.composerType==="reel"&&!file.type.startsWith("video/")){
+        $("#composerMessage").textContent="الريلز يقبل فيديو فقط.";
+        return;
+      }
+      if(!file.type.startsWith("image/")&&!file.type.startsWith("video/")){
+        $("#composerMessage").textContent="نوع الملف غير مدعوم.";
+        return;
+      }
+    }
+    state.composerFiles=list;
+    $("#composerMessage").textContent=source==="camera"?"تم التقاط الملف. يمكنك معاينته وتعديله قبل النشر.":"";
+    renderComposerPreview();
   }
 
   function openComposer(type){
     state.composerType=type;
     $("#publishDialog").close();
+    clearComposerPreview();
     $("#composerTitle").textContent=type==="story"?"إنشاء قصة":type==="reel"?"إنشاء ريلز":"إنشاء منشور";
     $("#composerFile").accept=type==="reel"?"video/*":"image/*,video/*";
     $("#composerFile").multiple=type==="post";
-    $("#composerFile").value="";
+    $("#composerCameraFile").accept=type==="reel"?"video/*":"image/*";
     $("#composerCaption").value="";
     $("#composerVisibility").value="public";
     $("#composerCommentsEnabled").checked=true;
+    $("#composerExploreEnabled").checked=true;
+    $("#composerExploreRow").classList.toggle("hidden",type!=="reel");
     $("#composerOptions").classList.toggle("hidden",type==="story");
+    $("#storyEditorControls").classList.toggle("hidden",type!=="story");
+    $("#storyOverlayInput").value="";
+    $("#storyOverlayColor").value="#ffffff";
+    $("#storyOverlayY").value="50";
+    $("#storyOverlayBg").checked=true;
     $("#composerMessage").textContent="";
-    clearComposerPreview();
     openDialog($("#composerDialog"));
   }
 
-  $("#composerFile").onchange=()=>{
-    clearComposerPreview();
-    const files=[...$("#composerFile").files];
-    if(!files.length)return;
-    if(state.composerType!=="post"&&files.length>1){
-      $("#composerFile").value="";
-      $("#composerMessage").textContent="هذا النوع يقبل ملفًا واحدًا فقط.";
-      return;
-    }
-    if(state.composerType==="post"&&files.length>10){
-      $("#composerFile").value="";
-      $("#composerMessage").textContent="يمكن إضافة 10 ملفات كحد أقصى للمنشور.";
-      return;
-    }
-    for(const file of files){
-      if(state.composerType==="reel"&&!file.type.startsWith("video/")){
-        $("#composerFile").value="";
-        $("#composerMessage").textContent="الريلز يقبل فيديو فقط.";
-        return;
-      }
-      if(!file.type.startsWith("image/")&&!file.type.startsWith("video/")){
-        $("#composerFile").value="";
-        $("#composerMessage").textContent="نوع الملف غير مدعوم.";
-        return;
-      }
-    }
+  $("#composerFile").onchange=()=>acceptComposerFiles($("#composerFile").files,"library");
+  $("#composerCameraFile").onchange=()=>acceptComposerFiles($("#composerCameraFile").files,"camera");
 
-    const previews=[];
-    let total=0;
-    files.forEach(file=>{
-      const url=URL.createObjectURL(file);
-      state.previewUrls.push(url);
-      total+=file.size;
-      previews.push(file.type.startsWith("video/")
-        ?'<video src="'+url+'" controls playsinline preload="metadata"></video>'
-        :'<img src="'+url+'" alt="معاينة">');
-    });
-    state.previewUrl=state.previewUrls[0]||null;
-    $("#composerPreview").innerHTML=previews.join("");
-    $("#composerPreview").classList.toggle("composer-preview-grid",files.length>1);
-    $("#composerPreview").classList.remove("hidden");
-    $("#composerFileMeta").textContent=files.length===1
-      ?files[0].name+" · "+(files[0].size/1024/1024).toFixed(1)+" MB"
-      :files.length+" ملفات · "+(total/1024/1024).toFixed(1)+" MB";
-    $("#composerFileMeta").classList.remove("hidden");
-    $("#composerMessage").textContent="";
-  };
+  async function generateVideoCover(file){
+    if(!file?.type?.startsWith("video/"))return null;
+    const url=URL.createObjectURL(file);
+    try{
+      const video=document.createElement("video");
+      video.muted=true;
+      video.playsInline=true;
+      video.preload="auto";
+      video.src=url;
+      await new Promise((resolve,reject)=>{
+        const timeout=setTimeout(()=>reject(new Error("تعذر تجهيز غلاف الريلز")),8000);
+        video.onloadedmetadata=()=>{
+          const target=Math.min(0.35,Math.max(0.05,(video.duration||1)*0.04));
+          try{video.currentTime=target}catch(_){}
+        };
+        video.onseeked=()=>{clearTimeout(timeout);resolve()};
+        video.onerror=()=>{clearTimeout(timeout);reject(new Error("تعذر قراءة الفيديو"))};
+      });
+      const canvas=document.createElement("canvas");
+      canvas.width=540;
+      canvas.height=960;
+      const ctx=canvas.getContext("2d");
+      const vw=video.videoWidth||540,vh=video.videoHeight||960;
+      const scale=Math.max(canvas.width/vw,canvas.height/vh);
+      const dw=vw*scale,dh=vh*scale;
+      ctx.drawImage(video,(canvas.width-dw)/2,(canvas.height-dh)/2,dw,dh);
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",0.84));
+      if(!blob)return null;
+      return new File([blob],"reel-cover-"+Date.now()+".jpg",{type:"image/jpeg"});
+    }catch{
+      return null;
+    }finally{
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function notifyMentions(caption,type,id){
+    if(!caption||(!caption.includes("@")&&!caption.includes("#")))return;
+    await api("/v1/social/mentions",{
+      method:"POST",
+      body:JSON.stringify({caption,type,id})
+    }).catch(()=>{});
+  }
 
   $("#cancelComposer").onclick=()=>{
     if(state.activeUpload){
@@ -2253,9 +2341,9 @@
   };
 
   $("#submitComposer").onclick=async()=>{
-    const files=[...$("#composerFile").files];
+    const files=state.composerFiles||[];
     const caption=$("#composerCaption").value.trim();
-    if(!files.length)return $("#composerMessage").textContent="اختر ملفًا أولًا";
+    if(!files.length)return $("#composerMessage").textContent="اختر ملفًا من الكاميرا أو المكتبة أولًا.";
 
     for(const file of files){
       const uploadLimit=state.composerType==="story"
@@ -2270,8 +2358,13 @@
     }
 
     $("#submitComposer").disabled=true;
-    $("#composerMessage").textContent="جارٍ الرفع...";
+    $("#composerMessage").textContent="جارٍ تجهيز المحتوى...";
     try{
+      let reelCoverFile=null;
+      if(state.composerType==="reel"){
+        reelCoverFile=await generateVideoCover(files[0]);
+      }
+
       const uploaded=[];
       for(let i=0;i<files.length;i++){
         const file=files[i];
@@ -2284,43 +2377,59 @@
         uploaded.push(await uploadFile(file,kind));
       }
 
+      let reelCover=null;
+      if(reelCoverFile){
+        $("#composerMessage").textContent="جارٍ تجهيز غلاف الريلز...";
+        reelCover=await uploadFile(reelCoverFile,"reel_cover",{silent:true}).catch(()=>null);
+      }
+
       const visibility=$("#composerVisibility").value==="followers"?"followers":"public";
       const commentsEnabled=$("#composerCommentsEnabled").checked;
+
       if(state.composerType==="reel"){
-        const {error}=await client.from("reels").insert({
+        const result=await client.from("reels").insert({
+          author_id:state.user.id,
+          media_id:uploaded[0].id,
+          cover_media_id:reelCover?.id||null,
+          caption,
+          visibility,
+          comments_enabled:commentsEnabled,
+          explore_enabled:$("#composerExploreEnabled").checked
+        }).select("id").single();
+        if(result.error)throw result.error;
+        await notifyMentions(caption,"reel",result.data.id);
+      }else if(state.composerType==="story"){
+        const result=await client.from("stories").insert({
           author_id:state.user.id,
           media_id:uploaded[0].id,
           caption,
-          visibility,
-          comments_enabled:commentsEnabled
-        });
-        if(error)throw error;
-      }else if(state.composerType==="story"){
-        const {error}=await client.from("stories").insert({
-          author_id:state.user.id,
-          media_id:uploaded[0].id,
-          caption
-        });
-        if(error)throw error;
+          overlay_text:$("#storyOverlayInput").value.trim(),
+          overlay_color:$("#storyOverlayColor").value||"#ffffff",
+          overlay_y:Number($("#storyOverlayY").value||50)/100,
+          overlay_bg:$("#storyOverlayBg").checked
+        }).select("id").single();
+        if(result.error)throw result.error;
+        await notifyMentions(caption+" "+$("#storyOverlayInput").value.trim(),"story",result.data.id);
       }else{
-        const {data:post,error}=await client.from("posts").insert({
+        const result=await client.from("posts").insert({
           author_id:state.user.id,
           caption,
           visibility,
           comments_enabled:commentsEnabled
         }).select("id").single();
-        if(error)throw error;
-        const mediaRows=uploaded.map((media,index)=>({post_id:post.id,media_id:media.id,sort_order:index}));
-        const {error:mediaErr}=await client.from("post_media").insert(mediaRows);
-        if(mediaErr)throw mediaErr;
+        if(result.error)throw result.error;
+        const mediaRows=uploaded.map((media,index)=>({post_id:result.data.id,media_id:media.id,sort_order:index}));
+        const mediaResult=await client.from("post_media").insert(mediaRows);
+        if(mediaResult.error)throw mediaResult.error;
+        await notifyMentions(caption,"post",result.data.id);
       }
+
       clearComposerPreview();
       $("#composerDialog").close();
-      $("#composerFile").value="";
-      $("#composerCaption").value="";
       await loadHome();
-    }catch(e){
-      $("#composerMessage").textContent=e.message+" — يمكنك الضغط على «نشر الآن» لإعادة المحاولة.";
+      if(state.activePage==="profilePage")await loadProfile();
+    }catch(error){
+      $("#composerMessage").textContent=(error.message||"فشل النشر")+" — احتفظنا بالملف في الاستوديو لتعيد المحاولة.";
     }finally{
       $("#submitComposer").disabled=false;
     }

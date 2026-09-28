@@ -42,7 +42,13 @@ jobs:
           USER_BASE="$(find /tmp/ashur-user -type f -name '*.apk' | head -n1)"
           test -n "$USER_BASE" && test -s "$USER_BASE"
           cp "$USER_BASE" /tmp/patch-user/base.apk
-          cat .github/signing-patches/user.part* > /tmp/user-signing.patch
+          : > /tmp/user-signing.patch
+          FIRST=1
+          for PART in .github/signing-patches/user.part*; do
+            if [ "$FIRST" -eq 0 ]; then printf '\n' >> /tmp/user-signing.patch; fi
+            cat "$PART" >> /tmp/user-signing.patch
+            FIRST=0
+          done
           (
             cd /tmp/patch-user
             git init -q
@@ -95,4 +101,4 @@ jobs:
           git commit -m "Publish signed Ashur user 1.5.0 and admin 1.2.0 [skip ci]"
           git push
 
-# retry-line-safe
+# retry-line-safe-3

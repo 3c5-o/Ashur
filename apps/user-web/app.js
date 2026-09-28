@@ -1715,31 +1715,151 @@
     }
   }
 
+  function profileGridTile(item,kind,saved=false){
+    const mediaId=kind==="reels"
+      ?item.media_id
+      :([...(item.post_media||[])].sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0))[0]?.media_id||"");
+    const caption=String(item.caption||"");
+    const media=mediaId
+      ?(kind==="reels"
+        ?'<video class="profile-grid-media" muted playsinline preload="metadata" data-video-cover="1" data-media-id="'+escapeHtml(mediaId)+'"></video><span class="profile-grid-play">'+icon("play")+'</span>'
+        :'<img class="profile-grid-media" data-profile-cover="1" data-media-id="'+escapeHtml(mediaId)+'" alt="">')
+      :'<div class="profile-grid-placeholder">'+icon(kind==="reels"?"play":"comment")+'</div>';
+    return '<button class="profile-grid-tile" type="button"'+
+      ' data-preview-kind="'+kind+'"'+
+      ' data-preview-id="'+escapeHtml(item.id)+'"'+
+      ' data-preview-media="'+escapeHtml(mediaId)+'"'+
+      ' data-preview-caption="'+escapeHtml(caption)+'"'+
+      ' data-preview-comments="'+String(item.comments_enabled!==false)+'">'+
+      media+
+      (saved?'<span class="profile-grid-saved">'+icon("save")+'</span>':"")+
+      '</button>';
+  }
+
+  async function openProfileContentPreview(kind,id,mediaId,caption="",commentsEnabled=true){
+    const reel=kind==="reels";
+    const likeTable=reel?"reel_likes":"post_likes";
+    const targetField=reel?"reel_id":"post_id";
+    const saveTable=reel?"saved_reels":"saved_posts";
+    const saveField=reel?"reel_id":"post_id";
+    const commentField=reel?"reel_id":"post_id";
+    const results=await Promise.all([
+      client.from(likeTable).select(targetField).eq(targetField,id).eq("user_id",state.user.id).maybeSingle(),
+      client.from(saveTable).select(saveField).eq(saveField,id).eq("user_id",state.user.id).maybeSingle(),
+      client.from(likeTable).select("*",{count:"exact",head:true}).eq(targetField,id),
+      client.from("comments").select("*",{count:"exact",head:true}).eq(commentField,id)
+    ]);
+    const liked=!!results[0].data;
+    const saved=!!results[1].data;
+    const likeCount=Number(results[2].count||0);
+    const commentCount=Number(results[3].count||0);
+    const media=mediaId
+      ?(reel
+        ?'<video class="profile-preview-media" controls playsinline preload="metadata" data-media-id="'+escapeHtml(mediaId)+'"></video>'
+        :'<img class="profile-preview-media" data-media-id="'+escapeHtml(mediaId)+'" alt="">')
+      :"";
+    openInfoDialog(reel?"ريلز":"منشور",
+      '<div class="profile-preview">'+media+
+      (caption?'<p class="profile-preview-caption">'+escapeHtml(caption)+'</p>':"")+
+      '<div class="profile-preview-actions">'+
+      '<button id="previewLikeButton" class="'+(liked?"active":"")+'" type="button">'+icon("like")+'<span>'+likeCount+'</span></button>'+
+      (commentsEnabled?'<button id="previewCommentButton" type="button">'+icon("comment")+'<span>'+commentCount+'</span></button>':"")+
+      '<button id="previewShareButton" type="button">'+icon("share")+'<span>مشاركة</span></button>'+
+      '<button id="previewSaveButton" class="'+(saved?"active":"")+'" type="button">'+icon("save")+'<span>'+(saved?"محفوظ":"حفظ")+'</span></button>'+
+      '</div></div>');
+    await hydrateMedia($("#infoDialogBody"));
+    $("#previewLikeButton").onclick=async()=>{
+      const active=$("#previewLikeButton").classList.contains("active");
+      if(active)await client.from(likeTable).delete().eq(targetField,id).eq("user_id",state.user.id);
+      else await client.from(likeTable).insert({[targetField]:id,user_id:state.user.id});
+      const next=!active;
+      $("#previewLikeButton").classList.toggle("active",next);
+      const span=$("#previewLikeButton span");
+      if(span)span.textContent=String(Math.max(0,Number(span.textContent||0)+(next?1:-1)));
+    };
+    const commentButton=$("#previewCommentButton");
+    if(commentButton)commentButton.onclick=()=>openComments(reel?"reel":"post",id);
+    $("#previewShareButton").onclick=()=>shareContent(reel?"reel":"post",id);
+    $("#previewSaveButton").onclick=async()=>{
+      const active=$("#previewSaveButton").classList.contains("active");
+      if(active)await client.from(saveTable).delete().eq(saveField,id).eq("user_id",state.user.id);
+      else await client.from(saveTable).insert({[saveField]:id,user_id:state.user.id});
+      $("#previewSaveButton").classList.toggle("active",!active);
+      $("#previewSaveButton span").textContent=!active?"محفوظ":"حفظ";
+    };
+  }
+
+  function bindProfileGrid(root){
+    root.querySelectorAll("[data-preview-id]").forEach(btn=>{
+      btn.onclick=()=>openProfileContentPreview(
+        btn.dataset.previewKind,
+        btn.dataset.previewId,
+        btn.dataset.previewMedia,
+        btn.dataset.previewCaption,
+        btn.dataset.previewComments==="true"
+      ).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+    });
+  }
+
   async function loadProfileContent(kind="posts"){
+    if(!["posts","reels","saved"].includes(kind))kind="posts";
     state.profileTab=kind;
-    $$(".profile-tabs button").forEach((b,i)=>b.classList.toggle("active",(kind==="posts"&&i===0)||(kind==="reels"&&i===1)));
-    if(kind==="reels"){
-      const {data,error}=await client.from("reels").select("id,caption,media_id,created_at,comments_enabled").eq("author_id",state.user.id).order("created_at",{ascending:false});
-      if(error){$("#profileContent").innerHTML=errorMarkup(error.message,"profilePage");return}
-      $("#profileContent").innerHTML=(data||[]).map(r=>`<article class="post">
-        <video class="post-media" playsinline preload="metadata" data-media-id="${r.media_id}"></video>
-        <div class="post-body">${escapeHtml(r.caption||"")}
-          <div class="content-owner-actions"><button data-manage-profile-reel="${r.id}" data-caption="${escapeHtml(r.caption||"")}" data-comments="${r.comments_enabled!==false}" type="button">إدارة</button></div>
-        </div>
-      </article>`).join("")||'<div class="empty">لم تنشر ريلز بعد.</div>';
-      $("#profileContent").querySelectorAll("[data-manage-profile-reel]").forEach(b=>b.onclick=()=>openOwnContentActions("reels",b.dataset.manageProfileReel,b.dataset.caption,b.dataset.comments==="true"));
-    }else{
-      const {data,error}=await client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").eq("author_id",state.user.id).order("created_at",{ascending:false});
-      if(error){$("#profileContent").innerHTML=errorMarkup(error.message,"profilePage");return}
-      $("#profileContent").innerHTML=(data||[]).map(p=>`<article class="post">
-        ${p.post_media?.[0]?.media_id?`<img class="post-media" data-media-id="${p.post_media[0].media_id}">`:""}
-        <div class="post-body">${escapeHtml(p.caption||"")}
-          <div class="content-owner-actions"><button data-manage-profile-post="${p.id}" data-caption="${escapeHtml(p.caption||"")}" data-comments="${p.comments_enabled!==false}" type="button">إدارة</button></div>
-        </div>
-      </article>`).join("")||'<div class="empty">لم تنشر شيئًا بعد.</div>';
-      $("#profileContent").querySelectorAll("[data-manage-profile-post]").forEach(b=>b.onclick=()=>openOwnContentActions("posts",b.dataset.manageProfilePost,b.dataset.caption,b.dataset.comments==="true"));
+    $$("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.classList.toggle("active",btn.dataset.profileTab===kind));
+    $("#profileContent").className="profile-media-grid";
+    $("#profileContent").innerHTML='<div class="profile-grid-loading">جارٍ التحميل...</div>';
+    try{
+      if(kind==="reels"){
+        const result=await client.from("reels")
+          .select("id,caption,media_id,created_at,comments_enabled")
+          .eq("author_id",state.user.id)
+          .order("created_at",{ascending:false});
+        if(result.error)throw result.error;
+        $("#profileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"reels")).join("")||
+          '<div class="empty profile-grid-empty">لم تنشر ريلز بعد.</div>';
+      }else if(kind==="saved"){
+        const savedResults=await Promise.all([
+          client.from("saved_posts").select("post_id,created_at").eq("user_id",state.user.id).order("created_at",{ascending:false}),
+          client.from("saved_reels").select("reel_id,created_at").eq("user_id",state.user.id).order("created_at",{ascending:false})
+        ]);
+        if(savedResults[0].error)throw savedResults[0].error;
+        if(savedResults[1].error)throw savedResults[1].error;
+        const savedPosts=savedResults[0].data||[];
+        const savedReels=savedResults[1].data||[];
+        const postIds=savedPosts.map(x=>x.post_id);
+        const reelIds=savedReels.map(x=>x.reel_id);
+        const contentResults=await Promise.all([
+          postIds.length
+            ?client.from("posts").select("id,caption,comments_enabled,post_media(media_id,sort_order)").in("id",postIds)
+            :Promise.resolve({data:[],error:null}),
+          reelIds.length
+            ?client.from("reels").select("id,caption,media_id,comments_enabled").in("id",reelIds)
+            :Promise.resolve({data:[],error:null})
+        ]);
+        if(contentResults[0].error)throw contentResults[0].error;
+        if(contentResults[1].error)throw contentResults[1].error;
+        const postMap=new Map((contentResults[0].data||[]).map(x=>[x.id,x]));
+        const reelMap=new Map((contentResults[1].data||[]).map(x=>[x.id,x]));
+        const ordered=[
+          ...savedPosts.map(x=>({at:x.created_at,kind:"posts",item:postMap.get(x.post_id)})),
+          ...savedReels.map(x=>({at:x.created_at,kind:"reels",item:reelMap.get(x.reel_id)}))
+        ].filter(x=>x.item).sort((a,b)=>new Date(b.at)-new Date(a.at));
+        $("#profileContent").innerHTML=ordered.map(x=>profileGridTile(x.item,x.kind,true)).join("")||
+          '<div class="empty profile-grid-empty">لا توجد محفوظات بعد.</div>';
+      }else{
+        const result=await client.from("posts")
+          .select("id,caption,comments_enabled,post_media(media_id,sort_order)")
+          .eq("author_id",state.user.id)
+          .order("created_at",{ascending:false});
+        if(result.error)throw result.error;
+        $("#profileContent").innerHTML=(result.data||[]).map(row=>profileGridTile(row,"posts")).join("")||
+          '<div class="empty profile-grid-empty">لم تنشر شيئًا بعد.</div>';
+      }
+      await hydrateMedia($("#profileContent"));
+      prepareVideoCovers($("#profileContent"));
+      bindProfileGrid($("#profileContent"));
+    }catch(error){
+      $("#profileContent").innerHTML='<div class="empty error profile-grid-empty">'+escapeHtml(error.message)+'</div>';
     }
-    await hydrateMedia($("#profileContent"));
   }
 
   $("#ownProfileTabs [data-profile-tab]").forEach(btn=>btn.onclick=()=>loadProfileContent(btn.dataset.profileTab));

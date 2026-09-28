@@ -1,7 +1,15 @@
 (() => {
   const cfg = window.ASHUR_CONFIG;
+  const authUtil = window.AshurAuth;
+  const AUTH_REDIRECT_BASE = cfg.authRedirectUrl || "ashur://reset-password";
+  const PENDING_CONFIRMATION_KEY = "ashur_pending_confirmation_email_v1";
+  let recoveryModeActive = false;
+  let authHydrationPromise = null;
+  let authHydrationKey = "";
+  let lastHydratedKey = "";
+
   const client = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
   });
 
   const $ = (s) => document.querySelector(s);
@@ -196,61 +204,199 @@
   }
 
   async function accessToken(){
-    const { data } = await client.auth.getSession();
+    const { data, error } = await client.auth.getSession();
+    if(error)throw error;
     return data.session?.access_token || "";
   }
 
   async function api(path, options={}){
-    const token = await accessToken();
-    const headers = new Headers(options.headers || {});
-    if(token) headers.set("Authorization", "Bearer "+token);
-    const res = await fetch(apiUrl(path), {...options, headers});
+    const request = async(token)=>{
+      const headers = new Headers(options.headers || {});
+      if(token) headers.set("Authorization", "Bearer "+token);
+      return fetch(apiUrl(path), {...options, headers});
+    };
+
+    let token = await accessToken().catch(()=>"");
+    let res = await request(token);
+    if(res.status===401 && token){
+      const refreshed = await client.auth.refreshSession();
+      const nextToken = refreshed.data?.session?.access_token || "";
+      if(!refreshed.error && nextToken){
+        token = nextToken;
+        res = await request(token);
+      }
+    }
+
     const type = res.headers.get("content-type") || "";
     const body = type.includes("json") ? await res.json() : await res.text();
-    if(!res.ok) throw new Error(body?.error || body?.message || body || "تعذر تنفيذ الطلب");
+    if(!res.ok){
+      if(res.status===401)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
+      throw new Error(body?.error || body?.message || body || "تعذر تنفيذ الطلب");
+    }
     return body;
   }
 
-  function enterPasswordRecoveryMode(message="اكتب كلمة المرور الجديدة للحساب."){
+  const authRedirect = (flow) => authUtil.buildRedirect(AUTH_REDIRECT_BASE, flow);
+
+  function setAuthBusy(form,busy){
+    if(!form)return;
+    form.setAttribute("aria-busy",busy?"true":"false");
+    form.querySelectorAll("button,input").forEach(control=>{
+      control.disabled=Boolean(busy);
+    });
+  }
+
+  function setAuthView(view){
+    const login=view==="login";
+    const register=view==="register";
+    const recovery=view==="recovery";
     showApp(false);
-    $("#loginForm").classList.add("hidden");
-    $("#registerForm").classList.add("hidden");
-    $("#passwordRecoveryForm").classList.remove("hidden");
-    $(".auth-tabs").classList.add("hidden");
+    $("#loginForm").classList.toggle("hidden",!login);
+    $("#registerForm").classList.toggle("hidden",!register);
+    $("#passwordRecoveryForm").classList.toggle("hidden",!recovery);
+    $(".auth-tabs").classList.toggle("hidden",recovery);
+    $("#loginTab").classList.toggle("active",login);
+    $("#registerTab").classList.toggle("active",register);
+  }
+
+  function rememberPendingConfirmation(email=""){
+    const normalized=authUtil.normalizeEmail(email);
+    try{
+      if(normalized)localStorage.setItem(PENDING_CONFIRMATION_KEY,normalized);
+      else localStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    }catch(_){}
+    const button=$("#resendConfirmation");
+    if(button)button.classList.toggle("hidden",!normalized);
+    return normalized;
+  }
+
+  function pendingConfirmationEmail(){
+    try{return authUtil.normalizeEmail(localStorage.getItem(PENDING_CONFIRMATION_KEY)||"")}
+    catch{return ""}
+  }
+
+  function enterPasswordRecoveryMode(message="اكتب كلمة المرور الجديدة للحساب."){
+    recoveryModeActive=true;
+    setAuthView("recovery");
     showAuthMessage(message,true);
   }
 
-  window.ASHUR_HANDLE_AUTH_LINK=async(link)=>{
-    try{
-      const url=new URL(String(link||""));
-      let authenticated=false;
-      const code=url.searchParams.get("code");
-      if(code){
-        const result=await client.auth.exchangeCodeForSession(code);
-        if(result.error)throw result.error;
-        authenticated=true;
-      }else{
-        const hash=new URLSearchParams(String(url.hash||"").replace(/^#/,""));
-        const accessToken=hash.get("access_token");
-        const refreshToken=hash.get("refresh_token");
-        if(accessToken&&refreshToken){
-          const result=await client.auth.setSession({access_token:accessToken,refresh_token:refreshToken});
-          if(result.error)throw result.error;
-          authenticated=true;
-        }
+  function clearAuthSession(){
+    recoveryModeActive=false;
+    authHydrationKey="";
+    authHydrationPromise=null;
+    lastHydratedKey="";
+    state.user=null;
+    state.profile=null;
+    try{localStorage.removeItem(PROFILE_CACHE_KEY)}catch(_){}
+    nativeLogout();
+    showApp(false);
+    store.emit("auth:signed-out",{});
+  }
+
+  function sessionKey(session){
+    if(!session?.user?.id)return "";
+    return session.user.id+":"+String(session.access_token||"").slice(-24);
+  }
+
+  async function hydrateAuthenticatedSession(session,{reason="auth"}={}){
+    if(!session?.user){
+      clearAuthSession();
+      return;
+    }
+    const key=sessionKey(session);
+    state.user=session.user;
+
+    if(lastHydratedKey===key && !$("#app").classList.contains("hidden")){
+      return;
+    }
+    if(authHydrationPromise && authHydrationKey===key){
+      return authHydrationPromise;
+    }
+
+    authHydrationKey=key;
+    authHydrationPromise=(async()=>{
+      state.profile=readCachedProfile(state.user.id);
+      showApp(true);
+      await nativeLogin(state.user.id);
+      try{
+        await refreshProfile();
+        await ensureProfileIdentity();
+        setNetworkState(true);
+      }catch(error){
+        console.warn("ASHUR_PROFILE_OFFLINE",error);
+        setNetworkState(false,"تعذر الاتصال بالخدمة. سيتم عرض آخر بيانات متاحة.");
       }
-      if(!authenticated)throw new Error("رابط الاستعادة غير مكتمل أو منتهي.");
-      enterPasswordRecoveryMode();
+      await checkRuntimeSettings().catch(()=>{});
+      await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
+      lastHydratedKey=key;
+      rememberPendingConfirmation("");
+      store.emit("auth:ready",{userId:state.user.id,reason});
+    })();
+
+    try{
+      await authHydrationPromise;
+    }finally{
+      if(authHydrationKey===key){
+        authHydrationPromise=null;
+        authHydrationKey="";
+      }
+    }
+  }
+
+  window.ASHUR_HANDLE_AUTH_LINK=async(link)=>{
+    let parsed;
+    try{
+      parsed=authUtil.parseAuthLink(link);
+      if(parsed.error || parsed.errorDescription){
+        const error=new Error(parsed.errorDescription||parsed.error);
+        error.code=parsed.errorCode||parsed.error;
+        throw error;
+      }
+
+      recoveryModeActive=parsed.flow==="recovery";
+      let session=null;
+
+      if(parsed.code){
+        const options=parsed.flowId?{flowId:parsed.flowId}:undefined;
+        const result=await client.auth.exchangeCodeForSession(parsed.code,options);
+        if(result.error)throw result.error;
+        session=result.data?.session||null;
+      }else if(parsed.accessToken&&parsed.refreshToken){
+        const result=await client.auth.setSession({
+          access_token:parsed.accessToken,
+          refresh_token:parsed.refreshToken
+        });
+        if(result.error)throw result.error;
+        session=result.data?.session||null;
+      }else{
+        throw new Error("رابط التحقق غير مكتمل أو منتهي.");
+      }
+
+      if(!session?.user)throw new Error("تعذر إنشاء جلسة للحساب.");
+
+      state.user=session.user;
+      if(parsed.flow==="recovery"){
+        enterPasswordRecoveryMode();
+      }else{
+        recoveryModeActive=false;
+        rememberPendingConfirmation("");
+        await hydrateAuthenticatedSession(session,{reason:"email-confirmation"});
+      }
       return true;
     }catch(error){
-      showApp(false);
-      showAuthMessage(error?.message||"تعذر فتح رابط استعادة كلمة المرور.");
+      recoveryModeActive=false;
+      setAuthView("login");
+      showAuthMessage(authUtil.errorMessage(error,"تعذر فتح رابط التحقق. اطلب رابطًا جديدًا."));
       return false;
     }
   };
 
   function showAuthMessage(text, good=false){
-    const el=$("#authMessage"); el.textContent=text; el.className="message "+(good?"success":"error");
+    const el=$("#authMessage");
+    if(!el)return;
+    el.textContent=text||"";
+    el.className="message "+(text?(good?"success":"error"):"");
   }
 
   function errorMarkup(message,view){
@@ -445,35 +591,17 @@
     };
     const fallbackTimer=setTimeout(closeSplash,5000);
     setNetworkState(navigator.onLine);
+    rememberPendingConfirmation(pendingConfirmationEmail());
 
     try{
       await checkRuntimeSettings().catch(()=>{});
       const {data:{session},error:sessionError}=await client.auth.getSession();
       if(sessionError)throw sessionError;
-      state.user=session?.user||null;
-
-      if(!state.user){
-        showApp(false);
+      if(!session){
+        clearAuthSession();
         return;
       }
-
-      state.profile=readCachedProfile(state.user.id);
-      showApp(true);
-      await nativeLogin(state.user.id);
-
-      try{
-        await refreshProfile();
-        await ensureProfileIdentity();
-        setNetworkState(true);
-      }catch(error){
-        console.warn("ASHUR_PROFILE_OFFLINE",error);
-        setNetworkState(false,"تعذر الاتصال بالخدمة. سيتم عرض آخر بيانات متاحة.");
-      }
-
-      await Promise.allSettled([
-        loadHome(),
-        loadNotificationsBadge()
-      ]);
+      await hydrateAuthenticatedSession(session,{reason:"boot"});
     }finally{
       clearTimeout(fallbackTimer);
       setTimeout(closeSplash,350);
@@ -489,104 +617,196 @@
     try{ if(window.AshurNative?.logoutOneSignal) window.AshurNative.logoutOneSignal(); }catch(_){}
   }
 
-  client.auth.onAuthStateChange(async (event, session)=>{
-    state.user=session?.user || null;
-    if(event==="PASSWORD_RECOVERY"){
-      enterPasswordRecoveryMode();
+  async function handleAuthEvent(event,session){
+    if(event==="INITIAL_SESSION")return;
+    if(event==="SIGNED_OUT"){
+      clearAuthSession();
       return;
     }
-    if(state.user){
+
+    state.user=session?.user||null;
+
+    if(event==="PASSWORD_RECOVERY"){
+      if(state.user)enterPasswordRecoveryMode();
+      return;
+    }
+    if(!state.user)return;
+
+    if(event==="TOKEN_REFRESHED"){
+      store.emit("auth:token-refreshed",{userId:state.user.id});
+      return;
+    }
+    if(recoveryModeActive)return;
+
+    if(event==="USER_UPDATED"){
       await refreshProfile().catch(()=>{});
       await ensureProfileIdentity().catch(()=>{});
-      await nativeLogin(state.user.id);
-      showApp(true);
-      checkRuntimeSettings(); loadHome(); loadNotificationsBadge();
-    }else{
-      state.profile=null;
-      try{localStorage.removeItem(PROFILE_CACHE_KEY)}catch(_){}
-      nativeLogout();
-      showApp(false);
+      store.emit("auth:user-updated",{userId:state.user.id});
+      return;
     }
+    if(event==="SIGNED_IN"){
+      await hydrateAuthenticatedSession(session,{reason:"signed-in"});
+    }
+  }
+
+  client.auth.onAuthStateChange((event,session)=>{
+    queueMicrotask(()=>{
+      handleAuthEvent(event,session).catch(error=>console.error("ASHUR_AUTH_EVENT_ERROR",event,error));
+    });
   });
 
-  $("#loginTab").onclick=()=>{
-    $("#loginTab").classList.add("active"); $("#registerTab").classList.remove("active");
-    $("#loginForm").classList.remove("hidden"); $("#registerForm").classList.add("hidden");
-  };
-  $("#registerTab").onclick=()=>{
-    $("#registerTab").classList.add("active"); $("#loginTab").classList.remove("active");
-    $("#registerForm").classList.remove("hidden"); $("#loginForm").classList.add("hidden");
-  };
+  $("#loginTab").onclick=()=>setAuthView("login");
+  $("#registerTab").onclick=()=>setAuthView("register");
 
   $("#loginForm").onsubmit=async(e)=>{
-    e.preventDefault(); showAuthMessage("جارٍ تسجيل الدخول...",true);
-    const {error}=await client.auth.signInWithPassword({email:$("#loginEmail").value.trim(),password:$("#loginPassword").value});
-    if(error) return showAuthMessage("تعذر تسجيل الدخول: "+error.message);
-    showAuthMessage("");
+    e.preventDefault();
+    const form=e.currentTarget;
+    const email=authUtil.normalizeEmail($("#loginEmail").value);
+    const password=$("#loginPassword").value;
+    if(!authUtil.validEmail(email))return showAuthMessage("اكتب بريدًا إلكترونيًا صحيحًا.");
+    if(!password)return showAuthMessage("اكتب كلمة المرور.");
+
+    setAuthBusy(form,true);
+    showAuthMessage("جارٍ تسجيل الدخول...",true);
+    try{
+      const {data,error}=await client.auth.signInWithPassword({email,password});
+      if(error)throw error;
+      rememberPendingConfirmation("");
+      showAuthMessage("");
+      if(data?.session)await hydrateAuthenticatedSession(data.session,{reason:"password-login"});
+    }catch(error){
+      if(String(error?.code||"").toLowerCase()==="email_not_confirmed"){
+        rememberPendingConfirmation(email);
+      }
+      showAuthMessage(authUtil.errorMessage(error,"تعذر تسجيل الدخول. تحقق من البيانات وحاول مرة أخرى."));
+    }finally{
+      setAuthBusy(form,false);
+    }
   };
 
   $("#registerForm").onsubmit=async(e)=>{
     e.preventDefault();
-    const name=$("#registerName").value.trim(), username=$("#registerUsername").value.trim().toLowerCase();
-    const email=$("#registerEmail").value.trim(), p1=$("#registerPassword").value, p2=$("#registerPassword2").value;
-    if(p1!==p2) return showAuthMessage("كلمتا المرور غير متطابقتين");
-    if(!/^[a-z0-9_]{3,24}$/.test(username)) return showAuthMessage("اسم المستخدم يقبل الحروف الإنجليزية والأرقام والشرطة السفلية فقط");
-    showAuthMessage("جارٍ التحقق من اسم المستخدم...",true);
-    const {data:existingUsername,error:checkError}=await client.from("profiles")
-      .select("id")
-      .eq("username",username)
-      .maybeSingle();
-    if(checkError)return showAuthMessage("تعذر التحقق من اسم المستخدم");
-    if(existingUsername)return showAuthMessage("اسم المستخدم مستخدم بالفعل");
+    const form=e.currentTarget;
+    const name=$("#registerName").value.trim();
+    const username=$("#registerUsername").value.trim().toLowerCase();
+    const email=authUtil.normalizeEmail($("#registerEmail").value);
+    const p1=$("#registerPassword").value;
+    const p2=$("#registerPassword2").value;
 
-    showAuthMessage("جارٍ إنشاء الحساب...",true);
-    const {data,error}=await client.auth.signUp({
-      email,
-      password:p1,
-      options:{data:{name,username}}
-    });
-    if(error) return showAuthMessage(error.message);
-    if(data.session){
-      const {error:claimError}=await client.rpc("claim_username",{p_username:username,p_name:name});
-      if(claimError) return showAuthMessage(claimError.message);
-      await refreshProfile().catch(()=>{});
-      showAuthMessage("تم إنشاء الحساب",true);
-    }else{
-      showAuthMessage("تم إنشاء الحساب. افتح رسالة التحقق في بريدك ثم سجّل الدخول.",true);
+    if(name.length<2)return showAuthMessage("اكتب اسمًا ظاهرًا من حرفين على الأقل.");
+    if(!authUtil.validUsername(username))return showAuthMessage("اسم المستخدم يقبل الحروف الإنجليزية والأرقام والشرطة السفلية، من ٣ إلى ٢٤ خانة.");
+    if(!authUtil.validEmail(email))return showAuthMessage("اكتب بريدًا إلكترونيًا صحيحًا.");
+    if(!authUtil.validPassword(p1))return showAuthMessage("كلمة المرور يجب ألا تقل عن ٨ أحرف.");
+    if(p1!==p2)return showAuthMessage("كلمتا المرور غير متطابقتين.");
+
+    setAuthBusy(form,true);
+    try{
+      showAuthMessage("جارٍ التحقق من اسم المستخدم...",true);
+      const {data:existingUsername,error:checkError}=await client.from("profiles")
+        .select("id").eq("username",username).maybeSingle();
+      if(checkError)throw checkError;
+      if(existingUsername)throw new Error("اسم المستخدم مستخدم بالفعل.");
+
+      showAuthMessage("جارٍ إنشاء الحساب...",true);
+      const {data,error}=await client.auth.signUp({
+        email,
+        password:p1,
+        options:{
+          data:{name,username},
+          emailRedirectTo:authRedirect("signup")
+        }
+      });
+      if(error)throw error;
+
+      $("#loginEmail").value=email;
+      if(data?.session){
+        state.user=data.session.user;
+        await hydrateAuthenticatedSession(data.session,{reason:"signup"});
+        showAuthMessage("");
+      }else{
+        rememberPendingConfirmation(email);
+        $("#registerPassword").value="";
+        $("#registerPassword2").value="";
+        showAuthMessage("إذا تم إنشاء الحساب بنجاح فستصلك رسالة تأكيد. افتحها من نفس الهاتف لإكمال الدخول.",true);
+      }
+    }catch(error){
+      const text=String(error?.message||"");
+      if(text==="اسم المستخدم مستخدم بالفعل.")showAuthMessage(text);
+      else showAuthMessage(authUtil.errorMessage(error,"تعذر إنشاء الحساب. حاول مرة أخرى."));
+    }finally{
+      setAuthBusy(form,false);
     }
   };
 
   $("#forgotPassword").onclick=async()=>{
-    const email=$("#loginEmail").value.trim();
-    if(!email) return showAuthMessage("اكتب البريد الإلكتروني أولًا");
-    const redirectTo="ashur://reset-password";
-    const {error}=await client.auth.resetPasswordForEmail(email,{redirectTo});
-    showAuthMessage(error?error.message:"تم إرسال رابط استعادة كلمة المرور إلى بريدك.",!error);
+    const button=$("#forgotPassword");
+    const email=authUtil.normalizeEmail($("#loginEmail").value);
+    if(!authUtil.validEmail(email))return showAuthMessage("اكتب بريدك الإلكتروني الصحيح أولًا.");
+    button.disabled=true;
+    showAuthMessage("جارٍ إرسال رابط الاستعادة...",true);
+    try{
+      const {error}=await client.auth.resetPasswordForEmail(email,{redirectTo:authRedirect("recovery")});
+      if(error)throw error;
+      showAuthMessage("إذا كان البريد مرتبطًا بحساب فستصلك رسالة استعادة. افتح الرابط من نفس الهاتف.",true);
+    }catch(error){
+      showAuthMessage(authUtil.errorMessage(error,"تعذر إرسال رابط الاستعادة."));
+    }finally{
+      button.disabled=false;
+    }
+  };
+
+  $("#resendConfirmation").onclick=async()=>{
+    const button=$("#resendConfirmation");
+    const email=authUtil.normalizeEmail($("#loginEmail").value)||pendingConfirmationEmail();
+    if(!authUtil.validEmail(email))return showAuthMessage("اكتب البريد الإلكتروني المستخدم عند إنشاء الحساب.");
+    button.disabled=true;
+    showAuthMessage("جارٍ إعادة إرسال رسالة التحقق...",true);
+    try{
+      const {error}=await client.auth.resend({
+        type:"signup",
+        email,
+        options:{emailRedirectTo:authRedirect("signup")}
+      });
+      if(error)throw error;
+      rememberPendingConfirmation(email);
+      showAuthMessage("تم طلب رسالة تحقق جديدة. افحص البريد ثم افتح الرابط من نفس الهاتف.",true);
+    }catch(error){
+      showAuthMessage(authUtil.errorMessage(error,"تعذر إعادة إرسال رسالة التحقق."));
+    }finally{
+      button.disabled=false;
+    }
   };
 
   $("#passwordRecoveryForm").onsubmit=async(e)=>{
     e.preventDefault();
+    const form=e.currentTarget;
     const p1=$("#recoveryPassword").value;
     const p2=$("#recoveryPassword2").value;
-    if(p1.length<8)return showAuthMessage("كلمة المرور يجب ألا تقل عن ٨ أحرف.");
+    if(!authUtil.validPassword(p1))return showAuthMessage("كلمة المرور يجب ألا تقل عن ٨ أحرف.");
     if(p1!==p2)return showAuthMessage("كلمتا المرور غير متطابقتين.");
-    const {error}=await client.auth.updateUser({password:p1});
-    if(error)return showAuthMessage(error.message);
-    $("#passwordRecoveryForm").classList.add("hidden");
-    $(".auth-tabs").classList.remove("hidden");
-    $("#loginForm").classList.remove("hidden");
-    $("#loginTab").classList.add("active");
-    $("#registerTab").classList.remove("active");
-    showAuthMessage("تم تغيير كلمة المرور. يمكنك تسجيل الدخول الآن.",true);
-    await client.auth.signOut();
+
+    setAuthBusy(form,true);
+    try{
+      const {error}=await client.auth.updateUser({password:p1});
+      if(error)throw error;
+      recoveryModeActive=false;
+      $("#recoveryPassword").value="";
+      $("#recoveryPassword2").value="";
+      await client.auth.signOut({scope:"local"});
+      setAuthView("login");
+      showAuthMessage("تم تغيير كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.",true);
+    }catch(error){
+      showAuthMessage(authUtil.errorMessage(error,"تعذر تغيير كلمة المرور."));
+    }finally{
+      setAuthBusy(form,false);
+    }
   };
-  $("#cancelPasswordRecovery").onclick=()=>{
-    $("#passwordRecoveryForm").classList.add("hidden");
-    $(".auth-tabs").classList.remove("hidden");
-    $("#loginForm").classList.remove("hidden");
-    $("#registerForm").classList.add("hidden");
-    $("#loginTab").classList.add("active");
-    $("#registerTab").classList.remove("active");
+
+  $("#cancelPasswordRecovery").onclick=async()=>{
+    recoveryModeActive=false;
+    await client.auth.signOut({scope:"local"}).catch(()=>{});
+    setAuthView("login");
+    showAuthMessage("");
   };
 
   function updateTopbarContext(page){
@@ -2877,10 +3097,17 @@
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
   $("#settingsLogoutButton").onclick=async()=>{
-    $("#settingsLogoutButton").disabled=true;
-    await client.auth.signOut();
-    $("#settingsLogoutButton").disabled=false;
-    $("#settingsDialog").close();
+    const button=$("#settingsLogoutButton");
+    button.disabled=true;
+    try{
+      const {error}=await client.auth.signOut({scope:"local"});
+      if(error)throw error;
+      $("#settingsDialog").close();
+    }catch(error){
+      alert(authUtil.errorMessage(error,"تعذر تسجيل الخروج."));
+    }finally{
+      button.disabled=false;
+    }
   };
   $("#settingsEditProfile").onclick=()=>{
     $("#settingsDialog").close();
@@ -3246,6 +3473,8 @@
       try{window.AshurNative.openExternal(href)}catch(_){}
     }
   });
+
+  try{window.AshurNative?.authReady?.()}catch(_){}
 
   window.ASHUR_HANDLE_BACK=()=>{
     const openDialogs=[...document.querySelectorAll("dialog[open]")];

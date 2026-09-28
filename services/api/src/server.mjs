@@ -198,7 +198,7 @@ async function requireAdmin(req, permission = null) {
 async function profileFor(userId) {
   const rows = await select(
     "profiles",
-    `select=id,name,username,is_private,is_banned,banned_until,ban_reason,warning_count,deleted_at&limit=1&id=eq.${encodeURIComponent(userId)}`,
+    `select=id,name,username,is_private,is_banned,banned_until,ban_reason,warning_count,deleted_at,saved_visibility&limit=1&id=eq.${encodeURIComponent(userId)}`,
   );
   return rows?.[0] || null;
 }
@@ -2204,6 +2204,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/v1/social/message-read") {
       return socialMessageRead(req, res);
     }
+    if (req.method === "POST" && url.pathname === "/v1/social/share-story") {
+      return socialShareToStory(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/mentions") {
+      return socialMentions(req, res);
+    }
+    const publicSavedMatch = /^\/v1\/social\/saved\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && publicSavedMatch) {
+      return socialPublicSaved(req, res, publicSavedMatch[1], url);
+    }
     const socialContentMatch = /^\/v1\/social\/content\/(posts|reels|stories)\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (socialContentMatch && req.method === "PATCH") {
       return socialEditContent(req, res, socialContentMatch[1], socialContentMatch[2]);
@@ -2232,6 +2242,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/conversations") {
       if (req.method === "GET") return listConversations(req, res);
       if (req.method === "POST") return createConversation(req, res);
+    }
+    const conversationMessageMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/messages$/.exec(url.pathname);
+    if (req.method === "POST" && conversationMessageMatch) {
+      return sendConversationMessage(req, res, conversationMessageMatch[1]);
     }
 
     if (req.method === "GET" && url.pathname === "/v1/admin/me") {

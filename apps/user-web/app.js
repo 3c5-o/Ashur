@@ -616,7 +616,7 @@
 
   async function loadStories(){
     const since=new Date().toISOString();
-    const {data,error}=await client.from("stories").select("id,author_id,media_id,caption,expires_at").gt("expires_at",since).order("created_at",{ascending:false}).limit(20);
+    const {data,error}=await client.from("stories").select("id,author_id,media_id,caption,expires_at,overlay_text,overlay_color,overlay_y,overlay_bg,shared_type,shared_id").gt("expires_at",since).order("created_at",{ascending:false}).limit(20);
     if(error){$("#stories").innerHTML="";return}
     const ids=[...new Set((data||[]).map(x=>x.author_id))];
     const profiles=await profilesMap(ids);
@@ -680,12 +680,30 @@
     const own=story.author_id===state.user.id;
     user.innerHTML=avatar(story.profile)+'<span>'+escapeHtml(story.profile?.name||story.profile?.username||"مستخدم")+'</span>';
     $("#storyViewerCaption").textContent=story.caption||"";
+    const storyOverlay=$("#storyViewerOverlay");
+    const overlayText=String(story.overlay_text||"").trim();
+    storyOverlay.innerHTML=overlayText?'<span>'+escapeHtml(overlayText)+'</span>':"";
+    storyOverlay.classList.toggle("hidden",!overlayText);
+    storyOverlay.classList.toggle("with-bg",Boolean(story.overlay_bg));
+    storyOverlay.style.color=story.overlay_color||"#ffffff";
+    storyOverlay.style.top=(Math.max(.12,Math.min(.86,Number(story.overlay_y||.5)))*100)+"%";
     $("#storyViewerMedia").innerHTML='<div class="empty">جارٍ تحميل القصة...</div>';
     $("#storyProgressBar").style.transition="none";
     $("#storyProgressBar").style.width="0%";
+    const sharedAction=story.shared_type&&story.shared_id
+      ?'<button id="openSharedStoryContent" type="button">'+(story.shared_type==="reel"?"فتح الريلز":"فتح المنشور")+'</button>'
+      :"";
     $("#storyViewerActions").innerHTML=own
-      ?'<button id="storyViewersButton" type="button">المشاهدات</button><button id="manageStoryButton" type="button">إدارة القصة</button>'
-      :'<button id="replyStoryButton" type="button">رد برسالة</button><button id="reportStoryButton" type="button">إبلاغ</button>';
+      ?sharedAction+'<button id="storyViewersButton" type="button">المشاهدات</button><button id="manageStoryButton" type="button">إدارة القصة</button>'
+      :sharedAction+'<button id="replyStoryButton" type="button">رد برسالة</button><button id="reportStoryButton" type="button">إبلاغ</button>';
+    if($("#openSharedStoryContent")){
+      $("#openSharedStoryContent").onclick=()=>{
+        const type=story.shared_type;
+        const id=story.shared_id;
+        closeStoryViewer();
+        openSharedContent(type,id).catch(error=>openInfoDialog("تعذر الفتح",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+      };
+    }
     openDialog(dialog);
     await hydrateMedia(user);
 

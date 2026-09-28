@@ -3405,33 +3405,65 @@
   };
 
 
+  function followListActionLabel(item){
+    if(item.id===state.user.id)return "";
+    if(item.viewer_status==="accepted")return "إلغاء المتابعة";
+    if(item.viewer_status==="pending")return "إلغاء الطلب";
+    if(item.follows_viewer)return "رد المتابعة";
+    return "متابعة";
+  }
+
   async function openFollowList(profileId,mode,title){
-    openInfoDialog(title,'<div id="followListDialog" class="list compact"><div class="empty">جارٍ التحميل...</div></div>');
+    const isOwn=profileId===state.user.id;
+    openInfoDialog(title,
+      '<div class="follow-list-shell">'+
+        '<div class="follow-list-head"><div><b>'+escapeHtml(title)+'</b><small>'+(mode==="followers"?"الأشخاص الذين يتابعون الحساب":"الحسابات التي تتم متابعتها")+'</small></div></div>'+
+        '<div id="followListDialog" class="follow-list"><div class="empty">جارٍ التحميل...</div></div>'+
+      '</div>');
     try{
-      const field=mode==="following"?"follower_id":"following_id";
-      const target=mode==="following"?"following_id":"follower_id";
-      const result=await client.from("follows")
-        .select(target+",created_at")
-        .eq(field,profileId)
-        .eq("status","accepted")
-        .order("created_at",{ascending:false})
-        .limit(500);
-      if(result.error)throw result.error;
-      const ids=[...new Set((result.data||[]).map(row=>row[target]).filter(Boolean))];
-      const profiles=await profilesMap(ids);
-      const items=ids.map(id=>profiles[id]).filter(Boolean);
-      $("#followListDialog").innerHTML=items.map(p=>
-        '<button class="list-card" data-open-follow-profile="'+escapeHtml(p.id)+'" type="button">'+
-          avatar(p)+
-          '<span class="grow"><b>'+escapeHtml(p.name||"مستخدم")+(p.is_verified?'<span class="verified-inline">✓</span>':"")+'</b><small>@'+escapeHtml(p.username||"")+'</small></span>'+
-        '</button>'
-      ).join("")||'<div class="empty">لا توجد حسابات.</div>';
+      const result=await api("/v1/social/follows/"+encodeURIComponent(profileId)+"?mode="+encodeURIComponent(mode));
+      const items=result.items||[];
+      $("#followListDialog").innerHTML=items.map(p=>{
+        const action=followListActionLabel(p);
+        const actionClass=p.viewer_status?"active":"";
+        return '<div class="follow-list-card">'+
+          '<button class="follow-person" data-open-follow-profile="'+escapeHtml(p.id)+'" type="button">'+
+            avatar(p,"follow-avatar")+
+            '<span class="follow-person-copy"><b>'+escapeHtml(p.name||"مستخدم")+(p.is_verified?'<span class="verified-inline">✓</span>':"")+'</b>'+
+            '<small>@'+escapeHtml(p.username||"")+(p.is_private?' · خاص':'')+'</small>'+
+            (p.bio?'<em>'+escapeHtml(p.bio)+'</em>':"")+
+            '</span>'+
+          '</button>'+
+          (action?'<button class="follow-list-action '+actionClass+'" data-follow-list-action="'+escapeHtml(p.id)+'" type="button">'+escapeHtml(action)+'</button>':"")+
+        '</div>';
+      }).join("")||'<div class="empty">لا توجد حسابات.</div>';
+
       await hydrateMedia($("#followListDialog"));
+
       $("#followListDialog").querySelectorAll("[data-open-follow-profile]").forEach(btn=>btn.onclick=()=>{
         const uid=btn.dataset.openFollowProfile;
         $("#infoDialog").close();
         openPublicProfile(uid);
       });
+
+      $("#followListDialog").querySelectorAll("[data-follow-list-action]").forEach(btn=>btn.onclick=async()=>{
+        const uid=btn.dataset.followListAction;
+        btn.disabled=true;
+        const original=btn.textContent;
+        btn.textContent="...";
+        try{
+          await followUser(uid,btn);
+          await openFollowList(profileId,mode,title);
+        }catch(error){
+          btn.disabled=false;
+          btn.textContent=original;
+        }
+      });
+
+      if(isOwn&&mode==="followers"&&items.some(item=>item.follows_viewer&&!item.viewer_status)){
+        const head=$("#followListDialog")?.previousElementSibling;
+        head?.insertAdjacentHTML("beforeend",'<span class="follow-back-hint">يمكنك رد المتابعة مباشرة من القائمة</span>');
+      }
     }catch(error){
       $("#followListDialog").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
     }

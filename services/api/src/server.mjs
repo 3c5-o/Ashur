@@ -893,7 +893,7 @@ async function createConversation(req, res) {
     : body.target_user_id
       ? [body.target_user_id]
       : [];
-  const memberIds = [...new Set([user.id, ...requested.filter(Boolean)])];
+  const memberIds = [...new Set([user.id, ...requested.filter((id) => /^[0-9a-f-]{36}$/i.test(String(id)))])];
 
   if (kind === "direct" && memberIds.length !== 2) {
     const error = new Error("المحادثة الخاصة تحتاج مستخدمًا واحدًا");
@@ -906,6 +906,7 @@ async function createConversation(req, res) {
     throw error;
   }
 
+  let directKey = null;
   if (kind === "direct") {
     const targetUserId = memberIds.find((id) => id !== user.id);
     if (await isBlockedBetween(user.id, targetUserId)) {
@@ -913,34 +914,36 @@ async function createConversation(req, res) {
       error.statusCode = 403;
       throw error;
     }
-    const mine = await select(
-      "conversation_members",
-      `select=conversation_id&user_id=eq.${encodeURIComponent(user.id)}&limit=200`,
-    );
-    const candidateIds = (mine || []).map((row) => row.conversation_id);
-    if (candidateIds.length) {
-      const direct = await select(
-        "conversations",
-        `select=id,kind,title,image_media_id,updated_at&id=in.(${candidateIds.join(",")})&kind=eq.direct&limit=200`,
-      );
-      for (const conversation of direct || []) {
-        const other = await select(
-          "conversation_members",
-          `select=user_id&conversation_id=eq.${encodeURIComponent(conversation.id)}&user_id=eq.${encodeURIComponent(targetUserId)}&limit=1`,
-        );
-        if (other?.[0]) {
-          return json(res, 200, conversation);
-        }
-      }
-    }
+
+    directKey = memberIds.map(String).sort().join(":");
+    const existing = await select(
+      "conversations",
+      "select=id,kind,title,image_media_id,updated_at,direct_key&direct_key=eq." + encodeURIComponent(directKey) + "&is_deleted=eq.false&limit=1",
+    ).catch(() => []);
+    if (existing?.[0]) return json(res, 200, existing[0]);
   }
 
-  const created = await insert("conversations", {
-    kind,
-    title: kind === "group" ? String(body.title || "مجموعة").slice(0, 80) : "",
-    created_by: user.id,
-  });
-  const conversation = created?.[0];
+  let conversation;
+  try {
+    const created = await insert("conversations", {
+      kind,
+      title: kind === "group" ? String(body.title || "مجموعة").slice(0, 80) : "",
+      created_by: user.id,
+      direct_key: directKey,
+      is_deleted: false,
+    });
+    conversation = created?.[0];
+  } catch (error) {
+    if (directKey) {
+      const existing = await select(
+        "conversations",
+        "select=id,kind,title,image_media_id,updated_at,direct_key&direct_key=eq." + encodeURIComponent(directKey) + "&is_deleted=eq.false&limit=1",
+      ).catch(() => []);
+      if (existing?.[0]) return json(res, 200, existing[0]);
+    }
+    throw error;
+  }
+
   const members = memberIds.map((id) => ({
     conversation_id: conversation.id,
     user_id: id,
@@ -950,6 +953,100 @@ async function createConversation(req, res) {
   json(res, 201, conversation);
 }
 
+
+async function listConversationMessages(req, res, conversationId) {
+  const user = await currentUser(req);
+  const membership = await select(
+    "conversation_members",
+    "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  if (!membership?.length) return json(res, 403, { error: "لست عضوًا في هذه المحادثة" });
+
+  const conversations = await select(
+    "conversations",
+    "select=id&is_deleted=eq.false&id=eq." + encodeURIComponent(conversationId) + "&limit=1",
+  );
+  if (!conversations?.[0]) return json(res, 404, { error: "المحادثة غير موجودة" });
+
+  const items = await select(
+    "messages",
+    "select=id,conversation_id,sender_id,body,media_id,reply_to,shared_type,shared_id,client_message_id,created_at&conversation_id=eq." +
+      encodeURIComponent(conversationId) +
+      "&is_deleted=eq.false&order=created_at.asc&limit=220",
+  );
+
+  const ownIds = (items || []).filter((m) => m.sender_id === user.id).map((m) => m.id);
+  let readIds = new Set();
+  if (ownIds.length) {
+    const reads = await select(
+      "message_reads",
+      "select=message_id,user_id&message_id=in.(" + ownIds.join(",") + ")&user_id=neq." + encodeURIComponent(user.id),
+    ).catch(() => []);
+    readIds = new Set((reads || []).map((row) => row.message_id));
+  }
+
+  json(res, 200, {
+    items: (items || []).map((message) => ({
+      ...message,
+      read_by_other: readIds.has(message.id),
+    })),
+  });
+}
+
+
+async function validateSharedMessageTarget(user, type, id) {
+  if (!type || !id) return true;
+
+  if (type === "profile") {
+    const profile = await profileFor(id);
+    return Boolean(profile && !profileIsBanned(profile) && await canViewOwner(user, id));
+  }
+
+  if (type === "post") {
+    const rows = await select(
+      "posts",
+      "select=author_id,visibility,moderation_status,deleted_at&id=eq." + encodeURIComponent(id) + "&limit=1",
+    );
+    const row = rows?.[0];
+    return Boolean(
+      row &&
+      !row.deleted_at &&
+      row.moderation_status === "active" &&
+      await canViewContentOwner(user, row.author_id, row.visibility || "public")
+    );
+  }
+
+  if (type === "reel") {
+    const rows = await select(
+      "reels",
+      "select=author_id,visibility,moderation_status,deleted_at&id=eq." + encodeURIComponent(id) + "&limit=1",
+    );
+    const row = rows?.[0];
+    return Boolean(
+      row &&
+      !row.deleted_at &&
+      row.moderation_status === "active" &&
+      await canViewContentOwner(user, row.author_id, row.visibility || "public")
+    );
+  }
+
+  if (type === "story") {
+    const rows = await select(
+      "stories",
+      "select=author_id,expires_at,moderation_status,deleted_at&id=eq." + encodeURIComponent(id) + "&limit=1",
+    );
+    const row = rows?.[0];
+    return Boolean(
+      row &&
+      !row.deleted_at &&
+      row.moderation_status === "active" &&
+      new Date(row.expires_at) > new Date() &&
+      await canViewOwner(user, row.author_id)
+    );
+  }
+
+  return false;
+}
 
 
 async function sendConversationMessage(req, res, conversationId) {
@@ -984,29 +1081,78 @@ async function sendConversationMessage(req, res, conversationId) {
   const replyTo = /^[0-9a-f-]{36}$/i.test(String(body.reply_to || "")) ? String(body.reply_to) : null;
   const sharedType = ["post","reel","story","profile"].includes(body.shared_type) ? body.shared_type : null;
   const sharedId = /^[0-9a-f-]{36}$/i.test(String(body.shared_id || "")) ? String(body.shared_id) : null;
+  const clientMessageId = /^[0-9a-f-]{36}$/i.test(String(body.client_message_id || ""))
+    ? String(body.client_message_id)
+    : null;
 
   if (!text && !mediaId && !(sharedType && sharedId)) {
     return json(res, 400, { error: "الرسالة فارغة" });
   }
 
+  if (clientMessageId) {
+    const existing = await select(
+      "messages",
+      "select=*&sender_id=eq." + encodeURIComponent(user.id) +
+        "&client_message_id=eq." + encodeURIComponent(clientMessageId) + "&limit=1",
+    ).catch(() => []);
+    if (existing?.[0]) return json(res, 200, { ...existing[0], duplicate: true });
+  }
+
+  if (replyTo) {
+    const parent = await select(
+      "messages",
+      "select=id&conversation_id=eq." + encodeURIComponent(conversationId) +
+        "&id=eq." + encodeURIComponent(replyTo) + "&is_deleted=eq.false&limit=1",
+    );
+    if (!parent?.[0]) return json(res, 400, { error: "الرسالة التي ترد عليها غير متاحة في هذه المحادثة" });
+  }
+
   if (mediaId) {
     const owned = await select(
       "media_objects",
-      "select=id&owner_id=eq." + encodeURIComponent(user.id) + "&id=eq." + encodeURIComponent(mediaId) + "&status=eq.ready&limit=1",
+      "select=id,kind,status&owner_id=eq." + encodeURIComponent(user.id) +
+        "&id=eq." + encodeURIComponent(mediaId) + "&status=eq.ready&limit=1",
     );
-    if (!owned?.length) return json(res, 403, { error: "المرفق غير صالح" });
+    const media = owned?.[0];
+    const allowedKinds = conversation.kind === "group"
+      ? ["chat_image","chat_video","chat_audio","chat_file","group_media"]
+      : ["chat_image","chat_video","chat_audio","chat_file"];
+    if (!media || !allowedKinds.includes(media.kind)) {
+      return json(res, 403, { error: "المرفق غير صالح لهذه المحادثة" });
+    }
   }
 
-  const rows = await insert("messages", {
-    conversation_id: conversationId,
-    sender_id: user.id,
-    body: text,
-    media_id: mediaId,
-    reply_to: replyTo,
-    shared_type: sharedType,
-    shared_id: sharedType ? sharedId : null,
-  });
-  const message = rows?.[0];
+  if ((sharedType && !sharedId) || (!sharedType && sharedId)) {
+    return json(res, 400, { error: "بيانات المشاركة غير مكتملة" });
+  }
+  if (sharedType && !(await validateSharedMessageTarget(user, sharedType, sharedId))) {
+    return json(res, 403, { error: "المحتوى المشارك غير متاح" });
+  }
+
+  let message;
+  try {
+    const rows = await insert("messages", {
+      conversation_id: conversationId,
+      sender_id: user.id,
+      body: text,
+      media_id: mediaId,
+      reply_to: replyTo,
+      shared_type: sharedType,
+      shared_id: sharedType ? sharedId : null,
+      client_message_id: clientMessageId,
+    });
+    message = rows?.[0];
+  } catch (error) {
+    if (clientMessageId) {
+      const existing = await select(
+        "messages",
+        "select=*&sender_id=eq." + encodeURIComponent(user.id) +
+          "&client_message_id=eq." + encodeURIComponent(clientMessageId) + "&limit=1",
+      ).catch(() => []);
+      if (existing?.[0]) return json(res, 200, { ...existing[0], duplicate: true });
+    }
+    throw error;
+  }
 
   await update("conversations", "id=eq." + encodeURIComponent(conversationId), {
     updated_at: new Date().toISOString(),
@@ -1022,7 +1168,9 @@ async function sendConversationMessage(req, res, conversationId) {
   ).catch(() => []);
   const sender = senderProfiles?.[0];
   const title = sender?.name || sender?.username || "رسالة جديدة";
-  const preview = text || (sharedType ? (sharedType === "post" ? "شارك منشورًا" : sharedType === "reel" ? "شارك ريلز" : "شارك محتوى") : "أرسل مرفقًا");
+  const preview = text || (sharedType
+    ? (sharedType === "post" ? "شارك منشورًا" : sharedType === "reel" ? "شارك ريلز" : sharedType === "story" ? "شارك قصة" : "شارك حسابًا")
+    : mediaId ? "أرسل مرفقًا" : "رسالة جديدة");
 
   for (const member of others || []) {
     await insert("notifications", {
@@ -1035,6 +1183,7 @@ async function sendConversationMessage(req, res, conversationId) {
       entity_id: conversationId,
     }, { returning: false }).catch(() => {});
   }
+
   const pushIds = (others || []).filter((m) => !m.muted).map((m) => m.user_id);
   if (pushIds.length) {
     await sendPush({
@@ -1363,9 +1512,35 @@ async function socialFollowList(req, res, profileId, url) {
 async function socialMessageRead(req, res) {
   const user = await currentUser(req);
   const body = await readJson(req);
-  const ids = Array.isArray(body.message_ids) ? body.message_ids.filter((x) => /^[0-9a-f-]{36}$/i.test(String(x))).slice(0, 200) : [];
-  if (!ids.length) return json(res, 200, { ok: true, count: 0 });
-  const rows = ids.map((messageId) => ({ message_id: messageId, user_id: user.id, read_at: new Date().toISOString() }));
+  const requested = Array.isArray(body.message_ids)
+    ? [...new Set(body.message_ids.filter((x) => /^[0-9a-f-]{36}$/i.test(String(x))).map(String))].slice(0, 200)
+    : [];
+  if (!requested.length) return json(res, 200, { ok: true, count: 0 });
+
+  const messages = await select(
+    "messages",
+    "select=id,conversation_id,sender_id&is_deleted=eq.false&id=in.(" + requested.join(",") + ")",
+  );
+  const conversationIds = [...new Set((messages || []).map((m) => m.conversation_id))];
+  const memberships = conversationIds.length
+    ? await select(
+        "conversation_members",
+        "select=conversation_id&user_id=eq." + encodeURIComponent(user.id) +
+          "&conversation_id=in.(" + conversationIds.join(",") + ")",
+      )
+    : [];
+  const allowedConversations = new Set((memberships || []).map((row) => row.conversation_id));
+  const allowedIds = (messages || [])
+    .filter((m) => m.sender_id !== user.id && allowedConversations.has(m.conversation_id))
+    .map((m) => m.id);
+
+  if (!allowedIds.length) return json(res, 200, { ok: true, count: 0 });
+
+  const rows = allowedIds.map((messageId) => ({
+    message_id: messageId,
+    user_id: user.id,
+    read_at: new Date().toISOString(),
+  }));
   await upsert("message_reads", rows, "message_id,user_id");
   json(res, 200, { ok: true, count: rows.length });
 }
@@ -2341,6 +2516,9 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "POST") return createConversation(req, res);
     }
     const conversationMessageMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/messages$/.exec(url.pathname);
+    if (req.method === "GET" && conversationMessageMatch) {
+      return listConversationMessages(req, res, conversationMessageMatch[1]);
+    }
     if (req.method === "POST" && conversationMessageMatch) {
       return sendConversationMessage(req, res, conversationMessageMatch[1]);
     }

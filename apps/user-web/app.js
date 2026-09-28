@@ -1161,8 +1161,9 @@
       const p=ps[r.author_id]||{};
       const likedNow=likedSet.has(r.id);
       const savedNow=savedSet.has(r.id);
-      return `<article class="reel" data-reel-id="${r.id}">
+      return `<article class="reel is-loading" data-reel-id="${r.id}">
         <video playsinline muted loop preload="metadata" data-media-id="${r.media_id}"></video>
+        <div class="reel-loader" aria-hidden="true"></div>
         <div class="reel-shade"></div>
         <button class="reel-center-play" type="button" aria-label="تشغيل">
           <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></svg>
@@ -1243,6 +1244,19 @@
       if(!video)return;
 
       observer.observe(reel);
+
+      const markReady=()=>{
+        reel.classList.remove("is-loading","load-error");
+      };
+      if(video.readyState>=2)markReady();
+      else{
+        video.addEventListener("loadeddata",markReady,{once:true});
+        video.addEventListener("canplay",markReady,{once:true});
+      }
+      video.addEventListener("error",()=>{
+        reel.classList.remove("is-loading");
+        reel.classList.add("load-error");
+      },{once:true});
 
       const togglePlay=()=>{
         if(video.paused){

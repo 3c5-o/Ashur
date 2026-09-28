@@ -61,7 +61,7 @@ dependencies {
 tasks.register("prepareSupabaseVendor") {
     doLast {
         def vendorFile = file("../../../apps/user-web/vendor/supabase.min.js")
-        def packageVendor = file("../../../node_modules/@supabase/supabase-js/dist/umd/supabase.min.js")
+        def packageVendor = file("../../../node_modules/@supabase/supabase-js/dist/umd/supabase.js")
         if ((!vendorFile.exists() || vendorFile.length() < 50000) && packageVendor.exists()) {
             vendorFile.parentFile.mkdirs()
             copy {

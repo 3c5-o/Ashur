@@ -41,6 +41,21 @@ jobs:
           test -n "$KEY_ALIAS" || (echo "ASHUR_KEY_ALIAS غير موجود" && exit 1)
           test -n "$KEY_PASS" || (echo "ASHUR_KEY_PASSWORD غير موجود" && exit 1)
 
+      - name: إعداد نود
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: تجهيز مكتبة Supabase المحلية
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          mkdir -p apps/user-web/vendor apps/admin-web/vendor
+          cp node_modules/@supabase/supabase-js/dist/umd/supabase.js apps/user-web/vendor/supabase.min.js
+          cp apps/user-web/vendor/supabase.min.js apps/admin-web/vendor/supabase.min.js
+          test -s apps/user-web/vendor/supabase.min.js
+          test -s apps/admin-web/vendor/supabase.min.js
+
       - name: إعداد جافا
         uses: actions/setup-java@v5
         with:
@@ -78,6 +93,7 @@ jobs:
           ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
           ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
           ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_KEY_PASSWORD }}
+          ASHUR_REQUIRE_RELEASE_SIGNING: "true"
         run: gradle -p android/user :app:assembleRelease --stacktrace
 
       - name: بناء نسخة الإدارة الرسمية
@@ -87,7 +103,21 @@ jobs:
           ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
           ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
           ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_KEY_PASSWORD }}
+          ASHUR_REQUIRE_RELEASE_SIGNING: "true"
         run: gradle -p android/admin :app:assembleRelease --stacktrace
+
+      - name: التحقق من توقيع APK الرسمي
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          USER_APK="$(find android/user/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          ADMIN_APK="$(find android/admin/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          test -n "$USER_APK" && test -s "$USER_APK"
+          test -n "$ADMIN_APK" && test -s "$ADMIN_APK"
+          "$APKSIGNER" verify --verbose --print-certs "$USER_APK"
+          "$APKSIGNER" verify --verbose --print-certs "$ADMIN_APK"
+          sha256sum "$USER_APK" "$ADMIN_APK"
 
       - name: تجهيز ملفات الإصدار
         shell: bash

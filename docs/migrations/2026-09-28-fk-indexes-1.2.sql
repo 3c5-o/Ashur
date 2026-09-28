@@ -1,0 +1,35 @@
+-- ASHUR 1.2 foreign-key indexes
+-- Applied to Supabase project pwpjrwcynnicexrmunkd on 2026-09-28.
+
+create index if not exists admin_notification_history_actor_idx on public.admin_notification_history(actor_user_id);
+create index if not exists admin_notification_history_target_idx on public.admin_notification_history(target_user_id);
+create index if not exists app_releases_created_by_idx on public.app_releases(created_by);
+create index if not exists audit_logs_actor_user_idx on public.audit_logs(actor_user_id);
+create index if not exists blocks_blocked_idx on public.blocks(blocked_id);
+create index if not exists comments_author_idx on public.comments(author_id);
+create index if not exists comments_hidden_by_idx on public.comments(hidden_by);
+create index if not exists conversations_created_by_idx on public.conversations(created_by);
+create index if not exists conversations_image_media_idx on public.conversations(image_media_id);
+create index if not exists media_objects_channel_key_idx on public.media_objects(channel_key);
+create index if not exists message_reads_user_idx on public.message_reads(user_id);
+create index if not exists messages_media_idx on public.messages(media_id);
+create index if not exists messages_reply_to_idx on public.messages(reply_to);
+create index if not exists messages_sender_idx on public.messages(sender_id);
+create index if not exists notification_outbox_notification_idx on public.notification_outbox(notification_id);
+create index if not exists notification_outbox_user_idx on public.notification_outbox(user_id);
+create index if not exists notifications_actor_idx on public.notifications(actor_id);
+create index if not exists post_media_media_idx on public.post_media(media_id);
+create index if not exists posts_hidden_by_idx on public.posts(hidden_by);
+create index if not exists profiles_avatar_media_idx on public.profiles(avatar_media_id);
+create index if not exists profiles_cover_media_idx on public.profiles(cover_media_id);
+create index if not exists reels_hidden_by_idx on public.reels(hidden_by);
+create index if not exists reels_media_idx on public.reels(media_id);
+create index if not exists reports_handled_by_idx on public.reports(handled_by);
+create index if not exists reports_reporter_idx on public.reports(reporter_id);
+create index if not exists saved_posts_post_idx on public.saved_posts(post_id);
+create index if not exists stories_hidden_by_idx on public.stories(hidden_by);
+create index if not exists stories_media_idx on public.stories(media_id);
+create index if not exists story_views_user_idx on public.story_views(user_id);
+create index if not exists support_tickets_assigned_to_idx on public.support_tickets(assigned_to);
+create index if not exists system_errors_user_idx on public.system_errors(user_id);
+create index if not exists upload_jobs_media_idx on public.upload_jobs(media_id);

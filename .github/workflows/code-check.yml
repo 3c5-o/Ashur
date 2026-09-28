@@ -2,10 +2,13 @@ name: فحص كود آشور
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/ashur-1.2-full-build]
     paths:
       - "apps/**/*.js"
+      - "apps/**/*.html"
+      - "apps/**/*.css"
       - "services/**/*.mjs"
+      - "android/user/app/src/main/java/**/*.java"
       - ".github/workflows/code-check.yml"
   workflow_dispatch:
 
@@ -24,16 +27,76 @@ jobs:
 
       - name: فحص نسخة المستخدم
         run: |
+          node --check apps/user-web/core.js
+          node --check apps/user-web/auth-core.js
+          node --check apps/user-web/profile-core.js
           node --check apps/user-web/app.js
           node <<'NODE'
           const fs = require('fs');
+          const vm = require('vm');
+          global.window = global;
+          vm.runInThisContext(fs.readFileSync('apps/user-web/auth-core.js','utf8'));
+          vm.runInThisContext(fs.readFileSync('apps/user-web/profile-core.js','utf8'));
+          if (!global.AshurAuth.validEmail('User@Example.com')) throw new Error('auth email validator failed');
+          if (global.AshurAuth.normalizeEmail(' User@Example.com ') !== 'user@example.com') throw new Error('auth email normalization failed');
+          if (!global.AshurAuth.validUsername('ashur_123')) throw new Error('auth username validator failed');
+          if (global.AshurAuth.validPassword('1234567')) throw new Error('auth password validator failed');
+          const signup = global.AshurAuth.parseAuthLink('ashur://reset-password?flow=signup#access_token=a&refresh_token=b&type=signup');
+          if (signup.flow !== 'signup' || signup.accessToken !== 'a' || signup.refreshToken !== 'b') throw new Error('auth signup link parser failed');
+          const recovery = global.AshurAuth.parseAuthLink('ashur://reset-password#access_token=a&refresh_token=b&type=recovery');
+          if (recovery.flow !== 'recovery') throw new Error('auth recovery link parser failed');
+          const profile = global.AshurProfile.validateProfile({
+            name:' حمد  النزار ',
+            username:'ASHUR_123',
+            bio:'نبذة',
+            profile_link:'example.com/user',
+            is_private:true
+          });
+          if (!profile.ok || profile.value.username !== 'ashur_123' || profile.value.name !== 'حمد النزار') throw new Error('profile normalization failed');
+          if (!profile.value.profile_link.startsWith('https://')) throw new Error('profile link normalization failed');
+          if (global.AshurProfile.validateImageFile({type:'application/pdf',size:10}).ok) throw new Error('profile image validation failed');
+          NODE
+          node <<'NODE'
+          const fs = require('fs');
           const app = fs.readFileSync('apps/user-web/app.js','utf8');
+          const index = fs.readFileSync('apps/user-web/index.html','utf8');
+          const core = fs.readFileSync('apps/user-web/core.js','utf8');
+          const authCore = fs.readFileSync('apps/user-web/auth-core.js','utf8');
+          const profileCore = fs.readFileSync('apps/user-web/profile-core.js','utf8');
+          const server = fs.readFileSync('services/api/src/server.mjs','utf8');
+          const manifest = fs.readFileSync('android/user/app/src/main/AndroidManifest.xml','utf8');
           const main = fs.readFileSync('android/user/app/src/main/java/app/ashur/social/MainActivity.java','utf8');
-          const badForEach = /(?<!\$)\$\("\.[^"]+"\)\.forEach/g.test(app);
-          const triple = app.includes('$$$(');
+          const directSingleForEach = /(^|[^$])\$\((?:"[^"]*"|'[^']*')\)\.forEach/g.test(app);
+          const triple = app.includes('$' + '$' + '$' + '(');
           const remoteUi = /REMOTE_APP_URL|vercel\.app\/app/.test(main);
-          if (badForEach || triple || remoteUi) {
-            console.error({badForEach,triple,remoteUi});
+          const missingBack = !app.includes('window.ASHUR_HANDLE_BACK');
+          const missingLocal = !main.includes('LOCAL_APP_URL');
+          const runtimeCdn = /cdn\.jsdelivr\.net|unpkg\.com/i.test(index);
+          const missingLocalVendor = !index.includes('./vendor/supabase.min.js');
+          const missingCore = !index.includes('./core.js') || !core.includes('createStore') || !core.includes('createRouter');
+          const appNotUsingCore = !app.includes('AshurCore.createStore') || !app.includes('AshurCore.createRouter');
+          const missingAuthCore = !index.includes('./auth-core.js') || !authCore.includes('parseAuthLink') || !authCore.includes('errorMessage');
+          const unsafeUrlDetection = app.includes('detectSessionInUrl: true');
+          const missingAuthReady = !main.includes('void authReady()') || !app.includes('AshurNative?.authReady');
+          const missingSingleTask = !manifest.includes('android:launchMode="singleTask"');
+          const missingLocalLogout = !app.includes('signOut({scope:"local"})');
+          const missingProfileCore = !index.includes('./profile-core.js') || !profileCore.includes('validateProfile') || !app.includes('window.AshurProfile');
+          const missingProfileMediaGuard = !server.includes('detectProfileImageMime') || !server.includes('kind === "profile_cover"');
+          const missingDeleteRevocation = !server.includes('/auth/v1/logout?scope=global');
+          const missingInteractionLocks = !app.includes('interactionLocks:new Set()') || !app.includes('ASHUR_LIKE_TOGGLE_FAILED');
+          const missingReelPagination = !app.includes('reelOffset:0') || !app.includes('loadReels({append=false}') || !app.includes('loadReels({append:true})');
+          const missingStoryViewersApi = !app.includes('/v1/social/story-viewers/') || !server.includes('async function socialStoryViewers');
+          const missingMediaVisibilityScan = !server.includes('for (const link of links)') || !server.includes('for (const reel of reels || [])');
+          const missingCommentFeedback = !index.includes('id="commentMessage"') || !app.includes('$("#commentMessage")');
+          const missingMessageIdempotency = !server.includes('client_message_id') || !app.includes('pendingChatSendId');
+          const missingMessageApiRead = !server.includes('async function listConversationMessages') || !app.includes('/messages");');
+          const missingMessagingRealtime = !app.includes('subscribeChatRealtime') || !app.includes('subscribeInboxRealtime') || !app.includes('CHANNEL_ERROR');
+          const missingChatStatus = !index.includes('id="chatConnectionStatus"') || !index.includes('id="chatMessage"');
+          const directMessageWrites = app.includes('client.from("messages").insert') || app.includes('client.from("message_reads").insert');
+          const missingAudioNative = !manifest.includes('android.permission.RECORD_AUDIO') || !main.includes('onPermissionRequest(PermissionRequest request)');
+          const missingConversationSoftDelete = !server.includes('is_deleted=eq.false') || !server.includes('direct_key');
+          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation || missingInteractionLocks || missingReelPagination || missingStoryViewersApi || missingMediaVisibilityScan || missingCommentFeedback || missingMessageIdempotency || missingMessageApiRead || missingMessagingRealtime || missingChatStatus || directMessageWrites || missingAudioNative || missingConversationSoftDelete) {
+            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation,missingInteractionLocks,missingReelPagination,missingStoryViewersApi,missingMediaVisibilityScan,missingCommentFeedback,missingMessageIdempotency,missingMessageApiRead,missingMessagingRealtime,missingChatStatus,directMessageWrites,missingAudioNative,missingConversationSoftDelete});
             process.exit(1);
           }
           NODE

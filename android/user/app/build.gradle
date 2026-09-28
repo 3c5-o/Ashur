@@ -9,6 +9,7 @@ def keystorePassword = System.getenv("ASHUR_KEYSTORE_PASSWORD") ?: ""
 def keyAliasName = System.getenv("ASHUR_KEY_ALIAS") ?: ""
 def keyPasswordValue = System.getenv("ASHUR_KEY_PASSWORD") ?: ""
 def hasReleaseSigning = keystoreFilePath && keystorePassword && keyAliasName && keyPasswordValue && file(keystoreFilePath).exists()
+def requireReleaseSigning = (System.getenv("ASHUR_REQUIRE_RELEASE_SIGNING") ?: "false").toBoolean()
 
 android {
     namespace 'app.ashur.social'
@@ -18,8 +19,8 @@ android {
         applicationId 'app.ashur.social'
         minSdk 24
         targetSdk 36
-        versionCode 6
-        versionName '1.1.0'
+        versionCode 7
+        versionName '1.2.0'
 
         buildConfigField "String", "ASHUR_API_URL", '"' + apiUrl + '"'
         buildConfigField "String", "ONESIGNAL_APP_ID", '"' + oneSignalAppId + '"'
@@ -43,7 +44,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            if (hasReleaseSigning) signingConfig signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else if (requireReleaseSigning) {
+                throw new GradleException("توقيع Release الرسمي مطلوب لكنه غير متوفر")
+            }
         }
     }
 
@@ -58,9 +63,29 @@ dependencies {
     implementation 'com.onesignal:OneSignal:5.10.2'
 }
 
+tasks.register("prepareSupabaseVendor") {
+    doLast {
+        def vendorFile = file("../../../apps/user-web/vendor/supabase.min.js")
+        def packageVendor = file("../../../node_modules/@supabase/supabase-js/dist/umd/supabase.js")
+        if ((!vendorFile.exists() || vendorFile.length() < 50000) && packageVendor.exists()) {
+            vendorFile.parentFile.mkdirs()
+            copy {
+                from packageVendor
+                into vendorFile.parentFile
+            }
+        }
+        if (!vendorFile.exists() || vendorFile.length() < 50000) {
+            throw new GradleException("ملف Supabase المحلي مفقود. نفّذ npm install قبل بناء التطبيق.")
+        }
+    }
+}
+
 tasks.register("syncWebAssets", Copy) {
     from "../../../apps/user-web"
     into "src/main/assets/www"
+}
+tasks.named("syncWebAssets").configure {
+    dependsOn("prepareSupabaseVendor")
 }
 tasks.named("preBuild").configure {
     dependsOn("syncWebAssets")

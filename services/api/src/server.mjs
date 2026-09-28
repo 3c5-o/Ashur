@@ -14,11 +14,13 @@ import {
   remove,
   upsert,
   count,
+  serviceRequest,
 } from "./supabase.mjs";
 import {
   uploadToChannel,
   downloadMessageMedia,
   testTelegramConnection,
+  testTelegramChannel,
 } from "./telegram.mjs";
 import { sendPush, notificationsConfigured } from "./onesignal.mjs";
 
@@ -31,10 +33,12 @@ const CHANNELS = {
   post_image: "posts_media",
   post_video: "posts_media",
   reel: "reels",
+  reel_cover: "reels",
   story: "stories",
   chat_image: "chat_media",
   chat_video: "chat_media",
   chat_audio: "chat_media",
+  chat_file: "chat_media",
   group_media: "group_media",
   file: "general_files",
   backup: "backups",
@@ -46,10 +50,12 @@ const DEFAULT_LIMITS_MB = {
   post_image: 10,
   post_video: 60,
   reel: 60,
+  reel_cover: 10,
   story: 30,
   chat_image: 10,
   chat_video: 50,
   chat_audio: 15,
+  chat_file: 50,
   group_media: 60,
   file: 60,
   backup: 60,
@@ -57,7 +63,7 @@ const DEFAULT_LIMITS_MB = {
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-File-Name, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-File-Name, X-Upload-Id, X-Requested-With");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
 }
@@ -151,6 +157,22 @@ async function adminFor(userId) {
   return rows?.[0] || null;
 }
 
+const ADMIN_ROLE_PERMISSIONS = {
+  moderator: new Set(["analytics", "users", "reports"]),
+  content_moderator: new Set(["analytics", "content", "reports"]),
+  support: new Set(["analytics", "support", "users"]),
+  analyst: new Set(["analytics"]),
+};
+
+function adminHasPermission(admin, permission) {
+  if (!admin || !admin.active) return false;
+  if (!permission) return true;
+  if (admin.role === "owner" || admin.role === "secondary_admin") return true;
+  if (admin.permissions?.[permission] === true) return true;
+  if (admin.permissions?.[permission] === false) return false;
+  return ADMIN_ROLE_PERMISSIONS[admin.role]?.has(permission) || false;
+}
+
 async function requireAdmin(req, permission = null) {
   const user = await currentUser(req, true);
   const admin = await adminFor(user.id);
@@ -159,30 +181,49 @@ async function requireAdmin(req, permission = null) {
     error.statusCode = 403;
     throw error;
   }
-  if (
-    permission &&
-    admin.role !== "owner" &&
-    admin.role !== "secondary_admin" &&
-    admin.permissions?.[permission] !== true
-  ) {
+  if (!adminHasPermission(admin, permission)) {
     const error = new Error("هذه الصلاحية غير متاحة لهذا المشرف");
     error.statusCode = 403;
     throw error;
   }
+  await update(
+    "admins",
+    "user_id=eq." + encodeURIComponent(user.id),
+    { last_active_at: new Date().toISOString() },
+    { returning: false },
+  ).catch(() => {});
   return { user, admin };
 }
 
 async function profileFor(userId) {
   const rows = await select(
     "profiles",
-    `select=id,name,username,is_private,is_banned&limit=1&id=eq.${encodeURIComponent(userId)}`,
+    `select=id,name,username,is_private,is_banned,banned_until,ban_reason,warning_count,deleted_at,saved_visibility&limit=1&id=eq.${encodeURIComponent(userId)}`,
   );
   return rows?.[0] || null;
 }
 
+async function isBlockedBetween(userId, otherId) {
+  if (!userId || !otherId || userId === otherId) return false;
+  const rows = await select(
+    "blocks",
+    "select=blocker_id&or=(and(blocker_id.eq." + encodeURIComponent(userId) + ",blocked_id.eq." + encodeURIComponent(otherId) + "),and(blocker_id.eq." + encodeURIComponent(otherId) + ",blocked_id.eq." + encodeURIComponent(userId) + "))&limit=1",
+  ).catch(() => []);
+  return Boolean(rows?.length);
+}
+
+function profileIsBanned(profile) {
+  if (!profile) return true;
+  if (profile.deleted_at) return true;
+  if (profile.is_banned) return true;
+  if (profile.banned_until && new Date(profile.banned_until) > new Date()) return true;
+  return false;
+}
+
 async function canViewOwner(user, ownerId) {
   const owner = await profileFor(ownerId);
-  if (!owner || owner.is_banned) return false;
+  if (profileIsBanned(owner)) return false;
+  if (user?.id && await isBlockedBetween(user.id, ownerId)) return false;
   if (!owner.is_private) return true;
   if (!user) return false;
   if (user.id === ownerId) return true;
@@ -193,9 +234,33 @@ async function canViewOwner(user, ownerId) {
   return Boolean(follows?.length);
 }
 
+async function canViewContentOwner(user, ownerId, visibility = "public") {
+  if (!ownerId) return false;
+  if (user?.id === ownerId) return true;
+  const owner = await profileFor(ownerId);
+  if (profileIsBanned(owner)) return false;
+  if (user?.id && await isBlockedBetween(user.id, ownerId)) return false;
+  if (!owner.is_private && visibility === "public") return true;
+  if (!user) return false;
+  const rows = await select(
+    "follows",
+    "select=status&follower_id=eq." + encodeURIComponent(user.id) +
+      "&following_id=eq." + encodeURIComponent(ownerId) +
+      "&status=eq.accepted&limit=1",
+  );
+  return Boolean(rows?.length);
+}
+
 async function canReadMedia(user, media) {
   if (!media) return false;
   if (user?.id && media.owner_id === user.id) return true;
+  if (user?.id) {
+    const adminRows = await select(
+      "admins",
+      "select=user_id&user_id=eq." + encodeURIComponent(user.id) + "&active=eq.true&limit=1",
+    ).catch(() => []);
+    if (adminRows?.length) return true;
+  }
 
   if (media.kind === "profile" || media.kind === "profile_cover") {
     return canViewOwner(user, media.owner_id);
@@ -204,34 +269,59 @@ async function canReadMedia(user, media) {
   if (media.kind === "post_image" || media.kind === "post_video") {
     const links = await select(
       "post_media",
-      `select=post_id&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=post_id&media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
     if (!links?.length) return false;
-    const posts = await select(
-      "posts",
-      `select=author_id&id=eq.${encodeURIComponent(links[0].post_id)}&limit=1`,
-    );
-    return posts?.[0] ? canViewOwner(user, posts[0].author_id) : false;
+    for (const link of links) {
+      const posts = await select(
+        "posts",
+        `select=author_id,visibility,moderation_status,deleted_at&id=eq.${encodeURIComponent(link.post_id)}&limit=1`,
+      );
+      const post = posts?.[0];
+      if (!post || post.deleted_at || post.moderation_status !== "active") continue;
+      if (await canViewContentOwner(user, post.author_id, post.visibility || "public")) return true;
+    }
+    return false;
   }
 
   if (media.kind === "reel") {
     const reels = await select(
       "reels",
-      `select=author_id&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,visibility,moderation_status,deleted_at&media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
-    return reels?.[0] ? canViewOwner(user, reels[0].author_id) : false;
+    for (const reel of reels || []) {
+      if (!reel || reel.deleted_at || reel.moderation_status !== "active") continue;
+      if (await canViewContentOwner(user, reel.author_id, reel.visibility || "public")) return true;
+    }
+    return false;
+  }
+
+  if (media.kind === "reel_cover") {
+    const reels = await select(
+      "reels",
+      `select=author_id,visibility,moderation_status,deleted_at&cover_media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
+    );
+    for (const reel of reels || []) {
+      if (!reel || reel.deleted_at || reel.moderation_status !== "active") continue;
+      if (await canViewContentOwner(user, reel.author_id, reel.visibility || "public")) return true;
+    }
+    return false;
   }
 
   if (media.kind === "story") {
     const stories = await select(
       "stories",
-      `select=author_id,expires_at&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=author_id,expires_at,moderation_status,deleted_at&media_id=eq.${encodeURIComponent(media.id)}&limit=50`,
     );
-    if (!stories?.[0] || new Date(stories[0].expires_at) <= new Date()) return false;
-    return canViewOwner(user, stories[0].author_id);
+    for (const story of stories || []) {
+      if (!story || story.deleted_at || story.moderation_status !== "active") continue;
+      if (new Date(story.expires_at) <= new Date()) continue;
+      if (await canViewOwner(user, story.author_id)) return true;
+    }
+    return false;
   }
 
-  if (["chat_image", "chat_video", "chat_audio", "group_media"].includes(media.kind)) {
+  if (["chat_image", "chat_video", "chat_audio", "chat_file", "group_media"].includes(media.kind)) {
     if (!user) return false;
     const messages = await select(
       "messages",
@@ -256,6 +346,26 @@ async function setting(key) {
   return rows?.[0]?.value || {};
 }
 
+async function writeAudit(actorUserId, action, targetType = null, targetId = null, details = {}) {
+  return insert("audit_logs", {
+    actor_user_id: actorUserId || null,
+    action,
+    target_type: targetType,
+    target_id: targetId == null ? null : String(targetId),
+    details: details || {},
+  }, { returning: false }).catch(() => {});
+}
+
+async function logSystemError(service, error, context = {}, userId = null) {
+  return insert("system_errors", {
+    service: String(service || "api").slice(0, 80),
+    code: String(error?.code || error?.statusCode || "").slice(0, 80),
+    message: String(error?.message || error || "Unknown error").slice(0, 1500),
+    context: context || {},
+    user_id: userId || null,
+  }, { returning: false }).catch(() => {});
+}
+
 async function uploadLimitBytes(kind) {
   try {
     const limits = await setting("limits");
@@ -265,10 +375,12 @@ async function uploadLimitBytes(kind) {
       post_image: limits.image_mb,
       post_video: limits.max_upload_mb,
       reel: limits.max_upload_mb,
+      reel_cover: limits.image_mb,
       story: limits.story_mb,
       chat_image: limits.image_mb,
       chat_video: limits.chat_video_mb,
       chat_audio: limits.audio_mb,
+      chat_file: limits.chat_video_mb || limits.max_upload_mb,
       group_media: limits.max_upload_mb,
       file: limits.max_upload_mb,
       backup: limits.max_upload_mb,
@@ -280,12 +392,34 @@ async function uploadLimitBytes(kind) {
   }
 }
 
-async function receiveFile(req, maxBytes) {
+async function receiveFile(req, maxBytes, jobId = null) {
   const id = crypto.randomUUID();
-  const filePath = path.join(cacheDir, `upload-${id}.bin`);
+  const filePath = path.join(cacheDir, "upload-" + id + ".bin");
   const stream = fs.createWriteStream(filePath, { flags: "wx" });
   const hash = crypto.createHash("sha256");
   let size = 0;
+  let lastProgress = 0;
+
+  const syncProgress = async (force = false) => {
+    if (!jobId) return;
+    if (!force && size - lastProgress < 4 * 1024 * 1024) return;
+    lastProgress = size;
+    await update(
+      "upload_jobs",
+      "id=eq." + encodeURIComponent(jobId),
+      { received_bytes: size, status: "receiving", updated_at: new Date().toISOString() },
+      { returning: false },
+    ).catch(() => {});
+    const rows = await select(
+      "upload_jobs",
+      "select=cancel_requested&id=eq." + encodeURIComponent(jobId) + "&limit=1",
+    ).catch(() => []);
+    if (rows?.[0]?.cancel_requested) {
+      const error = new Error("تم إلغاء الرفع");
+      error.statusCode = 499;
+      throw error;
+    }
+  };
 
   try {
     for await (const chunk of req) {
@@ -299,7 +433,9 @@ async function receiveFile(req, maxBytes) {
       if (!stream.write(chunk)) {
         await new Promise((resolve) => stream.once("drain", resolve));
       }
+      await syncProgress(false);
     }
+    await syncProgress(true);
     await new Promise((resolve, reject) => stream.end((error) => error ? reject(error) : resolve()));
     return { filePath, size, sha256: hash.digest("hex") };
   } catch (error) {
@@ -309,10 +445,44 @@ async function receiveFile(req, maxBytes) {
   }
 }
 
+async function detectProfileImageMime(filePath) {
+  const handle = await fsp.open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(32);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const b = buffer.subarray(0, bytesRead);
+
+    if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+      return "image/jpeg";
+    }
+    if (
+      b.length >= 8 &&
+      b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+      b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a
+    ) {
+      return "image/png";
+    }
+    if (
+      b.length >= 12 &&
+      b.subarray(0, 4).toString("ascii") === "RIFF" &&
+      b.subarray(8, 12).toString("ascii") === "WEBP"
+    ) {
+      return "image/webp";
+    }
+    if (b.length >= 12 && b.subarray(4, 8).toString("ascii") === "ftyp") {
+      const brand = b.subarray(8, 12).toString("ascii");
+      if (brand === "avif" || brand === "avis") return "image/avif";
+    }
+    return "";
+  } finally {
+    await handle.close();
+  }
+}
+
 async function handleUpload(req, res, url) {
   const user = await currentUser(req);
   const profile = await profileFor(user.id);
-  if (!profile || profile.is_banned) {
+  if (profileIsBanned(profile)) {
     const error = new Error("الحساب غير مسموح له بالرفع");
     error.statusCode = 403;
     throw error;
@@ -328,7 +498,7 @@ async function handleUpload(req, res, url) {
 
   const channels = await select(
     "storage_channels",
-    `select=*&channel_key=eq.${encodeURIComponent(channelKey)}&enabled=eq.true&status=eq.connected&limit=1`,
+    "select=*&channel_key=eq." + encodeURIComponent(channelKey) + "&enabled=eq.true&status=eq.connected&limit=1",
   );
   const channel = channels?.[0];
   if (!channel) {
@@ -340,20 +510,121 @@ async function handleUpload(req, res, url) {
   const maxBytes = await uploadLimitBytes(kind);
   const declared = Number(req.headers["content-length"] || 0);
   if (declared && declared > maxBytes) {
-    const error = new Error(`الحد الأقصى لهذا الملف ${Math.floor(maxBytes / 1024 / 1024)} ميغابايت`);
+    const error = new Error("الحد الأقصى لهذا الملف " + Math.floor(maxBytes / 1024 / 1024) + " ميغابايت");
     error.statusCode = 413;
     throw error;
   }
 
   const originalName = decodeURIComponent(String(req.headers["x-file-name"] || "ملف"));
   const mimeType = String(req.headers["content-type"] || "application/octet-stream");
-  const received = await receiveFile(req, maxBytes);
+  const clientUploadId = String(req.headers["x-upload-id"] || crypto.randomUUID()).slice(0, 120);
+  const isProfileImage = kind === "profile" || kind === "profile_cover";
 
+  let verifiedMimeType = mimeType;
+  let job = null;
+  let received = null;
   try {
+    const existingJobs = await select(
+      "upload_jobs",
+      "select=*&client_upload_id=eq." + encodeURIComponent(clientUploadId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+    ).catch(() => []);
+    job = existingJobs?.[0] || null;
+
+    if (job?.status === "completed" && job.media_id) {
+      const mediaRows = await select(
+        "media_objects",
+        "select=*&id=eq." + encodeURIComponent(job.media_id) + "&status=eq.ready&limit=1",
+      ).catch(() => []);
+      if (mediaRows?.[0]) {
+        return json(res, 200, { ...mediaRows[0], reused: true, upload_job_id: job.id });
+      }
+    }
+
+    if (!job) {
+      const jobs = await insert("upload_jobs", {
+        client_upload_id: clientUploadId,
+        user_id: user.id,
+        kind,
+        original_name: originalName.slice(0, 250),
+        size_bytes: declared || 0,
+        received_bytes: 0,
+        status: "queued",
+      });
+      job = jobs?.[0] || null;
+    } else {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          kind,
+          original_name: originalName.slice(0, 250),
+          size_bytes: declared || job.size_bytes || 0,
+          received_bytes: 0,
+          status: "queued",
+          error: null,
+          cancel_requested: false,
+          updated_at: new Date().toISOString(),
+          completed_at: null,
+        },
+        { returning: false },
+      );
+    }
+
+    received = await receiveFile(req, maxBytes, job?.id || null);
+
+    if (isProfileImage) {
+      const detectedMime = await detectProfileImageMime(received.filePath);
+      if (!detectedMime) {
+        const error = new Error("صيغة صورة الحساب غير مدعومة. استخدم JPG أو PNG أو WebP أو AVIF");
+        error.statusCode = 415;
+        throw error;
+      }
+      verifiedMimeType = detectedMime;
+    }
+
+    if (job?.id) {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          size_bytes: received.size,
+          received_bytes: received.size,
+          status: "storing",
+          updated_at: new Date().toISOString(),
+        },
+        { returning: false },
+      ).catch(() => {});
+    }
+
+    const duplicates = await select(
+      "media_objects",
+      "select=*&owner_id=eq." + encodeURIComponent(user.id) +
+        "&kind=eq." + encodeURIComponent(kind) +
+        "&sha256=eq." + encodeURIComponent(received.sha256) +
+        "&status=eq.ready&limit=1",
+    ).catch(() => []);
+
+    if (duplicates?.[0]) {
+      if (job?.id) {
+        await update(
+          "upload_jobs",
+          "id=eq." + encodeURIComponent(job.id),
+          {
+            media_id: duplicates[0].id,
+            status: "completed",
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { returning: false },
+        ).catch(() => {});
+      }
+      return json(res, 200, { ...duplicates[0], duplicate: true, upload_job_id: job?.id || null });
+    }
+
     const uploaded = await uploadToChannel({
       channelId: channel.channel_id,
       filePath: received.filePath,
-      caption: `آشور · ${kind} · ${user.id}`,
+      caption: "آشور · " + kind + " · " + user.id,
     });
 
     const rows = await insert("media_objects", {
@@ -363,23 +634,75 @@ async function handleUpload(req, res, url) {
       telegram_message_id: uploaded.messageId,
       telegram_file_id: uploaded.storageRef,
       original_name: originalName.slice(0, 250),
-      mime_type: mimeType.slice(0, 150),
+      mime_type: verifiedMimeType.slice(0, 150),
       size_bytes: received.size,
       sha256: received.sha256,
       status: "ready",
     });
+    const media = rows?.[0] || {};
 
     await update(
       "storage_channels",
-      `channel_key=eq.${encodeURIComponent(channelKey)}`,
+      "channel_key=eq." + encodeURIComponent(channelKey),
       { last_upload_at: new Date().toISOString() },
       { returning: false },
     ).catch(() => {});
 
-    json(res, 201, rows?.[0] || {});
+    if (job?.id) {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          media_id: media.id || null,
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { returning: false },
+      ).catch(() => {});
+    }
+
+    json(res, 201, { ...media, upload_job_id: job?.id || null });
+  } catch (error) {
+    if (job?.id) {
+      await update(
+        "upload_jobs",
+        "id=eq." + encodeURIComponent(job.id),
+        {
+          status: error.statusCode === 499 ? "cancelled" : "failed",
+          error: String(error.message || error).slice(0, 1000),
+          updated_at: new Date().toISOString(),
+        },
+        { returning: false },
+      ).catch(() => {});
+    }
+    if (error.statusCode !== 499) {
+      await logSystemError("upload", error, { kind, client_upload_id: clientUploadId }, user.id);
+    }
+    throw error;
   } finally {
-    await fsp.rm(received.filePath, { force: true }).catch(() => {});
+    if (received?.filePath) {
+      await fsp.rm(received.filePath, { force: true }).catch(() => {});
+    }
   }
+}
+
+async function cancelUploadJob(req, res, uploadId) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "upload_jobs",
+    "select=id,status&client_upload_id=eq." + encodeURIComponent(uploadId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const job = rows?.[0];
+  if (!job) return json(res, 404, { error: "عملية الرفع غير موجودة" });
+  if (job.status === "completed") return json(res, 409, { error: "اكتمل الرفع بالفعل" });
+  await update(
+    "upload_jobs",
+    "id=eq." + encodeURIComponent(job.id),
+    { cancel_requested: true, updated_at: new Date().toISOString() },
+    { returning: false },
+  );
+  return json(res, 200, { ok: true });
 }
 
 async function ensureCachedMedia(media) {
@@ -499,18 +822,29 @@ async function listConversations(req, res) {
   if (!memberships?.length) return json(res, 200, { items: [] });
 
   const ids = memberships.map((x) => x.conversation_id);
-  const idFilter = ids.join(",");
   const conversations = await select(
     "conversations",
-    `select=id,kind,title,image_media_id,updated_at&id=in.(${idFilter})&order=updated_at.desc`,
+    `select=id,kind,title,image_media_id,updated_at&id=in.(${ids.join(",")})&is_deleted=eq.false&order=updated_at.desc`,
   );
 
   const items = [];
   for (const conversation of conversations || []) {
     const messages = await select(
       "messages",
-      `select=body,created_at&conversation_id=eq.${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=1`,
+      `select=id,sender_id,body,media_id,shared_type,shared_id,created_at&conversation_id=eq.${encodeURIComponent(conversation.id)}&is_deleted=eq.false&order=created_at.desc&limit=100`,
     );
+    const latest = messages?.[0] || null;
+    const incomingIds = (messages || []).filter((m) => m.sender_id !== user.id).map((m) => m.id);
+    let unreadCount = 0;
+    if (incomingIds.length) {
+      const reads = await select(
+        "message_reads",
+        `select=message_id&user_id=eq.${encodeURIComponent(user.id)}&message_id=in.(${incomingIds.join(",")})`,
+      ).catch(() => []);
+      const readSet = new Set((reads || []).map((r) => r.message_id));
+      unreadCount = incomingIds.filter((id) => !readSet.has(id)).length;
+    }
+
     let title = conversation.title || "";
     let peerProfile = null;
     if (conversation.kind === "direct") {
@@ -527,14 +861,26 @@ async function listConversations(req, res) {
         if (!title) title = peerProfile?.name || peerProfile?.username || "محادثة";
       }
     }
+
+    const sharedLabel = latest?.shared_type === "post"
+      ? "شارك منشورًا"
+      : latest?.shared_type === "reel"
+        ? "شارك ريلز"
+        : latest?.shared_type === "story"
+          ? "شارك قصة"
+          : "";
+    const lastMessage = latest?.body || sharedLabel || (latest?.media_id ? "مرفق" : "");
+
     items.push({
       ...conversation,
       title: title || "محادثة",
       peer_profile: peerProfile,
-      last_message: messages?.[0]?.body || "",
-      updated_at: messages?.[0]?.created_at || conversation.updated_at,
+      last_message: lastMessage,
+      unread_count: unreadCount,
+      updated_at: latest?.created_at || conversation.updated_at,
     });
   }
+  items.sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at));
   json(res, 200, { items });
 }
 
@@ -547,7 +893,7 @@ async function createConversation(req, res) {
     : body.target_user_id
       ? [body.target_user_id]
       : [];
-  const memberIds = [...new Set([user.id, ...requested.filter(Boolean)])];
+  const memberIds = [...new Set([user.id, ...requested.filter((id) => /^[0-9a-f-]{36}$/i.test(String(id)))])];
 
   if (kind === "direct" && memberIds.length !== 2) {
     const error = new Error("المحادثة الخاصة تحتاج مستخدمًا واحدًا");
@@ -560,36 +906,44 @@ async function createConversation(req, res) {
     throw error;
   }
 
+  let directKey = null;
   if (kind === "direct") {
     const targetUserId = memberIds.find((id) => id !== user.id);
-    const mine = await select(
-      "conversation_members",
-      `select=conversation_id&user_id=eq.${encodeURIComponent(user.id)}&limit=200`,
-    );
-    const candidateIds = (mine || []).map((row) => row.conversation_id);
-    if (candidateIds.length) {
-      const direct = await select(
-        "conversations",
-        `select=id,kind,title,image_media_id,updated_at&id=in.(${candidateIds.join(",")})&kind=eq.direct&limit=200`,
-      );
-      for (const conversation of direct || []) {
-        const other = await select(
-          "conversation_members",
-          `select=user_id&conversation_id=eq.${encodeURIComponent(conversation.id)}&user_id=eq.${encodeURIComponent(targetUserId)}&limit=1`,
-        );
-        if (other?.[0]) {
-          return json(res, 200, conversation);
-        }
-      }
+    if (await isBlockedBetween(user.id, targetUserId)) {
+      const error = new Error("لا يمكن بدء محادثة مع هذا الحساب");
+      error.statusCode = 403;
+      throw error;
     }
+
+    directKey = memberIds.map(String).sort().join(":");
+    const existing = await select(
+      "conversations",
+      "select=id,kind,title,image_media_id,updated_at,direct_key&direct_key=eq." + encodeURIComponent(directKey) + "&is_deleted=eq.false&limit=1",
+    ).catch(() => []);
+    if (existing?.[0]) return json(res, 200, existing[0]);
   }
 
-  const created = await insert("conversations", {
-    kind,
-    title: kind === "group" ? String(body.title || "مجموعة").slice(0, 80) : "",
-    created_by: user.id,
-  });
-  const conversation = created?.[0];
+  let conversation;
+  try {
+    const created = await insert("conversations", {
+      kind,
+      title: kind === "group" ? String(body.title || "مجموعة").slice(0, 80) : "",
+      created_by: user.id,
+      direct_key: directKey,
+      is_deleted: false,
+    });
+    conversation = created?.[0];
+  } catch (error) {
+    if (directKey) {
+      const existing = await select(
+        "conversations",
+        "select=id,kind,title,image_media_id,updated_at,direct_key&direct_key=eq." + encodeURIComponent(directKey) + "&is_deleted=eq.false&limit=1",
+      ).catch(() => []);
+      if (existing?.[0]) return json(res, 200, existing[0]);
+    }
+    throw error;
+  }
+
   const members = memberIds.map((id) => ({
     conversation_id: conversation.id,
     user_id: id,
@@ -599,20 +953,708 @@ async function createConversation(req, res) {
   json(res, 201, conversation);
 }
 
+
+async function listConversationMessages(req, res, conversationId) {
+  const user = await currentUser(req);
+  const membership = await select(
+    "conversation_members",
+    "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  if (!membership?.length) return json(res, 403, { error: "لست عضوًا في هذه المحادثة" });
+
+  const conversations = await select(
+    "conversations",
+    "select=id&is_deleted=eq.false&id=eq." + encodeURIComponent(conversationId) + "&limit=1",
+  );
+  if (!conversations?.[0]) return json(res, 404, { error: "المحادثة غير موجودة" });
+
+  const items = await select(
+    "messages",
+    "select=id,conversation_id,sender_id,body,media_id,reply_to,shared_type,shared_id,client_message_id,created_at&conversation_id=eq." +
+      encodeURIComponent(conversationId) +
+      "&is_deleted=eq.false&order=created_at.asc&limit=220",
+  );
+
+  const ownIds = (items || []).filter((m) => m.sender_id === user.id).map((m) => m.id);
+  let readIds = new Set();
+  if (ownIds.length) {
+    const reads = await select(
+      "message_reads",
+      "select=message_id,user_id&message_id=in.(" + ownIds.join(",") + ")&user_id=neq." + encodeURIComponent(user.id),
+    ).catch(() => []);
+    readIds = new Set((reads || []).map((row) => row.message_id));
+  }
+
+  json(res, 200, {
+    items: (items || []).map((message) => ({
+      ...message,
+      read_by_other: readIds.has(message.id),
+    })),
+  });
+}
+
+
+async function validateSharedMessageTarget(user, type, id) {
+  if (!type || !id) return true;
+
+  if (type === "profile") {
+    const profile = await profileFor(id);
+    return Boolean(profile && !profileIsBanned(profile) && await canViewOwner(user, id));
+  }
+
+  if (type === "post") {
+    const rows = await select(
+      "posts",
+      "select=author_id,visibility,moderation_status,deleted_at&id=eq." + encodeURIComponent(id) + "&limit=1",
+    );
+    const row = rows?.[0];
+    return Boolean(
+      row &&
+      !row.deleted_at &&
+      row.moderation_status === "active" &&
+      await canViewContentOwner(user, row.author_id, row.visibility || "public")
+    );
+  }
+
+  if (type === "reel") {
+    const rows = await select(
+      "reels",
+      "select=author_id,visibility,moderation_status,deleted_at&id=eq." + encodeURIComponent(id) + "&limit=1",
+    );
+    const row = rows?.[0];
+    return Boolean(
+      row &&
+      !row.deleted_at &&
+      row.moderation_status === "active" &&
+      await canViewContentOwner(user, row.author_id, row.visibility || "public")
+    );
+  }
+
+  if (type === "story") {
+    const rows = await select(
+      "stories",
+      "select=author_id,expires_at,moderation_status,deleted_at&id=eq." + encodeURIComponent(id) + "&limit=1",
+    );
+    const row = rows?.[0];
+    return Boolean(
+      row &&
+      !row.deleted_at &&
+      row.moderation_status === "active" &&
+      new Date(row.expires_at) > new Date() &&
+      await canViewOwner(user, row.author_id)
+    );
+  }
+
+  return false;
+}
+
+
+async function sendConversationMessage(req, res, conversationId) {
+  const user = await currentUser(req);
+  const memberships = await select(
+    "conversation_members",
+    "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  if (!memberships?.length) return json(res, 403, { error: "لست عضوًا في هذه المحادثة" });
+
+  const conversations = await select(
+    "conversations",
+    "select=id,kind&is_deleted=eq.false&id=eq." + encodeURIComponent(conversationId) + "&limit=1",
+  );
+  const conversation = conversations?.[0];
+  if (!conversation) return json(res, 404, { error: "المحادثة غير موجودة" });
+
+  if (conversation.kind === "direct") {
+    const peers = await select(
+      "conversation_members",
+      "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=neq." + encodeURIComponent(user.id) + "&limit=1",
+    );
+    const peerId = peers?.[0]?.user_id;
+    if (peerId && await isBlockedBetween(user.id, peerId)) {
+      return json(res, 403, { error: "لا يمكن إرسال رسائل إلى هذا الحساب" });
+    }
+  }
+
+  const body = await readJson(req);
+  const text = String(body.body || "").trim().slice(0, 4000);
+  const mediaId = /^[0-9a-f-]{36}$/i.test(String(body.media_id || "")) ? String(body.media_id) : null;
+  const replyTo = /^[0-9a-f-]{36}$/i.test(String(body.reply_to || "")) ? String(body.reply_to) : null;
+  const sharedType = ["post","reel","story","profile"].includes(body.shared_type) ? body.shared_type : null;
+  const sharedId = /^[0-9a-f-]{36}$/i.test(String(body.shared_id || "")) ? String(body.shared_id) : null;
+  const clientMessageId = /^[0-9a-f-]{36}$/i.test(String(body.client_message_id || ""))
+    ? String(body.client_message_id)
+    : null;
+
+  if (!text && !mediaId && !(sharedType && sharedId)) {
+    return json(res, 400, { error: "الرسالة فارغة" });
+  }
+
+  if (clientMessageId) {
+    const existing = await select(
+      "messages",
+      "select=*&sender_id=eq." + encodeURIComponent(user.id) +
+        "&client_message_id=eq." + encodeURIComponent(clientMessageId) + "&limit=1",
+    ).catch(() => []);
+    if (existing?.[0]) return json(res, 200, { ...existing[0], duplicate: true });
+  }
+
+  if (replyTo) {
+    const parent = await select(
+      "messages",
+      "select=id&conversation_id=eq." + encodeURIComponent(conversationId) +
+        "&id=eq." + encodeURIComponent(replyTo) + "&is_deleted=eq.false&limit=1",
+    );
+    if (!parent?.[0]) return json(res, 400, { error: "الرسالة التي ترد عليها غير متاحة في هذه المحادثة" });
+  }
+
+  if (mediaId) {
+    const owned = await select(
+      "media_objects",
+      "select=id,kind,status&owner_id=eq." + encodeURIComponent(user.id) +
+        "&id=eq." + encodeURIComponent(mediaId) + "&status=eq.ready&limit=1",
+    );
+    const media = owned?.[0];
+    const allowedKinds = conversation.kind === "group"
+      ? ["chat_image","chat_video","chat_audio","chat_file","group_media"]
+      : ["chat_image","chat_video","chat_audio","chat_file"];
+    if (!media || !allowedKinds.includes(media.kind)) {
+      return json(res, 403, { error: "المرفق غير صالح لهذه المحادثة" });
+    }
+  }
+
+  if ((sharedType && !sharedId) || (!sharedType && sharedId)) {
+    return json(res, 400, { error: "بيانات المشاركة غير مكتملة" });
+  }
+  if (sharedType && !(await validateSharedMessageTarget(user, sharedType, sharedId))) {
+    return json(res, 403, { error: "المحتوى المشارك غير متاح" });
+  }
+
+  let message;
+  try {
+    const rows = await insert("messages", {
+      conversation_id: conversationId,
+      sender_id: user.id,
+      body: text,
+      media_id: mediaId,
+      reply_to: replyTo,
+      shared_type: sharedType,
+      shared_id: sharedType ? sharedId : null,
+      client_message_id: clientMessageId,
+    });
+    message = rows?.[0];
+  } catch (error) {
+    if (clientMessageId) {
+      const existing = await select(
+        "messages",
+        "select=*&sender_id=eq." + encodeURIComponent(user.id) +
+          "&client_message_id=eq." + encodeURIComponent(clientMessageId) + "&limit=1",
+      ).catch(() => []);
+      if (existing?.[0]) return json(res, 200, { ...existing[0], duplicate: true });
+    }
+    throw error;
+  }
+
+  await update("conversations", "id=eq." + encodeURIComponent(conversationId), {
+    updated_at: new Date().toISOString(),
+  }, { returning: false }).catch(() => {});
+
+  const others = await select(
+    "conversation_members",
+    "select=user_id,muted&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=neq." + encodeURIComponent(user.id),
+  ).catch(() => []);
+  const senderProfiles = await select(
+    "profiles",
+    "select=name,username&id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  ).catch(() => []);
+  const sender = senderProfiles?.[0];
+  const title = sender?.name || sender?.username || "رسالة جديدة";
+  const preview = text || (sharedType
+    ? (sharedType === "post" ? "شارك منشورًا" : sharedType === "reel" ? "شارك ريلز" : sharedType === "story" ? "شارك قصة" : "شارك حسابًا")
+    : mediaId ? "أرسل مرفقًا" : "رسالة جديدة");
+
+  for (const member of others || []) {
+    await insert("notifications", {
+      user_id: member.user_id,
+      actor_id: user.id,
+      kind: "message",
+      title,
+      body: preview.slice(0, 200),
+      entity_type: "conversation",
+      entity_id: conversationId,
+    }, { returning: false }).catch(() => {});
+  }
+
+  const pushIds = (others || []).filter((m) => !m.muted).map((m) => m.user_id);
+  if (pushIds.length) {
+    await sendPush({
+      userIds: pushIds,
+      title,
+      body: preview.slice(0, 180),
+      data: { kind: "message", conversation_id: conversationId },
+    }).catch(() => {});
+  }
+
+  json(res, 201, message || { ok: true });
+}
+
+async function socialShareToStory(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const type = body.type === "reel" ? "reel" : body.type === "post" ? "post" : "";
+  const id = String(body.id || "");
+  if (!type || !/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "المحتوى غير صالح" });
+
+  let source = null;
+  let mediaId = null;
+  if (type === "post") {
+    const rows = await select("posts", "select=id,author_id,caption,visibility&id=eq." + encodeURIComponent(id) + "&limit=1");
+    source = rows?.[0];
+    const media = await select("post_media", "select=media_id&post_id=eq." + encodeURIComponent(id) + "&order=sort_order.asc&limit=1");
+    mediaId = media?.[0]?.media_id || null;
+  } else {
+    const rows = await select("reels", "select=id,author_id,caption,visibility,media_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+    source = rows?.[0];
+    mediaId = source?.media_id || null;
+  }
+  if (!source || !mediaId) return json(res, 404, { error: "تعذر العثور على وسائط المحتوى" });
+
+  if (source.author_id !== user.id) {
+    const owner = await profileFor(source.author_id);
+    if (!owner || owner.is_private || source.visibility !== "public") {
+      return json(res, 403, { error: "يمكن مشاركة المحتوى العام فقط داخل القصة" });
+    }
+    if (await isBlockedBetween(user.id, source.author_id)) {
+      return json(res, 403, { error: "لا يمكنك مشاركة هذا المحتوى" });
+    }
+  }
+
+  const rows = await insert("stories", {
+    author_id: user.id,
+    media_id: mediaId,
+    caption: String(body.caption || "").slice(0, 300),
+    shared_type: type,
+    shared_id: id,
+  });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function socialPublicSaved(req, res, profileId, url) {
+  const user = await currentUser(req);
+  const profile = await profileFor(profileId);
+  if (!profile || profileIsBanned(profile)) return json(res, 404, { error: "الحساب غير موجود" });
+  if (profileId !== user.id && profile.saved_visibility !== "public") {
+    return json(res, 403, { error: "المحفوظات خاصة" });
+  }
+  if (profileId !== user.id && !(await canViewOwner(user, profileId))) {
+    return json(res, 403, { error: "الحساب خاص" });
+  }
+  const kind = url.searchParams.get("kind") === "reels" ? "reels" : "posts";
+  const table = kind === "reels" ? "saved_reels" : "saved_posts";
+  const idField = kind === "reels" ? "reel_id" : "post_id";
+  const rows = await select(
+    table,
+    "select=" + idField + ",created_at&user_id=eq." + encodeURIComponent(profileId) + "&order=created_at.desc&limit=100",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function socialMentions(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const caption = String(body.caption || "").slice(0, 2200);
+  const type = ["post","reel","story"].includes(body.type) ? body.type : "post";
+  const id = String(body.id || "");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "معرف المحتوى غير صالح" });
+
+  const usernames = [...new Set(
+    [...caption.matchAll(/@([A-Za-z0-9_.]{2,24})/g)].map((m) => m[1].toLowerCase())
+  )].slice(0, 20);
+  const hashtags = [...new Set(
+    [...caption.matchAll(/#([\p{L}\p{N}_]{2,50})/gu)].map((m) => m[1].toLowerCase())
+  )].slice(0, 30);
+
+  if (!usernames.length) return json(res, 200, { ok: true, mentions: 0, hashtags });
+  const profiles = await select(
+    "profiles",
+    "select=id,name,username&username=in.(" + usernames.map((x) => '"' + x.replace(/"/g, "") + '"').join(",") + ")&is_banned=eq.false",
+  ).catch(() => []);
+  const sender = await profileFor(user.id).catch(() => null);
+  let countNotified = 0;
+  for (const profile of profiles || []) {
+    if (profile.id === user.id || await isBlockedBetween(user.id, profile.id)) continue;
+    const title = "تمت الإشارة إليك";
+    const message = (sender?.name || sender?.username || "مستخدم") + " أشار إليك في " + (type === "reel" ? "ريلز" : type === "story" ? "قصة" : "منشور");
+    await insert("notifications", {
+      user_id: profile.id,
+      actor_id: user.id,
+      kind: "mention",
+      title,
+      body: message,
+      entity_type: type,
+      entity_id: id,
+    }, { returning: false }).catch(() => {});
+    await sendPush({
+      userIds: [profile.id],
+      title,
+      body: message,
+      data: { kind: "mention", entity_type: type, entity_id: id },
+    }).catch(() => {});
+    countNotified++;
+  }
+  json(res, 200, { ok: true, mentions: countNotified, hashtags });
+}
+
+async function socialBlock(req, res, targetUserId) {
+  const user = await currentUser(req);
+  if (targetUserId === user.id) return json(res, 400, { error: "لا يمكنك حظر حسابك" });
+  const target = await profileFor(targetUserId);
+  if (!target) return json(res, 404, { error: "الحساب غير موجود" });
+  const body = await readJson(req);
+  const blocked = body.blocked !== false;
+
+  if (blocked) {
+    await upsert("blocks", {
+      blocker_id: user.id,
+      blocked_id: targetUserId,
+      created_at: new Date().toISOString(),
+    }, "blocker_id,blocked_id");
+    await remove(
+      "follows",
+      "or=(and(follower_id.eq." + encodeURIComponent(user.id) + ",following_id.eq." + encodeURIComponent(targetUserId) + "),and(follower_id.eq." + encodeURIComponent(targetUserId) + ",following_id.eq." + encodeURIComponent(user.id) + "))",
+    ).catch(() => {});
+  } else {
+    await remove(
+      "blocks",
+      "blocker_id=eq." + encodeURIComponent(user.id) + "&blocked_id=eq." + encodeURIComponent(targetUserId),
+    );
+  }
+  json(res, 200, { ok: true, blocked });
+}
+
+async function socialBlockedList(req, res) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "blocks",
+    "select=blocked_id,created_at&blocker_id=eq." + encodeURIComponent(user.id) + "&order=created_at.desc&limit=200",
+  );
+  const items = [];
+  for (const row of rows || []) {
+    const profiles = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.blocked_id) + "&limit=1",
+    );
+    if (profiles?.[0]) items.push({ ...profiles[0], blocked_at: row.created_at });
+  }
+  json(res, 200, { items });
+}
+
+async function socialReport(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const targetType = String(body.target_type || "").trim();
+  const targetId = String(body.target_id || "").trim();
+  const reason = String(body.reason || "").trim().slice(0, 120);
+  const details = String(body.details || "").trim().slice(0, 1500);
+  const allowed = ["profile", "post", "reel", "story", "comment", "message"];
+  if (!allowed.includes(targetType) || !/^[0-9a-f-]{36}$/i.test(targetId) || !reason) {
+    return json(res, 400, { error: "بيانات البلاغ غير مكتملة" });
+  }
+  const recent = await select(
+    "reports",
+    "select=id&reporter_id=eq." + encodeURIComponent(user.id) +
+      "&target_type=eq." + encodeURIComponent(targetType) +
+      "&target_id=eq." + encodeURIComponent(targetId) +
+      "&status=in.(open,review)&limit=1",
+  ).catch(() => []);
+  if (recent?.length) return json(res, 409, { error: "سبق أن أرسلت بلاغًا عن هذا العنصر" });
+
+  const rows = await insert("reports", {
+    reporter_id: user.id,
+    target_type: targetType,
+    target_id: targetId,
+    reason,
+    details,
+    status: "open",
+  });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function socialSupport(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const subject = String(body.subject || "").trim().slice(0, 160);
+  const message = String(body.body || "").trim().slice(0, 4000);
+  if (!subject || !message) return json(res, 400, { error: "اكتب عنوان المشكلة وتفاصيلها" });
+  const rows = await insert("support_tickets", {
+    user_id: user.id,
+    category: String(body.category || "general").slice(0, 60),
+    subject,
+    body: message,
+    app_version: String(body.app_version || "").slice(0, 40),
+    device_info: String(body.device_info || "").slice(0, 300),
+  });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function socialSupportList(req, res) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "support_tickets",
+    "select=id,category,subject,body,status,priority,admin_reply,created_at,updated_at,closed_at&user_id=eq." +
+      encodeURIComponent(user.id) + "&order=created_at.desc&limit=100",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function socialSave(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const kind = body.kind === "reel" ? "reel" : body.kind === "post" ? "post" : "";
+  const id = String(body.id || "");
+  if (!kind || !/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { error: "المحتوى غير صالح" });
+  const table = kind === "reel" ? "saved_reels" : "saved_posts";
+  const idField = kind === "reel" ? "reel_id" : "post_id";
+  if (body.saved === false) {
+    await remove(table, "user_id=eq." + encodeURIComponent(user.id) + "&" + idField + "=eq." + encodeURIComponent(id));
+    return json(res, 200, { ok: true, saved: false });
+  }
+  await upsert(table, { user_id: user.id, [idField]: id }, "user_id," + idField);
+  json(res, 200, { ok: true, saved: true });
+}
+
+async function socialSaved(req, res, url) {
+  const user = await currentUser(req);
+  const kind = url.searchParams.get("kind") === "reels" ? "reels" : "posts";
+  const table = kind === "reels" ? "saved_reels" : "saved_posts";
+  const idField = kind === "reels" ? "reel_id" : "post_id";
+  const rows = await select(
+    table,
+    "select=" + idField + ",created_at&user_id=eq." + encodeURIComponent(user.id) + "&order=created_at.desc&limit=100",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function socialStoryView(req, res, storyId) {
+  const user = await currentUser(req);
+  const stories = await select(
+    "stories",
+    "select=id,author_id,expires_at&id=eq." + encodeURIComponent(storyId) + "&limit=1",
+  );
+  const story = stories?.[0];
+  if (!story || new Date(story.expires_at) <= new Date()) return json(res, 404, { error: "القصة غير موجودة" });
+  if (!(await canViewOwner(user, story.author_id))) return json(res, 403, { error: "لا يمكنك مشاهدة هذه القصة" });
+  if (story.author_id !== user.id) {
+    await upsert("story_views", {
+      story_id: storyId,
+      user_id: user.id,
+      viewed_at: new Date().toISOString(),
+    }, "story_id,user_id");
+  }
+  json(res, 200, { ok: true });
+}
+
+async function socialStoryViewers(req, res, storyId) {
+  const user = await currentUser(req);
+  const stories = await select(
+    "stories",
+    "select=id,author_id&id=eq." + encodeURIComponent(storyId) + "&limit=1",
+  );
+  if (!stories?.[0]) return json(res, 404, { error: "القصة غير موجودة" });
+  if (stories[0].author_id !== user.id) return json(res, 403, { error: "هذه البيانات لصاحب القصة فقط" });
+
+  const rows = await select(
+    "story_views",
+    "select=user_id,viewed_at&story_id=eq." + encodeURIComponent(storyId) + "&order=viewed_at.desc&limit=500",
+  );
+  const ids = [...new Set((rows || []).map((row) => row.user_id).filter(Boolean))];
+  if (!ids.length) return json(res, 200, { items: [] });
+
+  const profiles = await select(
+    "profiles",
+    "select=id,name,username,avatar_media_id,is_verified&id=in.(" + ids.map(encodeURIComponent).join(",") + ")",
+  );
+  const profileMap = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const items = (rows || []).map((row) => {
+    const profile = profileMap.get(row.user_id);
+    return profile ? { ...profile, viewed_at: row.viewed_at } : null;
+  }).filter(Boolean);
+
+  json(res, 200, { items });
+}
+
+async function socialFollowList(req, res, profileId, url) {
+  const user = await currentUser(req);
+  const mode = url.searchParams.get("mode") === "following" ? "following" : "followers";
+  if (await isBlockedBetween(user.id, profileId)) return json(res, 403, { error: "هذه القائمة غير متاحة" });
+  const profile = await profileFor(profileId);
+  if (!profile) return json(res, 404, { error: "الحساب غير موجود" });
+  if (profile.is_private && profileId !== user.id && !(await canViewOwner(user, profileId))) {
+    return json(res, 403, { error: "الحساب خاص" });
+  }
+  const filter = mode === "following"
+    ? "follower_id=eq." + encodeURIComponent(profileId)
+    : "following_id=eq." + encodeURIComponent(profileId);
+  const idField = mode === "following" ? "following_id" : "follower_id";
+  const rows = await select("follows", "select=" + idField + ",created_at&" + filter + "&status=eq.accepted&order=created_at.desc&limit=500");
+  const items = [];
+  for (const row of rows || []) {
+    const id = row[idField];
+    if (await isBlockedBetween(user.id, id)) continue;
+    const p = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified,is_private&id=eq." + encodeURIComponent(id) + "&is_banned=eq.false&limit=1",
+    );
+    if (p?.[0]) items.push(p[0]);
+  }
+  json(res, 200, { items });
+}
+
+async function socialMessageRead(req, res) {
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  const requested = Array.isArray(body.message_ids)
+    ? [...new Set(body.message_ids.filter((x) => /^[0-9a-f-]{36}$/i.test(String(x))).map(String))].slice(0, 200)
+    : [];
+  if (!requested.length) return json(res, 200, { ok: true, count: 0 });
+
+  const messages = await select(
+    "messages",
+    "select=id,conversation_id,sender_id&is_deleted=eq.false&id=in.(" + requested.join(",") + ")",
+  );
+  const conversationIds = [...new Set((messages || []).map((m) => m.conversation_id))];
+  const memberships = conversationIds.length
+    ? await select(
+        "conversation_members",
+        "select=conversation_id&user_id=eq." + encodeURIComponent(user.id) +
+          "&conversation_id=in.(" + conversationIds.join(",") + ")",
+      )
+    : [];
+  const allowedConversations = new Set((memberships || []).map((row) => row.conversation_id));
+  const allowedIds = (messages || [])
+    .filter((m) => m.sender_id !== user.id && allowedConversations.has(m.conversation_id))
+    .map((m) => m.id);
+
+  if (!allowedIds.length) return json(res, 200, { ok: true, count: 0 });
+
+  const rows = allowedIds.map((messageId) => ({
+    message_id: messageId,
+    user_id: user.id,
+    read_at: new Date().toISOString(),
+  }));
+  await upsert("message_reads", rows, "message_id,user_id");
+  json(res, 200, { ok: true, count: rows.length });
+}
+
+async function socialEditContent(req, res, kind, id) {
+  const user = await currentUser(req);
+  const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
+  if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+  const rows = await select(table, "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
+  if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك تعديل هذا المحتوى" });
+  const body = await readJson(req);
+  const patch = {};
+  if (body.caption !== undefined) patch.caption = String(body.caption || "").slice(0, 2200);
+  if (body.comments_enabled !== undefined && table !== "stories") patch.comments_enabled = Boolean(body.comments_enabled);
+  if (body.visibility !== undefined && table !== "stories") patch.visibility = ["public", "followers"].includes(body.visibility) ? body.visibility : "public";
+  if (table === "posts") patch.updated_at = new Date().toISOString();
+  if (!Object.keys(patch).length) return json(res, 400, { error: "لا توجد تعديلات" });
+  const updated = await update(table, "id=eq." + encodeURIComponent(id), patch);
+  json(res, 200, updated?.[0] || { ok: true });
+}
+
+async function socialDeleteContent(req, res, kind, id) {
+  const user = await currentUser(req);
+  const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
+  if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+  const rows = await select(table, "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
+  if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك حذف هذا المحتوى" });
+  await remove(table, "id=eq." + encodeURIComponent(id));
+  json(res, 200, { ok: true });
+}
+
+async function socialEditComment(req, res, commentId) {
+  const user = await currentUser(req);
+  const rows = await select("comments", "select=id,author_id&id=eq." + encodeURIComponent(commentId) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "التعليق غير موجود" });
+  if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك تعديل هذا التعليق" });
+  if (req.method === "DELETE") {
+    await remove("comments", "id=eq." + encodeURIComponent(commentId));
+    return json(res, 200, { ok: true });
+  }
+  const body = await readJson(req);
+  const text = String(body.body || "").trim().slice(0, 2000);
+  if (!text) return json(res, 400, { error: "التعليق فارغ" });
+  const updated = await update("comments", "id=eq." + encodeURIComponent(commentId), {
+    body: text,
+    updated_at: new Date().toISOString(),
+  });
+  json(res, 200, updated?.[0] || { ok: true });
+}
+
+async function socialDeleteAccount(req, res) {
+  const token = bearer(req);
+  const user = await currentUser(req);
+  const body = await readJson(req);
+  if (String(body.confirm || "") !== "DELETE") return json(res, 400, { error: "تأكيد حذف الحساب غير صحيح" });
+
+  await update("profiles", "id=eq." + encodeURIComponent(user.id), {
+    deleted_at: new Date().toISOString(),
+    is_banned: true,
+    ban_reason: "account_deleted",
+  }, { returning: false }).catch(() => {});
+
+  await writeAudit(user.id, "delete_own_account", "profile", user.id, {});
+
+  if (token) {
+    await serviceRequest("/auth/v1/logout?scope=global", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token },
+    }).catch(() => {});
+  }
+
+  await serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(user.id), { method: "DELETE" });
+  json(res, 200, { ok: true });
+}
+
 async function adminStats(req, res) {
   await requireAdmin(req, "analytics");
-  const [users, posts, reels, openReports, recent] = await Promise.all([
+  const since24h = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const since7d = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const [
+    users, posts, reels, stories, comments, openReports, openSupport, failedUploads, openErrors,
+    newUsers24h, posts24h, reels24h, comments24h, active7d, recent
+  ] = await Promise.all([
     count("profiles"),
     count("posts"),
     count("reels"),
-    count("reports", "status=eq.open"),
+    count("stories"),
+    count("comments"),
+    count("reports", "status=in.(open,review)"),
+    count("support_tickets", "status=in.(open,in_progress,answered)"),
+    count("upload_jobs", "status=eq.failed"),
+    count("system_errors", "status=eq.new"),
+    count("profiles", "created_at=gte." + encodeURIComponent(since24h)),
+    count("posts", "created_at=gte." + encodeURIComponent(since24h)),
+    count("reels", "created_at=gte." + encodeURIComponent(since24h)),
+    count("comments", "created_at=gte." + encodeURIComponent(since24h)),
+    count("profiles", "last_seen_at=gte." + encodeURIComponent(since7d)),
     select("reports", "select=id,reason,target_type,status,created_at&order=created_at.desc&limit=6"),
   ]);
   json(res, 200, {
-    users,
-    posts,
-    reels,
+    users, posts, reels, stories, comments,
     open_reports: openReports,
+    open_support: openSupport,
+    failed_uploads: failedUploads,
+    open_errors: openErrors,
+    today: {
+      new_users: newUsers24h,
+      posts: posts24h,
+      reels: reels24h,
+      comments: comments24h,
+    },
+    active_7d: active7d,
     recent_reports: recent || [],
   });
 }
@@ -621,8 +1663,8 @@ async function adminUsers(req, res, url) {
   await requireAdmin(req, "users");
   const q = (url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
   const query = q
-    ? `select=id,name,username,is_banned,is_verified,is_private,created_at&or=(name.ilike.*${encodeURIComponent(q)}*,username.ilike.*${encodeURIComponent(q)}*,id.eq.${encodeURIComponent(q)})&order=created_at.desc&limit=50`
-    : "select=id,name,username,is_banned,is_verified,is_private,created_at&order=created_at.desc&limit=50";
+    ? `select=id,name,username,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,created_at&or=(name.ilike.*${encodeURIComponent(q)}*,username.ilike.*${encodeURIComponent(q)}*,id.eq.${encodeURIComponent(q)})&order=created_at.desc&limit=50`
+    : "select=id,name,username,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,created_at&order=created_at.desc&limit=50";
   const items = await select("profiles", query);
   json(res, 200, { items: items || [] });
 }
@@ -631,15 +1673,333 @@ async function setBan(req, res, userId) {
   const actor = await requireAdmin(req, "users");
   const body = await readJson(req);
   const banned = Boolean(body.banned);
-  await update("profiles", `id=eq.${encodeURIComponent(userId)}`, { is_banned: banned }, { returning: false });
-  await insert("audit_logs", {
-    actor_user_id: actor.user.id,
-    action: banned ? "ban_user" : "unban_user",
-    target_type: "profile",
-    target_id: userId,
-    details: { reason: String(body.reason || "") },
-  }, { returning: false });
+  const hours = Number(body.duration_hours || 0);
+  const bannedUntil = banned && Number.isFinite(hours) && hours > 0
+    ? new Date(Date.now() + Math.min(hours, 24 * 365) * 3600_000).toISOString()
+    : null;
+  const reason = String(body.reason || "").trim().slice(0, 500);
+  await update(
+    "profiles",
+    "id=eq." + encodeURIComponent(userId),
+    {
+      is_banned: banned,
+      banned_until: bannedUntil,
+      ban_reason: banned ? reason : "",
+    },
+    { returning: false },
+  );
+  await writeAudit(actor.user.id, banned ? "ban_user" : "unban_user", "profile", userId, {
+    reason,
+    duration_hours: hours > 0 ? hours : null,
+    banned_until: bannedUntil,
+  });
+  json(res, 200, { ok: true, banned, banned_until: bannedUntil });
+}
+
+
+async function adminUserDetail(req, res, userId) {
+  await requireAdmin(req, "users");
+  const profiles = await select(
+    "profiles",
+    "select=id,name,username,bio,profile_link,avatar_media_id,cover_media_id,is_private,is_verified,is_banned,banned_until,ban_reason,warning_count,last_seen_at,created_at,updated_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
+  );
+  const profile = profiles?.[0];
+  if (!profile) return json(res, 404, { error: "الحساب غير موجود" });
+  const [posts, reels, stories, followers, following, reports] = await Promise.all([
+    count("posts", "author_id=eq." + encodeURIComponent(userId)),
+    count("reels", "author_id=eq." + encodeURIComponent(userId)),
+    count("stories", "author_id=eq." + encodeURIComponent(userId)),
+    count("follows", "following_id=eq." + encodeURIComponent(userId) + "&status=eq.accepted"),
+    count("follows", "follower_id=eq." + encodeURIComponent(userId) + "&status=eq.accepted"),
+    count("reports", "target_type=eq.profile&target_id=eq." + encodeURIComponent(userId)),
+  ]);
+  json(res, 200, { profile, stats: { posts, reels, stories, followers, following, reports } });
+}
+
+async function adminUserAction(req, res, userId) {
+  const actor = await requireAdmin(req, "users");
+  const body = await readJson(req);
+  const action = String(body.action || "");
+  if (action === "verify" || action === "unverify") {
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      is_verified: action === "verify",
+    }, { returning: false });
+  } else if (action === "warn") {
+    const rows = await select("profiles", "select=warning_count&id=eq." + encodeURIComponent(userId) + "&limit=1");
+    if (!rows?.[0]) return json(res, 404, { error: "الحساب غير موجود" });
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      warning_count: Number(rows[0].warning_count || 0) + 1,
+    }, { returning: false });
+    const title = "تنبيه من إدارة آشور";
+    const message = String(body.reason || "يرجى مراجعة استخدامك للمنصة.").slice(0, 500);
+    await insert("notifications", {
+      user_id: userId,
+      actor_id: actor.user.id,
+      kind: "system",
+      title,
+      body: message,
+    }, { returning: false }).catch(() => {});
+    await sendPush({ userIds: [userId], title, body: message, data: { kind: "system" } }).catch(() => {});
+  } else if (action === "unban") {
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      is_banned: false,
+      banned_until: null,
+      ban_reason: "",
+    }, { returning: false });
+  } else {
+    return json(res, 400, { error: "الإجراء غير مدعوم" });
+  }
+  await writeAudit(actor.user.id, "user_" + action, "profile", userId, {
+    reason: String(body.reason || "").slice(0, 500),
+  });
   json(res, 200, { ok: true });
+}
+
+async function adminComments(req, res, url) {
+  await requireAdmin(req, "content");
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,author_id,post_id,reel_id,parent_id,body,moderation_status,deleted_at,created_at,updated_at&order=created_at.desc&limit=150";
+  if (q) query += "&body=ilike.*" + encodeURIComponent(q) + "*";
+  if (status) query += "&moderation_status=eq." + encodeURIComponent(status);
+  const rows = await select("comments", query);
+  const items = [];
+  for (const row of rows || []) {
+    const p = await select("profiles", "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1").catch(() => []);
+    items.push({ ...row, author: p?.[0] || null });
+  }
+  json(res, 200, { items });
+}
+
+async function moderateContent(req, res, kind, id) {
+  const actor = await requireAdmin(req, "content");
+  const table = ({ posts: "posts", reels: "reels", stories: "stories", comments: "comments" })[kind];
+  if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+  const body = await readJson(req);
+  const status = ["active", "hidden"].includes(body.status) ? body.status : "active";
+  const patch = {
+    moderation_status: status,
+    hidden_by: status === "hidden" ? actor.user.id : null,
+    deleted_at: null,
+  };
+  if (body.comments_enabled !== undefined && ["posts", "reels"].includes(kind)) {
+    patch.comments_enabled = Boolean(body.comments_enabled);
+  }
+  await update(table, "id=eq." + encodeURIComponent(id), patch, { returning: false });
+  await writeAudit(actor.user.id, status === "hidden" ? "hide_content" : "restore_content", kind, id, {
+    reason: String(body.reason || "").slice(0, 500),
+  });
+  json(res, 200, { ok: true, status });
+}
+
+async function reportAction(req, res, reportId) {
+  const actor = await requireAdmin(req, "reports");
+  const body = await readJson(req);
+  const rows = await select(
+    "reports",
+    "select=id,target_type,target_id,status&id=eq." + encodeURIComponent(reportId) + "&limit=1",
+  );
+  const report = rows?.[0];
+  if (!report) return json(res, 404, { error: "البلاغ غير موجود" });
+  const status = ["open", "review", "resolved", "rejected"].includes(body.status) ? body.status : "resolved";
+  const action = String(body.action || "").slice(0, 80);
+  await update("reports", "id=eq." + encodeURIComponent(reportId), {
+    status,
+    admin_note: String(body.admin_note || "").slice(0, 1500),
+    action_taken: action,
+    handled_by: actor.user.id,
+    resolved_at: ["resolved", "rejected"].includes(status) ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+
+  if (action === "hide_content" && ["post", "reel", "story", "comment"].includes(report.target_type)) {
+    const table = ({ post: "posts", reel: "reels", story: "stories", comment: "comments" })[report.target_type];
+    await update(table, "id=eq." + encodeURIComponent(report.target_id), {
+      moderation_status: "hidden",
+      hidden_by: actor.user.id,
+    }, { returning: false }).catch(() => {});
+  }
+  await writeAudit(actor.user.id, "report_" + status, "report", reportId, {
+    action,
+    target_type: report.target_type,
+    target_id: report.target_id,
+  });
+  json(res, 200, { ok: true });
+}
+
+async function updateAdminRecord(req, res, adminUserId) {
+  const actor = await requireAdmin(req, "admins");
+  if (actor.admin.role !== "owner" && actor.admin.role !== "secondary_admin") {
+    return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
+  }
+  const body = await readJson(req);
+  const allowed = ["secondary_admin", "moderator", "content_moderator", "support", "analyst"];
+  const patch = { updated_at: new Date().toISOString() };
+  if (body.role !== undefined) {
+    if (!allowed.includes(body.role)) return json(res, 400, { error: "الدور غير صالح" });
+    patch.role = body.role;
+  }
+  if (body.permissions !== undefined) patch.permissions = body.permissions || {};
+  if (body.active !== undefined) patch.active = Boolean(body.active);
+  await update("admins", "user_id=eq." + encodeURIComponent(adminUserId), patch, { returning: false });
+  await writeAudit(actor.user.id, "update_admin", "admin", adminUserId, patch);
+  json(res, 200, { ok: true });
+}
+
+async function adminUploads(req, res, url) {
+  await requireAdmin(req, "storage");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,client_upload_id,user_id,kind,original_name,size_bytes,received_bytes,status,error,media_id,cancel_requested,created_at,updated_at,completed_at&order=created_at.desc&limit=200";
+  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const rows = await select("upload_jobs", query);
+  json(res, 200, { items: rows || [] });
+}
+
+async function adminCancelUpload(req, res, jobId) {
+  const actor = await requireAdmin(req, "storage");
+  await update("upload_jobs", "id=eq." + encodeURIComponent(jobId), {
+    cancel_requested: true,
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "cancel_upload", "upload_job", jobId, {});
+  json(res, 200, { ok: true });
+}
+
+async function adminErrors(req, res, url) {
+  await requireAdmin(req, "storage");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,service,code,message,context,user_id,status,created_at,resolved_at&order=created_at.desc&limit=200";
+  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const rows = await select("system_errors", query);
+  json(res, 200, { items: rows || [] });
+}
+
+async function resolveSystemError(req, res, errorId) {
+  const actor = await requireAdmin(req, "storage");
+  await update("system_errors", "id=eq." + encodeURIComponent(errorId), {
+    status: "resolved",
+    resolved_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "resolve_system_error", "system_error", errorId, {});
+  json(res, 200, { ok: true });
+}
+
+async function adminSupport(req, res, url) {
+  await requireAdmin(req, "support");
+  const status = String(url.searchParams.get("status") || "").trim();
+  let query = "select=id,user_id,category,subject,body,status,priority,admin_reply,assigned_to,app_version,device_info,created_at,updated_at,closed_at&order=created_at.desc&limit=200";
+  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const rows = await select("support_tickets", query);
+  json(res, 200, { items: rows || [] });
+}
+
+async function replySupport(req, res, ticketId) {
+  const actor = await requireAdmin(req, "support");
+  const body = await readJson(req);
+  const rows = await select("support_tickets", "select=id,user_id,status&id=eq." + encodeURIComponent(ticketId) + "&limit=1");
+  const ticket = rows?.[0];
+  if (!ticket) return json(res, 404, { error: "التذكرة غير موجودة" });
+  const reply = String(body.reply || "").trim().slice(0, 4000);
+  const status = ["open", "in_progress", "answered", "closed"].includes(body.status) ? body.status : "answered";
+  await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), {
+    admin_reply: reply,
+    status,
+    assigned_to: actor.user.id,
+    updated_at: new Date().toISOString(),
+    closed_at: status === "closed" ? new Date().toISOString() : null,
+  }, { returning: false });
+  if (reply) {
+    const title = "رد من دعم آشور";
+    await insert("notifications", {
+      user_id: ticket.user_id,
+      actor_id: actor.user.id,
+      kind: "support",
+      title,
+      body: reply.slice(0, 500),
+      entity_type: "support_ticket",
+      entity_id: ticketId,
+    }, { returning: false }).catch(() => {});
+    await sendPush({
+      userIds: [ticket.user_id],
+      title,
+      body: reply.slice(0, 200),
+      data: { kind: "support", ticket_id: ticketId },
+    }).catch(() => {});
+  }
+  await writeAudit(actor.user.id, "reply_support", "support_ticket", ticketId, { status });
+  json(res, 200, { ok: true });
+}
+
+async function adminReleases(req, res) {
+  const actor = await requireAdmin(req, "settings");
+  if (req.method === "GET") {
+    const rows = await select(
+      "app_releases",
+      "select=id,version,version_code,download_url,notes,required,minimum_version,status,created_by,created_at,published_at&order=created_at.desc&limit=100",
+    );
+    return json(res, 200, { items: rows || [] });
+  }
+  const body = await readJson(req);
+  const version = String(body.version || "").trim().slice(0, 40);
+  const code = Number(body.version_code || 0);
+  if (!version || !Number.isInteger(code) || code < 1) return json(res, 400, { error: "رقم الإصدار غير صالح" });
+  const rows = await insert("app_releases", {
+    version,
+    version_code: code,
+    download_url: String(body.download_url || "").slice(0, 500),
+    notes: String(body.notes || "").slice(0, 4000),
+    required: Boolean(body.required),
+    minimum_version: String(body.minimum_version || "").slice(0, 40),
+    status: ["draft", "testing", "published", "retired"].includes(body.status) ? body.status : "draft",
+    created_by: actor.user.id,
+    published_at: body.status === "published" ? new Date().toISOString() : null,
+  });
+  await writeAudit(actor.user.id, "create_release", "app_release", rows?.[0]?.id || null, { version, version_code: code });
+  json(res, 201, rows?.[0] || { ok: true });
+}
+
+async function updateRelease(req, res, releaseId) {
+  const actor = await requireAdmin(req, "settings");
+  const body = await readJson(req);
+  const patch = {};
+  for (const key of ["download_url", "notes", "minimum_version"]) {
+    if (body[key] !== undefined) patch[key] = String(body[key] || "").slice(0, key === "notes" ? 4000 : 500);
+  }
+  if (body.required !== undefined) patch.required = Boolean(body.required);
+  if (body.status !== undefined && ["draft", "testing", "published", "retired"].includes(body.status)) {
+    patch.status = body.status;
+    patch.published_at = body.status === "published" ? new Date().toISOString() : null;
+  }
+  await update("app_releases", "id=eq." + encodeURIComponent(releaseId), patch, { returning: false });
+  await writeAudit(actor.user.id, "update_release", "app_release", releaseId, patch);
+  json(res, 200, { ok: true });
+}
+
+async function testAdminChannel(req, res, channelKey) {
+  const actor = await requireAdmin(req, "storage");
+  const rows = await select(
+    "storage_channels",
+    "select=channel_key,channel_id,title&channel_key=eq." + encodeURIComponent(channelKey) + "&limit=1",
+  );
+  const channel = rows?.[0];
+  if (!channel) return json(res, 404, { error: "القناة غير موجودة" });
+  const result = await testTelegramChannel(channel.channel_id).catch((error) => ({ ok: false, detail: error.message }));
+  await update("storage_channels", "channel_key=eq." + encodeURIComponent(channelKey), {
+    status: result.ok ? "connected" : "error",
+    last_test_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "test_storage_channel", "storage_channel", channelKey, result);
+  json(res, result.ok ? 200 : 503, result);
+}
+
+async function adminNotificationHistory(req, res) {
+  await requireAdmin(req, "notifications");
+  const rows = await select(
+    "admin_notification_history",
+    "select=id,actor_user_id,title,body,audience,target_user_id,deep_link,scheduled_at,sent_at,status,push_result,created_at&order=created_at.desc&limit=200",
+  );
+  json(res, 200, { items: rows || [] });
 }
 
 async function adminContent(req, res, url) {
@@ -647,11 +2007,37 @@ async function adminContent(req, res, url) {
   const kind = url.searchParams.get("kind") || "posts";
   const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
   if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
-  const fields = table === "stories"
-    ? "id,author_id,caption,created_at,expires_at"
-    : "id,author_id,caption,created_at";
-  const items = await select(table, `select=${fields}&order=created_at.desc&limit=100`);
-  json(res, 200, { items: items || [] });
+  const status = String(url.searchParams.get("status") || "").trim();
+  const authorId = String(url.searchParams.get("author_id") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  let fields = "id,author_id,caption,created_at,moderation_status,deleted_at,hidden_by";
+  if (table === "stories") fields += ",expires_at,media_id";
+  if (table === "reels") fields += ",media_id,comments_enabled,explore_enabled,visibility";
+  if (table === "posts") fields += ",comments_enabled,visibility,updated_at";
+  let query = "select=" + fields + "&order=created_at.desc&limit=150";
+  if (status) query += "&moderation_status=eq." + encodeURIComponent(status);
+  if (authorId) query += "&author_id=eq." + encodeURIComponent(authorId);
+  if (q) query += "&caption=ilike.*" + encodeURIComponent(q) + "*";
+  const rows = await select(table, query);
+  const items = [];
+  for (const row of rows || []) {
+    const author = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1",
+    ).catch(() => []);
+    let media_ids = [];
+    if (kind === "posts") {
+      const media = await select(
+        "post_media",
+        "select=media_id,sort_order&post_id=eq." + encodeURIComponent(row.id) + "&order=sort_order.asc",
+      ).catch(() => []);
+      media_ids = (media || []).map((m) => m.media_id);
+    } else if (row.media_id) {
+      media_ids = [row.media_id];
+    }
+    items.push({ ...row, author: author?.[0] || null, media_ids });
+  }
+  json(res, 200, { items });
 }
 
 async function deleteContent(req, res, kind, id) {
@@ -672,9 +2058,17 @@ async function adminReports(req, res) {
   await requireAdmin(req, "reports");
   const items = await select(
     "reports",
-    "select=id,reporter_id,target_type,target_id,reason,details,status,created_at,resolved_at&order=created_at.desc&limit=100",
+    "select=id,reporter_id,target_type,target_id,reason,details,status,admin_note,handled_by,action_taken,created_at,updated_at,resolved_at&order=created_at.desc&limit=200",
   );
-  json(res, 200, { items: items || [] });
+  const enriched = [];
+  for (const row of items || []) {
+    const reporter = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.reporter_id) + "&limit=1",
+    ).catch(() => []);
+    enriched.push({ ...row, reporter: reporter?.[0] || null });
+  }
+  json(res, 200, { items: enriched });
 }
 
 async function resolveReport(req, res, reportId) {
@@ -731,7 +2125,7 @@ async function adminAdmins(req, res) {
   await requireAdmin(req, "admins");
   const rows = await select(
     "admins",
-    "select=user_id,role,permissions,active,created_at&order=created_at.asc",
+    "select=user_id,role,permissions,active,last_active_at,created_at,updated_at&order=created_at.asc",
   );
   const items = [];
   for (const row of rows || []) {
@@ -804,48 +2198,135 @@ async function siteSettings(req, res) {
   json(res, 200, { ok: true });
 }
 
+async function notificationRecipients(audience, targetUserId = null) {
+  if (audience === "user") {
+    return targetUserId ? { ids: [targetUserId], all: false } : { ids: [], all: false };
+  }
+  let query = "select=id&is_banned=eq.false&limit=10000";
+  if (audience === "verified") query += "&is_verified=eq.true";
+  if (audience === "active") {
+    const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    query += "&last_seen_at=gte." + encodeURIComponent(since);
+  }
+  if (audience === "inactive") {
+    const before = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
+    query += "&or=(last_seen_at.is.null,last_seen_at.lt." + encodeURIComponent(before) + ")";
+  }
+  const users = await select("profiles", query);
+  return { ids: (users || []).map((x) => x.id), all: audience === "all" };
+}
+
+async function deliverAdminNotification(record) {
+  const audience = record.audience || "all";
+  const targetUserId = record.target_user_id || null;
+  const recipients = await notificationRecipients(audience, targetUserId);
+  const data = {
+    kind: "system",
+    ...(record.deep_link || {}),
+    notification_history_id: record.id,
+  };
+
+  const inAppRows = recipients.ids.map((userId) => ({
+    user_id: userId,
+    actor_id: record.actor_user_id || null,
+    kind: "system",
+    title: record.title,
+    body: record.body,
+    entity_type: record.deep_link?.entity_type || null,
+    entity_id: record.deep_link?.entity_id || null,
+  }));
+  if (inAppRows.length) {
+    await insert("notifications", inAppRows, { returning: false });
+  }
+
+  const push = await sendPush({
+    ...(recipients.all ? { all: true } : { userIds: recipients.ids }),
+    title: record.title,
+    body: record.body,
+    data,
+    idempotencyKey: record.id,
+  });
+
+  await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+    status: "sent",
+    sent_at: new Date().toISOString(),
+    push_result: push || {},
+  }, { returning: false });
+  return push;
+}
+
 async function sendAdminNotification(req, res) {
   const actor = await requireAdmin(req, "notifications");
   const body = await readJson(req);
   const title = String(body.title || "").trim().slice(0, 80);
   const message = String(body.body || "").trim().slice(0, 500);
+  const audience = ["all", "user", "verified", "active", "inactive"].includes(body.audience)
+    ? body.audience
+    : "all";
+  const userId = audience === "user" ? String(body.user_id || "").trim() : null;
+  const deepLink = body.deep_link && typeof body.deep_link === "object" ? body.deep_link : {};
+  const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : null;
   if (!title || !message) return json(res, 400, { error: "العنوان والنص مطلوبان" });
-
-  if (body.audience === "user") {
-    const userId = String(body.user_id || "").trim();
-    if (!userId) return json(res, 400, { error: "معرف المستخدم مطلوب" });
-    await insert("notifications", {
-      user_id: userId,
-      actor_id: actor.user.id,
-      kind: "system",
-      title,
-      body: message,
-    }, { returning: false });
-    const push = await sendPush({
-      userIds: [userId],
-      title,
-      body: message,
-      data: { kind: "system" },
-    });
-    return json(res, 200, { ok: true, push });
+  if (audience === "user" && !/^[0-9a-f-]{36}$/i.test(userId || "")) {
+    return json(res, 400, { error: "معرف المستخدم مطلوب" });
+  }
+  if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
+    return json(res, 400, { error: "موعد الإرسال غير صالح" });
   }
 
-  const users = await select("profiles", "select=id&is_banned=eq.false&limit=10000");
-  const rows = (users || []).map((x) => ({
-    user_id: x.id,
-    actor_id: actor.user.id,
-    kind: "system",
+  const rows = await insert("admin_notification_history", {
+    actor_user_id: actor.user.id,
     title,
     body: message,
-  }));
-  if (rows.length) await insert("notifications", rows, { returning: false });
-  const push = await sendPush({
-    all: true,
-    title,
-    body: message,
-    data: { kind: "system" },
+    audience,
+    target_user_id: userId,
+    deep_link: deepLink,
+    scheduled_at: scheduledAt ? scheduledAt.toISOString() : null,
+    status: scheduledAt && scheduledAt.getTime() > Date.now() + 15_000 ? "scheduled" : "pending",
   });
-  json(res, 200, { ok: true, push });
+  const record = rows?.[0];
+
+  if (record.status === "scheduled") {
+    await writeAudit(actor.user.id, "schedule_notification", "notification", record.id, { audience, scheduled_at: record.scheduled_at });
+    return json(res, 202, { ok: true, scheduled: true, id: record.id });
+  }
+
+  try {
+    const push = await deliverAdminNotification(record);
+    await writeAudit(actor.user.id, "send_notification", "notification", record.id, { audience });
+    return json(res, 200, { ok: true, push, id: record.id });
+  } catch (error) {
+    await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+      status: "failed",
+      push_result: { error: String(error.message || error).slice(0, 1000) },
+    }, { returning: false }).catch(() => {});
+    await logSystemError("notifications", error, { history_id: record.id }, actor.user.id);
+    throw error;
+  }
+}
+
+async function processScheduledAdminNotifications() {
+  if (!readiness().database) return;
+  const now = new Date().toISOString();
+  const rows = await select(
+    "admin_notification_history",
+    "select=id,actor_user_id,title,body,audience,target_user_id,deep_link,scheduled_at,status&status=eq.scheduled&scheduled_at=lte." +
+      encodeURIComponent(now) + "&order=scheduled_at.asc&limit=20",
+  ).catch(() => []);
+  for (const record of rows || []) {
+    await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+      status: "processing",
+    }, { returning: false }).catch(() => {});
+    try {
+      await deliverAdminNotification(record);
+    } catch (error) {
+      await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+        status: "failed",
+        push_result: { error: String(error.message || error).slice(0, 1000) },
+      }, { returning: false }).catch(() => {});
+      await logSystemError("notifications", error, { history_id: record.id }, record.actor_user_id);
+    }
+  }
 }
 
 async function healthDetails(res) {
@@ -944,7 +2425,13 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { ok: true, readiness: readiness() });
+      return json(res, 200, {
+        ok: true,
+        api_version: "1.2.0",
+        messaging_revision: "E2",
+        commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
+        readiness: readiness()
+      });
     }
     if (req.method === "GET" && url.pathname === "/health/details") {
       return healthDetails(res);
@@ -952,6 +2439,72 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/v1/storage/upload") {
       return handleUpload(req, res, url);
+    }
+
+
+    const cancelUploadMatch = /^\/v1\/uploads\/([^/]+)\/cancel$/.exec(url.pathname);
+    if (req.method === "POST" && cancelUploadMatch) {
+      return cancelUploadJob(req, res, decodeURIComponent(cancelUploadMatch[1]));
+    }
+
+    const blockMatch = /^\/v1\/social\/block\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "POST" && blockMatch) {
+      return socialBlock(req, res, blockMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/social/blocked") {
+      return socialBlockedList(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/report") {
+      return socialReport(req, res);
+    }
+    if (url.pathname === "/v1/social/support") {
+      if (req.method === "GET") return socialSupportList(req, res);
+      if (req.method === "POST") return socialSupport(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/save") {
+      return socialSave(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/social/saved") {
+      return socialSaved(req, res, url);
+    }
+    const storyViewMatch = /^\/v1\/social\/story-view\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "POST" && storyViewMatch) {
+      return socialStoryView(req, res, storyViewMatch[1]);
+    }
+    const storyViewersMatch = /^\/v1\/social\/story-viewers\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && storyViewersMatch) {
+      return socialStoryViewers(req, res, storyViewersMatch[1]);
+    }
+    const followListMatch = /^\/v1\/social\/follows\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && followListMatch) {
+      return socialFollowList(req, res, followListMatch[1], url);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/message-read") {
+      return socialMessageRead(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/share-story") {
+      return socialShareToStory(req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/social/mentions") {
+      return socialMentions(req, res);
+    }
+    const publicSavedMatch = /^\/v1\/social\/saved\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && publicSavedMatch) {
+      return socialPublicSaved(req, res, publicSavedMatch[1], url);
+    }
+    const socialContentMatch = /^\/v1\/social\/content\/(posts|reels|stories)\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (socialContentMatch && req.method === "PATCH") {
+      return socialEditContent(req, res, socialContentMatch[1], socialContentMatch[2]);
+    }
+    if (socialContentMatch && req.method === "DELETE") {
+      return socialDeleteContent(req, res, socialContentMatch[1], socialContentMatch[2]);
+    }
+    const socialCommentMatch = /^\/v1\/social\/comments\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (socialCommentMatch && ["PATCH", "DELETE"].includes(req.method)) {
+      return socialEditComment(req, res, socialCommentMatch[1]);
+    }
+    if (req.method === "DELETE" && url.pathname === "/v1/account") {
+      return socialDeleteAccount(req, res);
     }
 
     const ticketMatch = /^\/v1\/media-ticket\/([0-9a-f-]{36})$/.exec(url.pathname);
@@ -967,6 +2520,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/conversations") {
       if (req.method === "GET") return listConversations(req, res);
       if (req.method === "POST") return createConversation(req, res);
+    }
+    const conversationMessageMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/messages$/.exec(url.pathname);
+    if (req.method === "GET" && conversationMessageMatch) {
+      return listConversationMessages(req, res, conversationMessageMatch[1]);
+    }
+    if (req.method === "POST" && conversationMessageMatch) {
+      return sendConversationMessage(req, res, conversationMessageMatch[1]);
     }
 
     if (req.method === "GET" && url.pathname === "/v1/admin/me") {
@@ -989,9 +2549,26 @@ const server = http.createServer(async (req, res) => {
       return setBan(req, res, banMatch[1]);
     }
 
+    const adminUserDetailMatch = /^\/v1\/admin\/users\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && adminUserDetailMatch) {
+      return adminUserDetail(req, res, adminUserDetailMatch[1]);
+    }
+    const adminUserActionMatch = /^\/v1\/admin\/users\/([0-9a-f-]{36})\/action$/.exec(url.pathname);
+    if (req.method === "POST" && adminUserActionMatch) {
+      return adminUserAction(req, res, adminUserActionMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/comments") {
+      return adminComments(req, res, url);
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/admin/content") {
       return adminContent(req, res, url);
     }
+    const moderateMatch = /^\/v1\/admin\/content\/(posts|reels|stories|comments)\/([0-9a-f-]{36})\/moderate$/.exec(url.pathname);
+    if (req.method === "POST" && moderateMatch) {
+      return moderateContent(req, res, moderateMatch[1], moderateMatch[2]);
+    }
+
     const contentMatch = /^\/v1\/admin\/content\/(posts|reels|stories)\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "DELETE" && contentMatch) {
       return deleteContent(req, res, contentMatch[1], contentMatch[2]);
@@ -1000,6 +2577,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/admin/reports") {
       return adminReports(req, res);
     }
+    const reportActionMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})\/action$/.exec(url.pathname);
+    if (req.method === "POST" && reportActionMatch) {
+      return reportAction(req, res, reportActionMatch[1]);
+    }
+
     const reportMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})\/resolve$/.exec(url.pathname);
     if (req.method === "POST" && reportMatch) {
       return resolveReport(req, res, reportMatch[1]);
@@ -1008,9 +2590,50 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/admin/channels") {
       return adminChannels(req, res);
     }
+    const channelTestMatch = /^\/v1\/admin\/channels\/([^/]+)\/test$/.exec(url.pathname);
+    if (req.method === "POST" && channelTestMatch) {
+      return testAdminChannel(req, res, decodeURIComponent(channelTestMatch[1]));
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/uploads") {
+      return adminUploads(req, res, url);
+    }
+    const adminUploadCancelMatch = /^\/v1\/admin\/uploads\/([0-9a-f-]{36})\/cancel$/.exec(url.pathname);
+    if (req.method === "POST" && adminUploadCancelMatch) {
+      return adminCancelUpload(req, res, adminUploadCancelMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/errors") {
+      return adminErrors(req, res, url);
+    }
+    const errorResolveMatch = /^\/v1\/admin\/errors\/(\d+)\/resolve$/.exec(url.pathname);
+    if (req.method === "POST" && errorResolveMatch) {
+      return resolveSystemError(req, res, errorResolveMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/support") {
+      return adminSupport(req, res, url);
+    }
+    const supportReplyMatch = /^\/v1\/admin\/support\/([0-9a-f-]{36})\/reply$/.exec(url.pathname);
+    if (req.method === "POST" && supportReplyMatch) {
+      return replySupport(req, res, supportReplyMatch[1]);
+    }
+    if (url.pathname === "/v1/admin/releases" && ["GET", "POST"].includes(req.method)) {
+      return adminReleases(req, res);
+    }
+    const releaseMatch = /^\/v1\/admin\/releases\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "PATCH" && releaseMatch) {
+      return updateRelease(req, res, releaseMatch[1]);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/notifications/history") {
+      return adminNotificationHistory(req, res);
+    }
+
+
     if (url.pathname === "/v1/admin/admins") {
       if (req.method === "GET") return adminAdmins(req, res);
       if (req.method === "POST") return addAdmin(req, res);
+    }
+    const adminRecordMatch = /^\/v1\/admin\/admins\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "PATCH" && adminRecordMatch) {
+      return updateAdminRecord(req, res, adminRecordMatch[1]);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/audit") {
       return adminAudit(req, res);
@@ -1039,7 +2662,10 @@ server.listen(config.port, "0.0.0.0", () => {
   console.log("Readiness:", readiness());
 });
 
-const worker = setInterval(() => processNotificationOutbox().catch(() => {}), 5000);
+const worker = setInterval(() => {
+  processNotificationOutbox().catch(() => {});
+  processScheduledAdminNotifications().catch(() => {});
+}, 5000);
 worker.unref();
 const cleaner = setInterval(() => cleanupCache().catch(() => {}), 10 * 60_000);
 cleaner.unref();

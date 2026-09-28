@@ -10,6 +10,7 @@
     "start": "node services/api/src/server.mjs"
   },
   "dependencies": {
-    "teleproto": "1.229.0"
+    "teleproto": "1.229.0",
+    "@supabase/supabase-js": "2.117.1"
   }
 }

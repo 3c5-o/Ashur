@@ -3,6 +3,7 @@ window.ASHUR_CONFIG = {
   supabaseKey: "sb_publishable_sj7LvpsRztNtSaK9jvzQsg_ypXNxXQT",
   apiBaseUrl: "https://exciting-miracle-production-b2cf.up.railway.app",
   shareBaseUrl: "https://ashur-alpha.vercel.app",
+  authRedirectUrl: "ashur://reset-password",
   maxUploadMb: 60,
-  appVersion: "1.1.0"
+  appVersion: "1.2.0"
 };

@@ -33,6 +33,18 @@
         <label><span>كلمة المرور</span><input id="loginPassword" type="password" required autocomplete="current-password" placeholder="اكتب كلمة المرور"></label>
         <button class="primary" type="submit">دخول</button>
         <button class="link-button" id="forgotPassword" type="button">نسيت كلمة المرور؟</button>
+        <button class="link-button hidden" id="resendConfirmation" type="button">إعادة إرسال رسالة التحقق</button>
+      </form>
+
+      <form id="passwordRecoveryForm" class="form hidden">
+        <div class="auth-form-title">
+          <b>تعيين كلمة مرور جديدة</b>
+          <small>اكتب كلمة مرور جديدة للحساب</small>
+        </div>
+        <label><span>كلمة المرور الجديدة</span><input id="recoveryPassword" type="password" minlength="8" required autocomplete="new-password" placeholder="٨ أحرف أو أكثر"></label>
+        <label><span>تأكيد كلمة المرور</span><input id="recoveryPassword2" type="password" minlength="8" required autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></label>
+        <button class="primary" type="submit">حفظ كلمة المرور</button>
+        <button id="cancelPasswordRecovery" class="link-button" type="button">العودة لتسجيل الدخول</button>
       </form>
 
       <form id="registerForm" class="form hidden">
@@ -43,14 +55,14 @@
         <label><span>تأكيد كلمة المرور</span><input id="registerPassword2" type="password" minlength="8" required autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></label>
         <button class="primary" type="submit">إنشاء الحساب</button>
       </form>
-      <p id="authMessage" class="message"></p>
+      <p id="authMessage" class="message" aria-live="polite"></p>
     </section>
   </div>
 
   <div id="networkBanner" class="network-banner hidden"><span>لا يوجد اتصال بالإنترنت</span><button id="retryNetworkButton" type="button">إعادة المحاولة</button></div>
 
   <div id="app" class="app hidden">
-    <header class="topbar">
+    <header class="topbar home-context">
       <button id="publishButton" class="top-action publish-action" aria-label="إنشاء جديد">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
@@ -106,21 +118,25 @@
         </div>
         <div class="messages-search">
           <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-          <span>محادثاتك تظهر هنا</span>
+          <input id="messagesSearchInput" type="search" autocomplete="off" placeholder="ابحث في المحادثات">
         </div>
         <div id="conversationList" class="list conversation-list"></div>
       </section>
 
       <section id="profilePage" class="page profile-page">
         <div id="profileCard" class="profile-card"></div>
-        <div class="profile-tabs">
-          <button class="active" type="button">
+        <div class="profile-tabs" id="ownProfileTabs">
+          <button class="active" data-profile-tab="posts" type="button">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             <span>المنشورات</span>
           </button>
-          <button type="button">
+          <button data-profile-tab="reels" type="button">
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg>
             <span>الريلز</span>
+          </button>
+          <button data-profile-tab="saved" type="button">
+            <svg viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4Z"/></svg>
+            <span>المحفوظات</span>
           </button>
         </div>
         <div id="profileContent" class="feed profile-feed"></div>
@@ -157,37 +173,92 @@
     <button id="closePublish" class="secondary-wide" type="button">إلغاء</button>
   </dialog>
 
-  <dialog id="composerDialog" class="sheet composer">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title"><div><span class="eyebrow">نشر جديد</span><h3 id="composerTitle">إنشاء منشور</h3></div></div>
-    <label class="file-drop">
-      <input id="composerFile" type="file" accept="image/*,video/*">
-      <span class="upload-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 15v5h16v-5"/></svg></span>
-      <b>اختر صورة أو فيديو</b>
-      <small>الحد الأقصى حسب نوع المحتوى</small>
-    </label>
-    <div id="composerPreview" class="composer-preview hidden"></div>
-    <div id="composerFileMeta" class="composer-file-meta hidden"></div>
-    <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا للمحتوى..."></textarea>
-    <div id="uploadProgress" class="upload-progress-wrap hidden">
-      <div class="progress"><div></div></div>
-      <span id="uploadProgressText">0%</span>
+  <dialog id="composerDialog" class="panel-dialog creator-dialog">
+    <div class="creator-head">
+      <button id="cancelComposer" class="creator-circle" type="button" aria-label="إغلاق">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <div class="creator-title"><span class="eyebrow">استوديو آشور</span><h3 id="composerTitle">إنشاء منشور</h3></div>
+      <button id="submitComposer" class="creator-publish-button" type="button">نشر</button>
     </div>
-    <button id="submitComposer" class="primary" type="button">نشر الآن</button>
-    <button id="cancelComposer" class="secondary-wide" type="button">إلغاء</button>
-    <p id="composerMessage" class="message"></p>
+
+    <div class="creator-body">
+      <div class="creator-source-grid">
+        <label class="creator-source-card camera-source">
+          <input id="composerCameraFile" type="file" accept="image/*" capture="environment">
+          <span class="creator-source-icon"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4Z"/><circle cx="12" cy="13" r="4"/></svg></span>
+          <span><b>الكاميرا</b><small>التقاط الآن</small></span>
+        </label>
+        <label class="creator-source-card library-source">
+          <input id="composerFile" type="file" accept="image/*,video/*" multiple>
+          <span class="creator-source-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m6 16 4-4 3 3 3-4 3 4"/><circle cx="9" cy="9" r="1.4"/></svg></span>
+          <span><b>المكتبة</b><small>اختيار صور أو فيديو</small></span>
+        </label>
+      </div>
+
+      <div id="composerStage" class="creator-stage hidden">
+        <div id="composerPreview" class="composer-preview"></div>
+        <div id="storyTextOverlay" class="story-editor-overlay hidden"></div>
+      </div>
+      <div id="composerFileMeta" class="composer-file-meta hidden"></div>
+
+      <div id="storyEditorControls" class="story-editor-controls hidden">
+        <label class="story-text-field">
+          <span>نص فوق القصة</span>
+          <input id="storyOverlayInput" maxlength="120" placeholder="اكتب شيئًا على الصورة أو الفيديو">
+        </label>
+        <div class="story-editor-row">
+          <label class="story-color-control"><span>اللون</span><input id="storyOverlayColor" type="color" value="#ffffff"></label>
+          <label class="switch-row story-bg-control"><span><b>خلفية للنص</b></span><input id="storyOverlayBg" type="checkbox" checked></label>
+        </div>
+        <label class="story-position-control"><span>موضع النص</span><input id="storyOverlayY" type="range" min="15" max="82" value="50"></label>
+      </div>
+
+      <label class="creator-caption-wrap">
+        <span>الوصف</span>
+        <textarea id="composerCaption" maxlength="2200" placeholder="اكتب وصفًا... استخدم @ للإشارة إلى حساب و # للهاشتاغ"></textarea>
+      </label>
+      <div id="composerCaptionHints" class="creator-hints">مثال: @username  #تصوير  #العراق</div>
+
+      <div id="composerOptions" class="composer-options">
+        <label><span>من يشاهد المحتوى؟</span>
+          <select id="composerVisibility">
+            <option value="public">الجميع</option>
+            <option value="followers">المتابعون فقط</option>
+          </select>
+        </label>
+        <label class="switch-row"><span><b>السماح بالتعليقات</b><small>تقدر تغيرها لاحقًا</small></span><input id="composerCommentsEnabled" type="checkbox" checked></label>
+        <label id="composerExploreRow" class="switch-row hidden"><span><b>إظهار في الاستكشاف</b><small>يساعد على وصول الريلز لمستخدمين أكثر</small></span><input id="composerExploreEnabled" type="checkbox" checked></label>
+      </div>
+
+      <div id="uploadProgress" class="upload-progress-wrap hidden">
+        <div class="progress"><div></div></div>
+        <span id="uploadProgressText">0%</span>
+      </div>
+      <p id="composerMessage" class="message"></p>
+    </div>
   </dialog>
 
   <dialog id="notificationsDialog" class="panel-dialog">
     <div class="dialog-head"><div><span class="eyebrow">نشاطك</span><h3>الإشعارات</h3></div><button id="closeNotifications" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
-    <div id="notificationsList" class="list notification-list"></div>
+    <div id="notificationsList" class="dialog-body list notification-list"></div>
   </dialog>
 
   <dialog id="chatDialog" class="panel-dialog chat-dialog">
-    <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3></div><button id="closeChat" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="dialog-head"><div><span class="eyebrow">محادثة</span><h3 id="chatTitle">الرسائل</h3><small id="chatConnectionStatus" class="chat-connection-status"></small></div><button id="closeChat" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div id="chatMessages" class="chat-messages"></div>
+    <div id="chatAttachmentPreview" class="chat-attachment-preview hidden"></div>
+    <p id="chatMessage" class="message chat-send-message" aria-live="polite"></p>
     <form id="chatForm" class="chat-form">
+      <label class="chat-attach-button" aria-label="إرفاق ملف">
+        <input id="chatFile" type="file" accept="image/*,video/*,audio/*,*/*">
+        <svg viewBox="0 0 24 24"><path d="M8 12.5 14.5 6a3 3 0 1 1 4.2 4.2l-8.3 8.3a5 5 0 0 1-7.1-7.1l8.1-8.1"/><path d="m9.5 14 7-7"/></svg>
+      </label>
       <input id="chatInput" maxlength="4000" placeholder="اكتب رسالة...">
+      <button id="voiceRecordButton" class="chat-voice-button" type="button" aria-label="رسالة صوتية">
+        <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg>
+        <span id="voiceRecordTimer" class="hidden">0:00</span>
+      </button>
       <button class="send-button" type="submit" aria-label="إرسال">
         <svg viewBox="0 0 24 24"><path d="m4 4 17 8-17 8 4-8Z"/><path d="M8 12h13"/></svg>
       </button>
@@ -202,7 +273,9 @@
       <button id="closeStoryViewer" class="story-close" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
     <div id="storyViewerMedia" class="story-viewer-media"></div>
+    <div id="storyViewerOverlay" class="story-viewer-overlay hidden"></div>
     <div id="storyViewerCaption" class="story-viewer-caption"></div>
+    <div id="storyViewerActions" class="story-viewer-actions"></div>
   </dialog>
 
   <dialog id="publicProfileDialog" class="panel-dialog public-profile-dialog">
@@ -210,8 +283,24 @@
       <div><span class="eyebrow">حساب</span><h3>الملف الشخصي</h3></div>
       <button id="closePublicProfile" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
     </div>
-    <div id="publicProfileCard" class="profile-card"></div>
-    <div id="publicProfileContent" class="feed profile-feed"></div>
+    <div class="public-profile-scroll">
+      <div id="publicProfileCard" class="profile-card"></div>
+      <div id="publicProfileTabs" class="profile-tabs public-profile-tabs">
+        <button class="active" data-public-profile-tab="posts" type="button">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <span>المنشورات</span>
+        </button>
+        <button data-public-profile-tab="reels" type="button">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg>
+          <span>الريلز</span>
+        </button>
+        <button id="publicSavedTab" class="hidden" data-public-profile-tab="saved" type="button">
+          <svg viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4Z"/></svg>
+          <span>المحفوظات</span>
+        </button>
+      </div>
+      <div id="publicProfileContent" class="profile-media-grid"></div>
+    </div>
   </dialog>
 
   <dialog id="systemDialog" class="panel-dialog system-dialog">
@@ -227,6 +316,8 @@
   <dialog id="commentsDialog" class="panel-dialog chat-dialog comments-sheet">
     <div class="dialog-head"><div><span class="eyebrow">التفاعل</span><h3>التعليقات</h3></div><button id="closeComments" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div id="commentsList" class="chat-messages comments-list"></div>
+    <div id="commentReplyBar" class="comment-reply-bar hidden"><span id="commentReplyText"></span><button id="cancelCommentReply" type="button" aria-label="إلغاء الرد">×</button></div>
+    <p id="commentMessage" class="message comment-message" aria-live="polite"></p>
     <form id="commentForm" class="chat-form">
       <input id="commentInput" maxlength="2000" placeholder="اكتب تعليقًا...">
       <button class="send-button" type="submit" aria-label="إرسال"><svg viewBox="0 0 24 24"><path d="m4 4 17 8-17 8 4-8Z"/><path d="M8 12h13"/></svg></button>
@@ -246,24 +337,63 @@
     <div class="dialog-head"><div><span class="eyebrow">حسابك</span><h3>تعديل الملف الشخصي</h3></div><button id="closeEditProfile" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <form id="editProfileForm" class="dialog-body form">
       <div class="edit-media-grid">
-        <label class="media-picker cover-picker"><input id="editCoverFile" type="file" accept="image/*"><span>تغيير الغلاف</span></label>
-        <label class="media-picker avatar-picker"><input id="editAvatarFile" type="file" accept="image/*"><span>تغيير الصورة</span></label>
+        <div class="profile-media-editor cover-editor">
+          <div class="profile-media-preview cover-preview">
+            <img id="editCoverPreview" class="hidden" alt="معاينة الغلاف">
+            <span id="editCoverFallback">لا يوجد غلاف</span>
+          </div>
+          <div class="profile-media-actions">
+            <label class="media-picker"><input id="editCoverFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"><span>تغيير الغلاف</span></label>
+            <button id="removeCoverImage" class="media-remove-button" type="button">إزالة</button>
+          </div>
+        </div>
+        <div class="profile-media-editor avatar-editor">
+          <div class="profile-media-preview avatar-preview">
+            <img id="editAvatarPreview" class="hidden" alt="معاينة صورة الحساب">
+            <span id="editAvatarFallback">لا توجد صورة</span>
+          </div>
+          <div class="profile-media-actions">
+            <label class="media-picker"><input id="editAvatarFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"><span>تغيير الصورة</span></label>
+            <button id="removeAvatarImage" class="media-remove-button" type="button">إزالة</button>
+          </div>
+        </div>
       </div>
-      <label><span>الاسم</span><input id="editName" maxlength="80" required></label>
-      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="24" required autocapitalize="none"></label>
+      <label><span>الاسم</span><input id="editName" maxlength="80" required autocomplete="name"></label>
+      <label><span>اسم المستخدم</span><input id="editUsername" maxlength="24" required autocapitalize="none" autocomplete="username"></label>
+      <small id="editUsernameStatus" class="field-hint"></small>
       <label><span>نبذة</span><textarea id="editBio" maxlength="300" placeholder="اكتب نبذة قصيرة عنك"></textarea></label>
-      <label><span>الرابط</span><input id="editProfileLink" maxlength="220" placeholder="رابط موقعك أو حسابك"></label>
+      <div class="field-counter"><span id="editBioCount">0</span><span>/ 300</span></div>
+      <label><span>الرابط</span><input id="editProfileLink" maxlength="220" inputmode="url" autocomplete="url" placeholder="example.com/yourname"></label>
       <label class="switch-row"><span><b>حساب خاص</b><small>المتابعة تحتاج موافقتك</small></span><input id="editPrivate" type="checkbox"></label>
-      <button class="primary" type="submit">حفظ التعديلات</button>
-      <p id="editProfileMessage" class="message"></p>
+      <button id="saveProfileButton" class="primary" type="submit">حفظ التعديلات</button>
+      <p id="editProfileMessage" class="message" aria-live="polite"></p>
     </form>
   </dialog>
 
   <dialog id="settingsDialog" class="panel-dialog">
     <div class="dialog-head"><div><span class="eyebrow">التحكم</span><h3>الإعدادات</h3></div><button id="closeSettings" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <form id="notificationSettingsForm" class="dialog-body form settings-form">
+      <div class="settings-group settings-account-group">
+        <div class="settings-group-title"><div><span class="eyebrow">حسابك</span><h4>الحساب والخصوصية</h4></div></div>
+        <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <label class="switch-row settings-row-switch"><span><b>حساب خاص</b><small>طلبات المتابعة تحتاج موافقتك</small></span><input id="settingsPrivateToggle" type="checkbox"></label>
+        <button type="button" class="settings-row" id="blockedAccountsButton"><span><b>الحسابات المحظورة</b><small>إدارة الأشخاص الذين حظرتهم</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="securitySessionsButton"><span><b>الأمان والجلسات</b><small>كلمة المرور والبريد والجلسات</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+      </div>
+
+      <div class="settings-group follow-requests">
+        <div class="settings-group-title"><div><span class="eyebrow">المتابعة</span><h4>طلبات المتابعة</h4></div></div>
+        <div id="followRequestsList" class="list compact"></div>
+      </div>
+
       <div class="settings-group">
-        <h4>الإشعارات</h4>
+        <div class="settings-group-title"><div><span class="eyebrow">محتواك</span><h4>المحتوى</h4></div></div>
+        <button type="button" class="settings-row" id="savedContentButton"><span><b>المحفوظات</b><small>المنشورات والريلز المحفوظة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <label class="switch-row settings-row-switch"><span><b>إظهار المحفوظات في ملفي</b><small>عند التفعيل يستطيع زوار ملفك رؤية المحتوى المحفوظ المسموح لهم بمشاهدته</small></span><input id="savedVisibilityToggle" type="checkbox"></label>
+      </div>
+
+      <div class="settings-group settings-notifications-group">
+        <div class="settings-group-title"><div><span class="eyebrow">التنبيهات</span><h4>الإشعارات</h4></div></div>
         <label class="switch-row"><span><b>الرسائل</b><small>الرسائل الخاصة الجديدة</small></span><input id="notifyMessages" type="checkbox"></label>
         <label class="switch-row"><span><b>المجموعات</b><small>تنبيهات المجموعات</small></span><input id="notifyGroups" type="checkbox"></label>
         <label class="switch-row"><span><b>الإعجابات</b><small>إعجابات المنشورات والريلز</small></span><input id="notifyLikes" type="checkbox"></label>
@@ -272,25 +402,22 @@
         <label class="switch-row"><span><b>القصص</b><small>تفاعلات القصص</small></span><input id="notifyStories" type="checkbox"></label>
         <label class="switch-row"><span><b>إشعارات النظام</b><small>التحديثات والتنبيهات المهمة</small></span><input id="notifySystem" type="checkbox"></label>
         <label class="switch-row"><span><b>معاينة الرسالة</b><small>إظهار جزء من النص في الإشعار</small></span><input id="notifyPreview" type="checkbox"></label>
+        <button class="primary settings-save-button" type="submit">حفظ إعدادات الإشعارات</button>
       </div>
-      <button class="primary" type="submit">حفظ إعدادات الإشعارات</button>
-      <div class="settings-group secondary-settings">
-        <h4>الحساب والخصوصية</h4>
-        <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><span>‹</span></button>
-        <button type="button" class="settings-row" id="blockedAccountsButton"><span><b>الحسابات المحظورة</b><small>إدارة الأشخاص الذين حظرتهم</small></span><span>‹</span></button>
-        <button type="button" class="settings-row" id="securitySessionsButton"><span><b>الأمان والجلسات</b><small>الأجهزة وتسجيلات الدخول</small></span><span>‹</span></button>
+
+      <div class="settings-group">
+        <div class="settings-group-title"><div><span class="eyebrow">المساعدة</span><h4>الدعم</h4></div></div>
+        <button type="button" class="settings-row" id="supportTicketsButton"><span><b>الدعم الفني</b><small>إرسال مشكلة ومتابعة الرد</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="helpButton"><span><b>المساعدة</b><small>الأسئلة الشائعة واستخدام التطبيق</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+        <button type="button" class="settings-row" id="aboutButton"><span><b>حول آشور</b><small>الإصدار ومعلومات المنصة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
       </div>
-      <button id="settingsLogoutButton" class="danger-wide" type="button">تسجيل الخروج</button>
-      <div class="settings-group secondary-settings">
-        <h4>الدعم</h4>
-        <button type="button" class="settings-row" id="helpButton"><span><b>المساعدة</b><small>الأسئلة الشائعة والدعم</small></span><span>‹</span></button>
-        <button type="button" class="settings-row" id="aboutButton"><span><b>حول آشور</b><small>الإصدار ومعلومات المنصة</small></span><span>‹</span></button>
+
+      <div class="settings-group danger-zone">
+        <div class="settings-group-title"><div><span class="eyebrow">الحساب</span><h4>إدارة الحساب</h4></div></div>
+        <button id="settingsLogoutButton" class="danger-wide" type="button">تسجيل الخروج</button>
+        <button id="deleteAccountButton" class="danger-wide danger-outline" type="button">حذف الحساب نهائيًا</button>
       </div>
     </form>
-    <div class="dialog-body follow-requests">
-      <div class="settings-group-title"><div><span class="eyebrow">الخصوصية</span><h4>طلبات المتابعة</h4></div></div>
-      <div id="followRequestsList" class="list compact"></div>
-    </div>
   </dialog>
 
   <dialog id="infoDialog" class="panel-dialog">
@@ -304,53 +431,48 @@
   </dialog>
 
   <script src="./config.js"></script>
+  <script src="./core.js"></script>
+  <script src="./auth-core.js"></script>
+  <script src="./profile-core.js"></script>
   <script>
     (() => {
-      const sources = [
-        "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
-        "https://unpkg.com/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"
-      ];
-      let sourceIndex = 0;
       let finished = false;
-
-      const fail = () => {
+      const fail = (message = "تعذر تشغيل مكونات التطبيق المحلية. أعد فتح التطبيق بعد تثبيت آخر تحديث.") => {
         if (finished) return;
         finished = true;
         const splash = document.getElementById("splash");
         if (splash) splash.remove();
         const auth = document.getElementById("auth");
         if (auth) auth.classList.remove("hidden");
-        const message = document.getElementById("authMessage");
-        if (message) {
-          message.textContent = "تعذر تحميل مكونات التطبيق. تحقق من اتصال الإنترنت ثم افتح التطبيق من جديد.";
-          message.className = "message error";
+        const target = document.getElementById("authMessage");
+        if (target) {
+          target.textContent = message;
+          target.className = "message error";
         }
       };
 
       const loadApp = () => {
         if (!window.supabase?.createClient) return fail();
+        if (!window.AshurCore?.createStore || !window.AshurCore?.createRouter) return fail();
+        if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
+        if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=1.1.0";
+        script.src = "./app.js?v=1.2.0";
         script.onload = () => { finished = true; };
-        script.onerror = fail;
+        script.onerror = () => fail("تعذر تشغيل واجهة آشور المحلية.");
         document.body.appendChild(script);
       };
 
-      const loadSupabase = () => {
-        if (sourceIndex >= sources.length) return fail();
-        const script = document.createElement("script");
-        script.src = sources[sourceIndex++];
-        script.async = false;
-        script.onload = loadApp;
-        script.onerror = loadSupabase;
-        document.head.appendChild(script);
-      };
+      const vendor = document.createElement("script");
+      vendor.src = "./vendor/supabase.min.js";
+      vendor.async = false;
+      vendor.onload = loadApp;
+      vendor.onerror = () => fail("ملف التشغيل المحلي غير مكتمل. ثبّت أحدث نسخة من التطبيق.");
+      document.head.appendChild(vendor);
 
       setTimeout(() => {
         if (!finished && !window.supabase?.createClient) fail();
-      }, 12000);
-
-      loadSupabase();
+      }, 8000);
     })();
   </script>
 </body>

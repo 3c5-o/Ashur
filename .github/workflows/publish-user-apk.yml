@@ -16,6 +16,32 @@ jobs:
       - name: جلب المشروع
         uses: actions/checkout@v4
 
+      - name: التحقق من أسرار التوقيع
+        env:
+          KEYSTORE_B64: ${{ secrets.ASHUR_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ASHUR_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          test -n "$KEYSTORE_B64"
+          test -n "$STORE_PASS"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASS"
+
+      - name: إعداد نود
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: تجهيز مكتبة Supabase المحلية
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund
+          mkdir -p apps/user-web/vendor
+          cp node_modules/@supabase/supabase-js/dist/umd/supabase.js apps/user-web/vendor/supabase.min.js
+          test -s apps/user-web/vendor/supabase.min.js
+
       - name: إعداد جافا
         uses: actions/setup-java@v5
         with:
@@ -37,17 +63,40 @@ jobs:
         with:
           gradle-version: "8.13"
 
-      - name: بناء نسخة المستخدم
+      - name: تجهيز مفتاح التوقيع الثابت
+        env:
+          KEYSTORE_B64: ${{ secrets.ASHUR_KEYSTORE_BASE64 }}
+        shell: bash
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/ashur-release.jks"
+          chmod 600 "$RUNNER_TEMP/ashur-release.jks"
+
+      - name: بناء نسخة المستخدم الرسمية الموقعة
         env:
           ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
           ONESIGNAL_APP_ID: ${{ vars.ONESIGNAL_APP_ID }}
-        run: gradle -p android/user :app:assembleDebug --stacktrace
+          ASHUR_KEYSTORE_FILE: ${{ runner.temp }}/ashur-release.jks
+          ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_KEY_PASSWORD }}
+          ASHUR_REQUIRE_RELEASE_SIGNING: "true"
+        run: gradle -p android/user :app:assembleRelease --stacktrace
 
-      - name: وضع APK داخل الموقع
+      - name: التحقق من التوقيع
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find android/user/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          test -n "$APK" && test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+
+      - name: وضع APK الموقع داخل الموقع
         shell: bash
         run: |
           mkdir -p apps/site/download
-          cp android/user/app/build/outputs/apk/debug/app-debug.apk apps/site/download/ASHUR-User-latest.apk
+          APK="$(find android/user/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          cp "$APK" apps/site/download/ASHUR-User-latest.apk
 
       - name: رفع APK للمستودع
         shell: bash

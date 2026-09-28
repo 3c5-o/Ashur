@@ -1,11 +1,14 @@
 package app.ashur.social;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -16,7 +19,10 @@ import android.webkit.WebViewClient;
 
 import org.json.JSONObject;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.webkit.WebViewAssetLoader;
 
 import com.onesignal.Continue;
@@ -24,9 +30,11 @@ import com.onesignal.OneSignal;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 4107;
+    private static final int AUDIO_PERMISSION_REQUEST = 4108;
     private static final String LOCAL_APP_URL = "https://appassets.androidplatform.net/assets/www/index.html";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
+    private PermissionRequest pendingPermissionRequest;
     private String pendingDeepLink;
 
     @Override
@@ -97,6 +105,34 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean wantsAudio = false;
+                    for (String resource : request.getResources()) {
+                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                            wantsAudio = true;
+                            break;
+                        }
+                    }
+                    if (!wantsAudio) {
+                        request.deny();
+                        return;
+                    }
+                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                            == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                        return;
+                    }
+                    pendingPermissionRequest = request;
+                    ActivityCompat.requestPermissions(
+                            MainActivity.this,
+                            new String[]{Manifest.permission.RECORD_AUDIO},
+                            AUDIO_PERMISSION_REQUEST
+                    );
+                });
+            }
+
+            @Override
             public boolean onShowFileChooser(
                     WebView webView,
                     ValueCallback<Uri[]> uploadMsg,
@@ -150,6 +186,20 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != AUDIO_PERMISSION_REQUEST) return;
+        PermissionRequest request = pendingPermissionRequest;
+        pendingPermissionRequest = null;
+        if (request == null) return;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+        } else {
+            request.deny();
+        }
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         if (requestCode == FILE_CHOOSER_REQUEST) {
             if (fileCallback != null) {
@@ -185,6 +235,10 @@ public class MainActivity extends Activity {
             webView.stopLoading();
             webView.loadUrl("about:blank");
             webView.removeJavascriptInterface("AshurNative");
+            if (pendingPermissionRequest != null) {
+                pendingPermissionRequest.deny();
+                pendingPermissionRequest = null;
+            }
             webView.destroy();
             webView = null;
         }

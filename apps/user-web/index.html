@@ -614,7 +614,7 @@
         if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
         if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=1.3.0";
+        script.src = "./app.js?v=1.4.0";
         script.onload = () => { finished = true; };
         script.onerror = () => fail("تعذر تشغيل واجهة آشور المحلية.");
         document.body.appendChild(script);

@@ -3560,7 +3560,7 @@ async function adminRetryUpload(req, res, jobId) {
   }
 }
 
-async function adminErrors(req, res, url) {async function adminErrors(req, res, url) {
+async function adminErrors(req, res, url) {
   await requireAdmin(req, "storage");
   const status = String(url.searchParams.get("status") || "").trim();
   let query = "select=id,service,code,message,context,user_id,status,created_at,resolved_at&order=created_at.desc&limit=200";
@@ -3931,7 +3931,7 @@ async function adminTestAllChannels(req, res) {
   json(res, results.every(x => x.ok) ? 200 : 207, { items: results });
 }
 
-async function adminNotificationHistory(req, res) {async function adminNotificationHistory(req, res) {
+async function adminNotificationHistory(req, res) {
   await requireAdmin(req, "notifications");
   const rows = await select(
     "admin_notification_history",
@@ -4292,7 +4292,7 @@ async function adminAdmins(req, res) {
   });
 }
 
-async function adminAudit(req, res) {async function adminAudit(req, res) {
+async function adminAudit(req, res) {
   await requireAdmin(req, "admins");
   const items = await select(
     "audit_logs",

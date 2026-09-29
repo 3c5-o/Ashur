@@ -21,7 +21,7 @@
     try{return localStorage.getItem(THEME_KEY)==="light"?"light":"dark"}catch{return "dark"}
   }
   function syncThemeControls(theme=currentTheme()){
-    $("[data-theme-choice]").forEach(button=>{
+    $$("[data-theme-choice]").forEach(button=>{
       const active=button.dataset.themeChoice===theme;
       button.classList.toggle("active",active);
       button.setAttribute("aria-checked",active?"true":"false");
@@ -4762,7 +4762,7 @@
     const label=tool==="style"?"اللون والخلفية":tool==="position"?"موضع النص":"النص";
     if(title)title.textContent=label;
     panel.classList.remove("hidden");
-    $("#storyEditorDock [data-story-tool]").forEach(button=>button.classList.toggle("active",button.dataset.storyTool===tool));
+    $$("#storyEditorDock [data-story-tool]").forEach(button=>button.classList.toggle("active",button.dataset.storyTool===tool));
     if(tool==="text")setTimeout(()=>$("#storyOverlayInput")?.focus(),60);
     if(tool==="style")setTimeout(()=>$("#storyOverlayColor")?.focus(),60);
     if(tool==="position")setTimeout(()=>$("#storyOverlayY")?.focus(),60);
@@ -4777,10 +4777,10 @@
 
   $("#closeStoryToolPanel")?.addEventListener("click",()=>{
     $("#storyEditorControls")?.classList.add("hidden");
-    $("#storyEditorDock [data-story-tool]").forEach(button=>button.classList.remove("active"));
+    $$("#storyEditorDock [data-story-tool]").forEach(button=>button.classList.remove("active"));
   });
 
-  $("#storyEditorDock [data-story-tool]").forEach(button=>button.onclick=()=>{
+  $$("#storyEditorDock [data-story-tool]").forEach(button=>button.onclick=()=>{
     const tool=button.dataset.storyTool;
     if(tool==="text"||tool==="style"||tool==="position"){
       setStoryToolPanel(tool);
@@ -4825,7 +4825,7 @@
       resetMediaEdit();
       updateStoryEffectLabel();
       $("#storyEditorControls")?.classList.add("hidden");
-      $("#storyEditorDock [data-story-tool]").forEach(item=>item.classList.remove("active"));
+      $$("#storyEditorDock [data-story-tool]").forEach(item=>item.classList.remove("active"));
       scheduleComposerDraftSave();
     }
   });
@@ -5331,7 +5331,7 @@
     $("#composerDialog").classList.toggle("story-mode",current==="story");
     $("#storyEditorDock")?.classList.toggle("hidden",current!=="story");
     $("#storyEditorControls")?.classList.add("hidden");
-    $("#cameraStudioDialog [data-camera-publish]").forEach(button=>{
+    $$("#cameraStudioDialog [data-camera-publish]").forEach(button=>{
       button.classList.toggle("active",button.dataset.cameraPublish===current);
       button.setAttribute("aria-selected",button.dataset.cameraPublish===current?"true":"false");
     });
@@ -6102,7 +6102,7 @@
     }
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
-  $("[data-theme-choice]").forEach(button=>button.onclick=()=>{
+  $$("[data-theme-choice]").forEach(button=>button.onclick=()=>{
     applyTheme(button.dataset.themeChoice,{persist:true});
   });
   $("#settingsLogoutButton").onclick=async()=>{

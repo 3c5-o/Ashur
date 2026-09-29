@@ -53,11 +53,13 @@ jobs:
           USER_BASE="$(find /tmp/user -type f -name '*.apk' | head -n1)"
           test -n "$USER_BASE" && test -s "$USER_BASE"
           cp "$USER_BASE" /tmp/fix-user/app.apk
+          base64 -d "$GITHUB_WORKSPACE/.github/signing-fixes/user-apksigner.patch.b64" > /tmp/user-apksigner.patch
+          echo "7793dec9d7a18bc2609dafaeeed4e2ff68115ad8a7e97391eb95b927cdccd466  /tmp/user-apksigner.patch" | sha256sum -c -
           (
             cd /tmp/fix-user
             git init -q
             git add app.apk
-            git apply --binary "$GITHUB_WORKSPACE/.github/signing-fixes/user-apksigner.patch"
+            git apply --binary /tmp/user-apksigner.patch
           )
           echo "f205e00d4d511a105380efbd4cae46792b8c1b4d2ca1b4b69cce87d53e00017c  /tmp/fix-user/app.apk" | sha256sum -c -
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
@@ -75,11 +77,13 @@ jobs:
           ADMIN_BASE="$(find /tmp/admin -type f -name '*.apk' | head -n1)"
           test -n "$ADMIN_BASE" && test -s "$ADMIN_BASE"
           cp "$ADMIN_BASE" /tmp/fix-admin/app.apk
+          base64 -d "$GITHUB_WORKSPACE/.github/signing-fixes/admin-apksigner.patch.b64" > /tmp/admin-apksigner.patch
+          echo "a256da936d4b9431d36bf5c7690a6a475fdff5662feb6eaaabb402c264800514  /tmp/admin-apksigner.patch" | sha256sum -c -
           (
             cd /tmp/fix-admin
             git init -q
             git add app.apk
-            git apply --binary "$GITHUB_WORKSPACE/.github/signing-fixes/admin-apksigner.patch"
+            git apply --binary /tmp/admin-apksigner.patch
           )
           echo "19dc94e80d2eafef31a5c04792b70fdb4696afc102705c09395985d8e51e0f39  /tmp/fix-admin/app.apk" | sha256sum -c -
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"

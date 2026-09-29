@@ -145,6 +145,7 @@ jobs:
           const userApp=fs.readFileSync('apps/user-web/app.js','utf8');
           const userStyle=fs.readFileSync('apps/user-web/style.css','utf8');
           const stage78Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages7-8.sql','utf8');
+          const stage910Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages9-10.sql','utf8');
           const server=fs.readFileSync('services/api/src/server.mjs','utf8');
           const telegram=fs.readFileSync('services/api/src/telegram.mjs','utf8');
           const failures={
@@ -179,11 +180,19 @@ jobs:
             missingStage8RetryCache:!server.includes('retryUploadCachePath')||!server.includes('retry_available')||!server.includes('failure_stage'),
             missingStage8TelegramCleanup:!server.includes('deleteChannelMessage({ channelId: channel.channel_id, messageId: telegramUpload.messageId })')||!server.includes('deleteChannelMessage({ channelId: channel.channel_id, messageId: uploaded.messageId })'),
             missingStage8Migration:!stage78Migration.includes("'checking'")||!stage78Migration.includes('refresh_storage_channel_counters')||!stage78Migration.includes('revoke all on function private.refresh_storage_channel_counters() from public'),
-            missingAdminA8Revision:!server.includes('admin_revision: "A8"'),
+            missingStage9ErrorsLayout:!index.includes('id="errorSummary"')||!index.includes('id="errorSeverity"')||!index.includes('id="errorsPager"'),
+            missingStage9ErrorsApi:!server.includes('occurrence_count')||!server.includes('fingerprint')||!server.includes('async function adminSystemHealth')||!server.includes('/v1/admin/system/health'),
+            missingStage9Style:!adminStyle.includes('.stage9-summary')||!adminStyle.includes('.stage9-error-card')||!adminStyle.includes('.stage9-queues'),
+            missingStage9Migration:!stage910Migration.includes('occurrence_count')||!stage910Migration.includes('admin_notification_templates'),
+            missingStage10NotificationLayout:!index.includes('id="notificationRecipientPreview"')||!index.includes('id="notificationTemplates"')||!index.includes('id="notificationHistoryPager"'),
+            missingStage10NotificationApi:!server.includes('async function adminNotificationPreview')||!server.includes('async function adminNotificationTemplates')||!server.includes('async function cancelScheduledAdminNotification')||!server.includes('async function resendAdminNotification'),
+            missingStage10NotificationUi:!app.includes('selectedNotificationUsers')||!app.includes('loadNotificationTemplates')||!app.includes('editingScheduledNotificationId'),
+            missingStage10Style:!adminStyle.includes('.stage10-layout')||!adminStyle.includes('.stage10-user-picker')||!adminStyle.includes('.stage10-template-card'),
+            missingAdminA10Revision:!server.includes('admin_revision: "A10"'),
             missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };
           if(Object.values(failures).some(Boolean)){
-            console.error('Admin stage 3-8 guard failed',failures);
+            console.error('Admin stage 3-10 guard failed',failures);
             process.exit(1);
           }
           NODE

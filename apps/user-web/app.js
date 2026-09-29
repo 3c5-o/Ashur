@@ -14,7 +14,7 @@
   });
 
   const $ = (s) => document.querySelector(s);
-  const $ = (s) => [...document.querySelectorAll(s)];
+  const $$ = (s) => [...document.querySelectorAll(s)];
 
   const THEME_KEY="ashur_theme_v1";
   function currentTheme(){

@@ -1075,3 +1075,22 @@ html[data-theme="light"] .stage14-summary>div,
 html[data-theme="light"] .stage13-feature-row,
 html[data-theme="light"] .stage14-audit-meta span,
 html[data-theme="light"] .stage14-details pre{background:#fff}
+
+
+/* Owner management */
+.stage7-owner-panel{margin-bottom:10px;border-color:color-mix(in srgb,var(--accent) 32%,var(--line))}
+.stage7-owner-summary{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px
+}
+.stage7-owner-summary>div{
+  min-height:68px;padding:10px;border:1px solid var(--line);border-radius:13px;background:var(--surface-2);
+  display:grid;align-content:center;gap:4px
+}
+.stage7-owner-summary span{font-size:9px;color:var(--muted)}
+.stage7-owner-summary b,.stage7-owner-summary code{font-size:10px;overflow-wrap:anywhere}
+.stage7-owner-transfer{
+  display:grid;grid-template-columns:minmax(260px,1.6fr) minmax(210px,1fr) auto;
+  gap:8px;align-items:end;margin-top:10px
+}
+.stage7-owner-transfer .danger{min-height:42px}
+html[data-theme="light"] .stage7-owner-summary>div{background:#fff}

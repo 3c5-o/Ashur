@@ -395,8 +395,8 @@ async function verify(){
     console.error("[ASHUR ADMIN UI]",uiError);
     reportAdminClientError("post-auth-shell",uiError);
     document.body.dataset.adminRole=me?.role||"";
-    $(".page").forEach(x=>x.classList.toggle("active",x.id==="dashboard"));
-    $("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page==="dashboard"));
+    $$(".page").forEach(x=>x.classList.toggle("active",x.id==="dashboard"));
+    $$("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page==="dashboard"));
     if($("#headerSectionName"))$("#headerSectionName").textContent="الرئيسية";
     showToast("تم تسجيل الدخول. جارٍ استعادة واجهة الإدارة.",{type:"info",duration:4500});
     Promise.resolve(loadDashboard?.()).catch(error=>{

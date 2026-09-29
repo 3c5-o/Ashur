@@ -19,6 +19,7 @@ import {
 import {
   uploadToChannel,
   downloadMessageMedia,
+  deleteChannelMessage,
   testTelegramConnection,
   testTelegramChannel,
 } from "./telegram.mjs";
@@ -120,6 +121,26 @@ async function currentUser(req, required = true) {
     error.statusCode = 401;
     throw error;
   }
+  if (user) {
+    const profile = await profileFor(user.id).catch(() => null);
+    if (profile) {
+      const until = profile.banned_until ? new Date(profile.banned_until) : null;
+      if (until && until <= new Date() && profile.is_banned) {
+        await update("profiles", "id=eq." + encodeURIComponent(user.id), {
+          is_banned: false,
+          banned_until: null,
+          ban_reason: "",
+        }, { returning: false }).catch(() => {});
+        profile.is_banned = false;
+        profile.banned_until = null;
+      }
+      if (profileIsBanned(profile)) {
+        const error = new Error(profile.deleted_at ? "هذا الحساب معطل" : "هذا الحساب موقوف");
+        error.statusCode = 403;
+        throw error;
+      }
+    }
+  }
   return user;
 }
 
@@ -215,9 +236,8 @@ async function isBlockedBetween(userId, otherId) {
 function profileIsBanned(profile) {
   if (!profile) return true;
   if (profile.deleted_at) return true;
-  if (profile.is_banned) return true;
-  if (profile.banned_until && new Date(profile.banned_until) > new Date()) return true;
-  return false;
+  if (profile.banned_until) return new Date(profile.banned_until) > new Date();
+  return Boolean(profile.is_banned);
 }
 
 async function canViewOwner(user, ownerId) {
@@ -2128,11 +2148,35 @@ async function socialDeleteContent(req, res, kind, id) {
   const user = await currentUser(req);
   const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
   if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
-  const rows = await select(table, "select=id,author_id&id=eq." + encodeURIComponent(id) + "&limit=1");
+
+  const fields = table === "posts"
+    ? "id,author_id"
+    : table === "reels"
+      ? "id,author_id,media_id,cover_media_id"
+      : "id,author_id,media_id";
+  const rows = await select(table, "select=" + fields + "&id=eq." + encodeURIComponent(id) + "&limit=1");
   if (!rows?.[0]) return json(res, 404, { error: "المحتوى غير موجود" });
   if (rows[0].author_id !== user.id) return json(res, 403, { error: "لا يمكنك حذف هذا المحتوى" });
+
+  let mediaIds = [];
+  if (kind === "posts") {
+    const media = await select("post_media", "select=media_id&post_id=eq." + encodeURIComponent(id)).catch(() => []);
+    mediaIds = (media || []).map((item) => item.media_id);
+  } else {
+    if (rows[0].media_id) mediaIds.push(rows[0].media_id);
+    if (rows[0].cover_media_id && rows[0].cover_media_id !== rows[0].media_id) mediaIds.push(rows[0].cover_media_id);
+  }
+  mediaIds = [...new Set(mediaIds.filter(Boolean))];
   await remove(table, "id=eq." + encodeURIComponent(id));
-  json(res, 200, { ok: true });
+  const cleanup = [];
+  for (const mediaId of mediaIds) {
+    cleanup.push(await purgeMediaObject(mediaId, user.id).catch((error) => ({
+      media_id: mediaId,
+      status: "cleanup_pending",
+      error: String(error.message || error),
+    })));
+  }
+  json(res, 200, { ok: true, media_count: mediaIds.length, cleanup });
 }
 
 async function socialEditComment(req, res, commentId) {
@@ -2290,14 +2334,187 @@ async function adminStats(req, res) {
   });
 }
 
+
+function pageParams(url, defaultLimit = 30, maxLimit = 100) {
+  const page = Math.max(1, Math.floor(Number(url.searchParams.get("page") || 1)));
+  const limit = Math.max(1, Math.min(maxLimit, Math.floor(Number(url.searchParams.get("limit") || defaultLimit))));
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+async function mediaReferenceCount(mediaId) {
+  const id = encodeURIComponent(mediaId);
+  const counts = await Promise.all([
+    count("post_media", "media_id=eq." + id),
+    count("reels", "media_id=eq." + id),
+    count("reels", "cover_media_id=eq." + id),
+    count("stories", "media_id=eq." + id),
+    count("profiles", "avatar_media_id=eq." + id),
+    count("profiles", "cover_media_id=eq." + id),
+    count("messages", "media_id=eq." + id),
+    count("conversations", "image_media_id=eq." + id),
+  ]);
+  return counts.reduce((sum, value) => sum + Number(value || 0), 0);
+}
+
+async function clearCachedMedia(mediaId) {
+  const names = await fsp.readdir(cacheDir).catch(() => []);
+  await Promise.all(
+    names
+      .filter((name) => name === mediaId || name.startsWith(mediaId + ".") || name.startsWith(mediaId + "-"))
+      .map((name) => fsp.rm(path.join(cacheDir, name), { force: true }).catch(() => {})),
+  );
+}
+
+async function queueMediaCleanup(media, requestedBy = null) {
+  const existing = await select(
+    "media_cleanup_jobs",
+    "select=id,status,attempts&channel_key=eq." + encodeURIComponent(media.channel_key) +
+      "&telegram_message_id=eq." + encodeURIComponent(media.telegram_message_id) +
+      "&status=in.(pending,processing,failed)&limit=1",
+  ).catch(() => []);
+  if (existing?.[0]) return existing[0];
+  const rows = await insert("media_cleanup_jobs", {
+    media_id: media.id,
+    channel_key: media.channel_key,
+    telegram_message_id: media.telegram_message_id,
+    requested_by: requestedBy || null,
+    status: "pending",
+    attempts: 0,
+  });
+  return rows?.[0] || null;
+}
+
+async function executeMediaCleanupJob(job) {
+  const channels = await select(
+    "storage_channels",
+    "select=channel_id&channel_key=eq." + encodeURIComponent(job.channel_key) + "&limit=1",
+  );
+  const channel = channels?.[0];
+  if (!channel) throw new Error("قناة التخزين غير موجودة");
+  await deleteChannelMessage({
+    channelId: channel.channel_id,
+    messageId: job.telegram_message_id,
+  });
+  await update("media_cleanup_jobs", "id=eq." + encodeURIComponent(job.id), {
+    status: "completed",
+    attempts: Number(job.attempts || 0) + 1,
+    last_error: null,
+    updated_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+  }, { returning: false });
+  return { ok: true };
+}
+
+async function purgeMediaObject(mediaId, requestedBy = null) {
+  const rows = await select(
+    "media_objects",
+    "select=id,channel_key,telegram_message_id,status&id=eq." + encodeURIComponent(mediaId) + "&limit=1",
+  ).catch(() => []);
+  const media = rows?.[0];
+  if (!media) return { media_id: mediaId, status: "missing" };
+
+  const references = await mediaReferenceCount(mediaId);
+  if (references > 0) {
+    return { media_id: mediaId, status: "kept", references };
+  }
+
+  const job = await queueMediaCleanup(media, requestedBy);
+  await remove("media_objects", "id=eq." + encodeURIComponent(mediaId)).catch((error) => {
+    error.message = "تعذر حذف سجل الوسائط: " + error.message;
+    throw error;
+  });
+  await clearCachedMedia(mediaId);
+
+  try {
+    await executeMediaCleanupJob(job);
+    return { media_id: mediaId, status: "deleted", cleanup_job_id: job?.id || null };
+  } catch (error) {
+    await update("media_cleanup_jobs", "id=eq." + encodeURIComponent(job.id), {
+      status: "failed",
+      attempts: Number(job.attempts || 0) + 1,
+      last_error: String(error.message || error).slice(0, 1000),
+      updated_at: new Date().toISOString(),
+    }, { returning: false }).catch(() => {});
+    return {
+      media_id: mediaId,
+      status: "cleanup_pending",
+      cleanup_job_id: job?.id || null,
+      error: String(error.message || error),
+    };
+  }
+}
+
+async function processMediaCleanupJobs() {
+  if (!readiness().database) return;
+  const jobs = await select(
+    "media_cleanup_jobs",
+    "select=id,media_id,channel_key,telegram_message_id,status,attempts,last_error&status=in.(pending,failed)&attempts=lt.5&order=created_at.asc&limit=10",
+  ).catch(() => []);
+  for (const job of jobs || []) {
+    try {
+      await update("media_cleanup_jobs", "id=eq." + encodeURIComponent(job.id), {
+        status: "processing",
+        updated_at: new Date().toISOString(),
+      }, { returning: false });
+      await executeMediaCleanupJob(job);
+    } catch (error) {
+      await update("media_cleanup_jobs", "id=eq." + encodeURIComponent(job.id), {
+        status: "failed",
+        attempts: Number(job.attempts || 0) + 1,
+        last_error: String(error.message || error).slice(0, 1000),
+        updated_at: new Date().toISOString(),
+      }, { returning: false }).catch(() => {});
+    }
+  }
+}
+
+async function ownedMediaIds(userId) {
+  const rows = await select(
+    "media_objects",
+    "select=id&owner_id=eq." + encodeURIComponent(userId) + "&limit=10000",
+  ).catch(() => []);
+  return [...new Set((rows || []).map((row) => row.id).filter(Boolean))];
+}
+
 async function adminUsers(req, res, url) {
   await requireAdmin(req, "users");
+  const { page, limit, offset } = pageParams(url, 30, 80);
   const q = (url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
-  const query = q
-    ? `select=id,name,username,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,created_at&or=(name.ilike.*${encodeURIComponent(q)}*,username.ilike.*${encodeURIComponent(q)}*,id.eq.${encodeURIComponent(q)})&order=created_at.desc&limit=50`
-    : "select=id,name,username,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,created_at&order=created_at.desc&limit=50";
+  const status = String(url.searchParams.get("status") || "").trim();
+  const verified = String(url.searchParams.get("verified") || "").trim();
+  const privacy = String(url.searchParams.get("privacy") || "").trim();
+
+  const filters = [];
+  if (q) {
+    const parts = [
+      "name.ilike.*" + encodeURIComponent(q) + "*",
+      "username.ilike.*" + encodeURIComponent(q.replace(/^@/, "")) + "*",
+    ];
+    if (/^[0-9a-f-]{36}$/i.test(q)) parts.push("id.eq." + encodeURIComponent(q));
+    filters.push("or=(" + parts.join(",") + ")");
+  }
+  if (status === "active") {
+    filters.push("deleted_at=is.null", "is_banned=eq.false");
+  } else if (status === "banned") {
+    filters.push("is_banned=eq.true");
+  } else if (status === "deleted") {
+    filters.push("deleted_at=not.is.null");
+  }
+  if (verified === "true" || verified === "false") filters.push("is_verified=eq." + verified);
+  if (privacy === "private") filters.push("is_private=eq.true");
+  if (privacy === "public") filters.push("is_private=eq.false");
+
+  const suffix = filters.length ? "&" + filters.join("&") : "";
+  const total = await count("profiles", filters.join("&"));
+  const query =
+    "select=id,name,username,avatar_media_id,is_banned,is_verified,is_private,banned_until,ban_reason,warning_count,last_seen_at,deleted_at,created_at" +
+    suffix +
+    "&order=created_at.desc&offset=" + offset + "&limit=" + limit;
   const items = await select("profiles", query);
-  json(res, 200, { items: items || [] });
+  json(res, 200, {
+    items: items || [],
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+  });
 }
 
 async function setBan(req, res, userId) {
@@ -2305,7 +2522,8 @@ async function setBan(req, res, userId) {
   const body = await readJson(req);
   const banned = Boolean(body.banned);
   const hours = Number(body.duration_hours || 0);
-  const bannedUntil = banned && Number.isFinite(hours) && hours > 0
+  const temporary = banned && Number.isFinite(hours) && hours > 0;
+  const bannedUntil = temporary
     ? new Date(Date.now() + Math.min(hours, 24 * 365) * 3600_000).toISOString()
     : null;
   const reason = String(body.reason || "").trim().slice(0, 500);
@@ -2313,64 +2531,134 @@ async function setBan(req, res, userId) {
     "profiles",
     "id=eq." + encodeURIComponent(userId),
     {
-      is_banned: banned,
+      is_banned: banned && !temporary,
       banned_until: bannedUntil,
       ban_reason: banned ? reason : "",
     },
     { returning: false },
   );
+  if (banned) {
+    await serviceRequest("/rest/v1/rpc/admin_revoke_user_sessions", {
+      method: "POST",
+      body: { p_user_id: userId },
+    }).catch(() => {});
+  }
   await writeAudit(actor.user.id, banned ? "ban_user" : "unban_user", "profile", userId, {
     reason,
-    duration_hours: hours > 0 ? hours : null,
+    duration_hours: temporary ? hours : null,
     banned_until: bannedUntil,
   });
-  json(res, 200, { ok: true, banned, banned_until: bannedUntil });
+  json(res, 200, { ok: true, banned, banned_until: bannedUntil, permanent: banned && !temporary });
 }
-
 
 async function adminUserDetail(req, res, userId) {
   await requireAdmin(req, "users");
   const profiles = await select(
     "profiles",
-    "select=id,name,username,bio,profile_link,avatar_media_id,cover_media_id,is_private,is_verified,is_banned,banned_until,ban_reason,warning_count,last_seen_at,created_at,updated_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
+    "select=id,name,username,bio,profile_link,avatar_media_id,cover_media_id,is_private,is_verified,is_banned,banned_until,ban_reason,warning_count,last_seen_at,deleted_at,created_at,updated_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
   );
   const profile = profiles?.[0];
   if (!profile) return json(res, 404, { error: "الحساب غير موجود" });
-  const [posts, reels, stories, followers, following, reports] = await Promise.all([
+
+  const [posts, reels, stories, comments, followers, following, reports, warnings, authRecord] = await Promise.all([
     count("posts", "author_id=eq." + encodeURIComponent(userId)),
     count("reels", "author_id=eq." + encodeURIComponent(userId)),
     count("stories", "author_id=eq." + encodeURIComponent(userId)),
+    count("comments", "author_id=eq." + encodeURIComponent(userId)),
     count("follows", "following_id=eq." + encodeURIComponent(userId) + "&status=eq.accepted"),
     count("follows", "follower_id=eq." + encodeURIComponent(userId) + "&status=eq.accepted"),
     count("reports", "target_type=eq.profile&target_id=eq." + encodeURIComponent(userId)),
+    select(
+      "admin_user_warnings",
+      "select=id,admin_user_id,reason,created_at&user_id=eq." + encodeURIComponent(userId) + "&order=created_at.desc&limit=30",
+    ).catch(() => []),
+    serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(userId)).catch(() => null),
   ]);
-  json(res, 200, { profile, stats: { posts, reels, stories, followers, following, reports } });
+
+  json(res, 200, {
+    profile,
+    auth: authRecord ? {
+      email: authRecord.email || "",
+      phone: authRecord.phone || "",
+      last_sign_in_at: authRecord.last_sign_in_at || null,
+      email_confirmed_at: authRecord.email_confirmed_at || null,
+      created_at: authRecord.created_at || null,
+    } : null,
+    warnings: warnings || [],
+    stats: { posts, reels, stories, comments, followers, following, reports },
+  });
 }
 
 async function adminUserAction(req, res, userId) {
   const actor = await requireAdmin(req, "users");
   const body = await readJson(req);
   const action = String(body.action || "");
+  const reason = String(body.reason || "").trim().slice(0, 500);
+
   if (action === "verify" || action === "unverify") {
     await update("profiles", "id=eq." + encodeURIComponent(userId), {
       is_verified: action === "verify",
     }, { returning: false });
   } else if (action === "warn") {
+    if (!reason) return json(res, 400, { error: "نص التحذير مطلوب" });
     const rows = await select("profiles", "select=warning_count&id=eq." + encodeURIComponent(userId) + "&limit=1");
     if (!rows?.[0]) return json(res, 404, { error: "الحساب غير موجود" });
+    await insert("admin_user_warnings", {
+      user_id: userId,
+      admin_user_id: actor.user.id,
+      reason,
+    }, { returning: false });
     await update("profiles", "id=eq." + encodeURIComponent(userId), {
       warning_count: Number(rows[0].warning_count || 0) + 1,
     }, { returning: false });
     const title = "تنبيه من إدارة آشور";
-    const message = String(body.reason || "يرجى مراجعة استخدامك للمنصة.").slice(0, 500);
+    await insert("notifications", {
+      user_id: userId,
+      actor_id: actor.user.id,
+      kind: "system",
+      title,
+      body: reason,
+    }, { returning: false }).catch(() => {});
+    await sendPush({ userIds: [userId], title, body: reason, data: { kind: "system" } }).catch(() => {});
+  } else if (action === "notify") {
+    const title = String(body.title || "رسالة من إدارة آشور").trim().slice(0, 80);
+    const message = String(body.message || "").trim().slice(0, 500);
+    if (!message) return json(res, 400, { error: "نص الإشعار مطلوب" });
     await insert("notifications", {
       user_id: userId,
       actor_id: actor.user.id,
       kind: "system",
       title,
       body: message,
-    }, { returning: false }).catch(() => {});
+    }, { returning: false });
     await sendPush({ userIds: [userId], title, body: message, data: { kind: "system" } }).catch(() => {});
+  } else if (action === "force_logout") {
+    const result = await serviceRequest("/rest/v1/rpc/admin_revoke_user_sessions", {
+      method: "POST",
+      body: { p_user_id: userId },
+    });
+    await writeAudit(actor.user.id, "force_logout_user", "profile", userId, {
+      sessions_revoked: Number(Array.isArray(result) ? result[0] : result || 0),
+    });
+    return json(res, 200, { ok: true, sessions_revoked: Number(Array.isArray(result) ? result[0] : result || 0) });
+  } else if (action === "deactivate") {
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      deleted_at: new Date().toISOString(),
+      is_banned: true,
+      banned_until: null,
+      ban_reason: reason || "admin_deactivated",
+    }, { returning: false });
+    await serviceRequest("/rest/v1/rpc/admin_revoke_user_sessions", {
+      method: "POST",
+      body: { p_user_id: userId },
+    }).catch(() => {});
+  } else if (action === "reactivate") {
+    await update("profiles", "id=eq." + encodeURIComponent(userId), {
+      deleted_at: null,
+      is_banned: false,
+      banned_until: null,
+      ban_reason: "",
+    }, { returning: false });
   } else if (action === "unban") {
     await update("profiles", "id=eq." + encodeURIComponent(userId), {
       is_banned: false,
@@ -2380,10 +2668,43 @@ async function adminUserAction(req, res, userId) {
   } else {
     return json(res, 400, { error: "الإجراء غير مدعوم" });
   }
-  await writeAudit(actor.user.id, "user_" + action, "profile", userId, {
-    reason: String(body.reason || "").slice(0, 500),
-  });
+
+  await writeAudit(actor.user.id, "user_" + action, "profile", userId, { reason });
   json(res, 200, { ok: true });
+}
+
+async function adminDeleteUser(req, res, userId) {
+  const actor = await requireAdmin(req, "users");
+  if (actor.user.id === userId) return json(res, 400, { error: "لا يمكن حذف حساب الإدارة الحالي" });
+  const body = await readJson(req);
+  if (String(body.confirm || "") !== "DELETE") {
+    return json(res, 400, { error: "تأكيد الحذف النهائي غير صحيح" });
+  }
+  const profileRows = await select(
+    "profiles",
+    "select=id,name,username&id=eq." + encodeURIComponent(userId) + "&limit=1",
+  );
+  const profile = profileRows?.[0];
+  if (!profile) return json(res, 404, { error: "الحساب غير موجود" });
+
+  const mediaIds = await ownedMediaIds(userId);
+  await serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(userId), { method: "DELETE" });
+
+  const cleanup = [];
+  for (const mediaId of mediaIds) {
+    cleanup.push(await purgeMediaObject(mediaId, actor.user.id).catch((error) => ({
+      media_id: mediaId,
+      status: "cleanup_pending",
+      error: String(error.message || error),
+    })));
+  }
+
+  await writeAudit(actor.user.id, "delete_user_permanently", "profile", userId, {
+    username: profile.username || "",
+    media_count: mediaIds.length,
+    cleanup,
+  });
+  json(res, 200, { ok: true, media_count: mediaIds.length, cleanup });
 }
 
 async function adminComments(req, res, url) {
@@ -2638,24 +2959,87 @@ async function adminContent(req, res, url) {
   const kind = url.searchParams.get("kind") || "posts";
   const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
   if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
+
+  const { page, limit, offset } = pageParams(url, 24, 60);
   const status = String(url.searchParams.get("status") || "").trim();
-  const authorId = String(url.searchParams.get("author_id") || "").trim();
+  const authorRaw = String(url.searchParams.get("author") || url.searchParams.get("author_id") || "").trim();
   const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  const visibility = String(url.searchParams.get("visibility") || "").trim();
+  const comments = String(url.searchParams.get("comments") || "").trim();
+  const explore = String(url.searchParams.get("explore") || "").trim();
+  const reports = String(url.searchParams.get("reports") || "").trim();
+  const from = String(url.searchParams.get("from") || "").trim();
+  const to = String(url.searchParams.get("to") || "").trim();
+
+  let authorId = "";
+  if (authorRaw) {
+    if (/^[0-9a-f-]{36}$/i.test(authorRaw)) {
+      authorId = authorRaw;
+    } else {
+      const username = authorRaw.replace(/^@/, "").replace(/[,*()]/g, "");
+      const authors = await select(
+        "profiles",
+        "select=id&username=ilike." + encodeURIComponent(username) + "&limit=1",
+      ).catch(() => []);
+      authorId = authors?.[0]?.id || "__none__";
+    }
+  }
+
+  const filters = [];
+  if (status) filters.push("moderation_status=eq." + encodeURIComponent(status));
+  if (authorId) filters.push("author_id=eq." + encodeURIComponent(authorId));
+  if (q) filters.push("caption=ilike.*" + encodeURIComponent(q) + "*");
+  if (visibility && table !== "stories") filters.push("visibility=eq." + encodeURIComponent(visibility));
+  if ((comments === "true" || comments === "false") && table !== "stories") {
+    filters.push("comments_enabled=eq." + comments);
+  }
+  if ((explore === "true" || explore === "false") && table === "reels") {
+    filters.push("explore_enabled=eq." + explore);
+  }
+  if (from) filters.push("created_at=gte." + encodeURIComponent(new Date(from).toISOString()));
+  if (to) {
+    const end = new Date(to);
+    end.setHours(23, 59, 59, 999);
+    filters.push("created_at=lte." + encodeURIComponent(end.toISOString()));
+  }
+
+  if (reports === "true" || reports === "false") {
+    const reportType = ({ posts: "post", reels: "reel", stories: "story" })[kind];
+    const reportRows = await select(
+      "reports",
+      "select=target_id&target_type=eq." + reportType + "&limit=10000",
+    ).catch(() => []);
+    const ids = [...new Set((reportRows || []).map((row) => row.target_id).filter(Boolean))];
+    if (reports === "true") {
+      if (!ids.length) return json(res, 200, { items: [], pagination: { page, limit, total: 0, pages: 1 } });
+      filters.push("id=in.(" + ids.map(encodeURIComponent).join(",") + ")");
+    } else if (ids.length) {
+      filters.push("id=not.in.(" + ids.map(encodeURIComponent).join(",") + ")");
+    }
+  }
+
   let fields = "id,author_id,caption,created_at,moderation_status,deleted_at,hidden_by";
-  if (table === "stories") fields += ",expires_at,media_id";
-  if (table === "reels") fields += ",media_id,comments_enabled,explore_enabled,visibility";
-  if (table === "posts") fields += ",comments_enabled,visibility,updated_at";
-  let query = "select=" + fields + "&order=created_at.desc&limit=150";
-  if (status) query += "&moderation_status=eq." + encodeURIComponent(status);
-  if (authorId) query += "&author_id=eq." + encodeURIComponent(authorId);
-  if (q) query += "&caption=ilike.*" + encodeURIComponent(q) + "*";
+  if (table === "stories") fields += ",expires_at,media_id,overlay_text,shared_type,shared_id";
+  if (table === "reels") fields += ",media_id,cover_media_id,comments_enabled,explore_enabled,visibility,view_count";
+  if (table === "posts") fields += ",comments_enabled,visibility,updated_at,pinned_at";
+
+  const filterQuery = filters.join("&");
+  const total = await count(table, filterQuery);
+  let query = "select=" + fields;
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=created_at.desc&offset=" + offset + "&limit=" + limit;
+
   const rows = await select(table, query);
   const items = [];
+  const reportType = ({ posts: "post", reels: "reel", stories: "story" })[kind];
   for (const row of rows || []) {
-    const author = await select(
-      "profiles",
-      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1",
-    ).catch(() => []);
+    const [author, reportCount] = await Promise.all([
+      select(
+        "profiles",
+        "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1",
+      ).catch(() => []),
+      count("reports", "target_type=eq." + reportType + "&target_id=eq." + encodeURIComponent(row.id)).catch(() => 0),
+    ]);
     let media_ids = [];
     if (kind === "posts") {
       const media = await select(
@@ -2663,26 +3047,68 @@ async function adminContent(req, res, url) {
         "select=media_id,sort_order&post_id=eq." + encodeURIComponent(row.id) + "&order=sort_order.asc",
       ).catch(() => []);
       media_ids = (media || []).map((m) => m.media_id);
-    } else if (row.media_id) {
-      media_ids = [row.media_id];
+    } else {
+      if (row.media_id) media_ids.push(row.media_id);
+      if (row.cover_media_id && row.cover_media_id !== row.media_id) media_ids.push(row.cover_media_id);
     }
-    items.push({ ...row, author: author?.[0] || null, media_ids });
+    items.push({
+      ...row,
+      author: author?.[0] || null,
+      media_ids,
+      report_count: Number(reportCount || 0),
+    });
   }
-  json(res, 200, { items });
+
+  json(res, 200, {
+    items,
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+  });
 }
 
 async function deleteContent(req, res, kind, id) {
   const actor = await requireAdmin(req, "content");
   const table = ({ posts: "posts", reels: "reels", stories: "stories" })[kind];
   if (!table) return json(res, 400, { error: "نوع المحتوى غير صالح" });
-  await remove(table, `id=eq.${encodeURIComponent(id)}`);
-  await insert("audit_logs", {
-    actor_user_id: actor.user.id,
-    action: "delete_content",
-    target_type: kind,
-    target_id: id,
-  }, { returning: false });
-  json(res, 200, { ok: true });
+
+  const fields = table === "posts"
+    ? "id,author_id"
+    : table === "reels"
+      ? "id,author_id,media_id,cover_media_id"
+      : "id,author_id,media_id";
+  const rows = await select(table, "select=" + fields + "&id=eq." + encodeURIComponent(id) + "&limit=1");
+  const content = rows?.[0];
+  if (!content) return json(res, 404, { error: "المحتوى غير موجود" });
+
+  let mediaIds = [];
+  if (kind === "posts") {
+    const media = await select(
+      "post_media",
+      "select=media_id&post_id=eq." + encodeURIComponent(id),
+    ).catch(() => []);
+    mediaIds = (media || []).map((item) => item.media_id);
+  } else {
+    if (content.media_id) mediaIds.push(content.media_id);
+    if (content.cover_media_id && content.cover_media_id !== content.media_id) mediaIds.push(content.cover_media_id);
+  }
+  mediaIds = [...new Set(mediaIds.filter(Boolean))];
+
+  await remove(table, "id=eq." + encodeURIComponent(id));
+
+  const cleanup = [];
+  for (const mediaId of mediaIds) {
+    cleanup.push(await purgeMediaObject(mediaId, actor.user.id).catch((error) => ({
+      media_id: mediaId,
+      status: "cleanup_pending",
+      error: String(error.message || error),
+    })));
+  }
+
+  await writeAudit(actor.user.id, "delete_content", kind, id, {
+    author_id: content.author_id,
+    media_ids: mediaIds,
+    cleanup,
+  });
+  json(res, 200, { ok: true, media_count: mediaIds.length, cleanup });
 }
 
 async function adminReports(req, res) {
@@ -3215,6 +3641,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && adminUserDetailMatch) {
       return adminUserDetail(req, res, adminUserDetailMatch[1]);
     }
+    if (req.method === "DELETE" && adminUserDetailMatch) {
+      return adminDeleteUser(req, res, adminUserDetailMatch[1]);
+    }
     const adminUserActionMatch = /^\/v1\/admin\/users\/([0-9a-f-]{36})\/action$/.exec(url.pathname);
     if (req.method === "POST" && adminUserActionMatch) {
       return adminUserAction(req, res, adminUserActionMatch[1]);
@@ -3327,6 +3756,7 @@ server.listen(config.port, "0.0.0.0", () => {
 const worker = setInterval(() => {
   processNotificationOutbox().catch(() => {});
   processScheduledAdminNotifications().catch(() => {});
+  processMediaCleanupJobs().catch(() => {});
 }, 5000);
 worker.unref();
 const cleaner = setInterval(() => cleanupCache().catch(() => {}), 10 * 60_000);

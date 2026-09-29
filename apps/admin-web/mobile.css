@@ -347,3 +347,33 @@
   .stage8-upload-user{align-items:flex-start}
   .stage8-upload-user .small{margin-inline-start:0}
 }
+
+
+/* Ashur Admin stages 9-10 mobile */
+@media(max-width:920px){
+  .stage9-error-filter{grid-template-columns:1fr 1fr}
+  .stage9-error-filter .search-wrap{grid-column:1/-1}
+  .stage9-error-filter #resetErrorFilters{grid-column:1/-1}
+  .stage9-runtime{grid-template-columns:1fr 1fr}
+  .stage10-layout{grid-template-columns:1fr}
+  .stage10-preview-panel{position:static}
+  .stage10-history-filter{grid-template-columns:1fr 1fr}
+  .stage10-history-filter .search-wrap,
+  .stage10-history-filter #resetNotificationHistoryFilters{grid-column:1/-1}
+  .stage10-template-list{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .stage9-summary,.stage10-summary{grid-template-columns:1fr 1fr}
+  .stage9-error-filter{grid-template-columns:1fr}
+  .stage9-error-filter>*{grid-column:1!important}
+  .stage9-error-context span{grid-template-columns:1fr}
+  .stage9-runtime{grid-template-columns:1fr 1fr}
+  .stage9-queues{grid-template-columns:1fr 1fr}
+  .stage10-composer .panel-head{align-items:stretch;flex-direction:column}
+  .stage10-composer .panel-head select{width:100%;min-width:0}
+  .stage10-actions{display:grid;grid-template-columns:1fr}
+  .stage10-history-filter{grid-template-columns:1fr}
+  .stage10-history-filter>*{grid-column:1!important}
+  .stage10-template-card{display:grid}
+  .stage10-template-card .admin-actions{grid-template-columns:repeat(3,1fr)}
+}

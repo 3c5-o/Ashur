@@ -148,6 +148,8 @@ jobs:
           const stage910Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages9-10.sql','utf8');
           const stage1112Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages11-12.sql','utf8');
           const stage1314Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages13-14.sql','utf8');
+          const ownerMigration=fs.readFileSync('docs/migrations/2026-09-29-owner-management.sql','utf8');
+          const bot=fs.readFileSync('services/bot/src/bot.mjs','utf8');
           const siteApp=fs.readFileSync('apps/site/app.js','utf8');
           const siteIndex=fs.readFileSync('apps/site/index.html','utf8');
           const server=fs.readFileSync('services/api/src/server.mjs','utf8');
@@ -212,11 +214,17 @@ jobs:
             missingStage14AuditUi:!app.includes('auditSensitive')||!app.includes('auditDetailsMarkup')||!app.includes('adminSensitiveConfirm'),
             missingStage14Style:!adminStyle.includes('.stage14-summary')||!adminStyle.includes('.stage14-audit-card')||!adminStyle.includes('.stage14-details'),
             missingStage1314Migration:!stage1314Migration.includes('prevent_audit_log_delete')||!stage1314Migration.includes('actor_role')||!stage1314Migration.includes("'features'"),
+            missingOwnerOnlyLayout:!index.includes('id="ownerManagementPanel"')||!index.includes('data-owner-only')||!index.includes('id="ownerNewUserId"'),
+            missingOwnerOnlyUi:!app.includes('loadOwnerManagement')||!app.includes('adminAccess?.role==="owner"')||!app.includes('phrase:"TRANSFER"'),
+            missingOwnerOnlyApi:!server.includes('async function adminOwner')||!server.includes('/v1/admin/owner')||!server.includes('actor.admin.role !== "owner"')||!server.includes('/rest/v1/rpc/admin_transfer_owner'),
+            missingOwnerBotGuard:!bot.includes('callback_data: "owner_management"')||!bot.includes('confirm_app_owner')||!bot.includes('String(query.from.id) !== ADMIN_ID')||!bot.includes('owner_transfer_secondary')||!bot.includes('owner_transfer_remove'),
+            missingOwnerMigration:!ownerMigration.includes('admins_single_active_owner_idx')||!ownerMigration.includes('admin_transfer_owner')||!ownerMigration.includes('grant execute on function public.admin_transfer_owner(uuid,text) to service_role'),
+            staleStaticOwnerChecks:server.includes('candidate !== String(config.ownerUserId')||server.includes('body.assigned_to) !== String(config.ownerUserId'),
             missingAdminA14Revision:(server.match(/admin_revision: "A14"/g)||[]).length<2||server.includes('admin_revision: "A10"'),
             missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };
           if(Object.values(failures).some(Boolean)){
-            console.error('Admin stage 3-14 guard failed',failures);
+            console.error('Admin stage 3-14 + owner-management guard failed',failures);
             process.exit(1);
           }
           NODE

@@ -177,17 +177,19 @@ async function hydrateAdminMedia(root=document){
   await Promise.all(nodes.map(async node=>{
     try{
       const access=await mediaAccess(node.dataset.mediaId);
+      const mediaUrl=access?.url||(access?.path?apiBase()+access.path:"");
+      if(!mediaUrl)throw new Error("تعذر تجهيز رابط الوسائط");
       node.dataset.mediaReady="1";
       if(access.mime_type?.startsWith("video/")){
         const v=document.createElement("video");
         v.className=node.className;
-        v.src=access.url;
+        v.src=mediaUrl;
         v.controls=true;
         v.playsInline=true;
         v.preload="metadata";
         node.replaceWith(v);
       }else{
-        node.src=access.url;
+        node.src=mediaUrl;
       }
     }catch{
       node.classList.add("media-error");
@@ -299,14 +301,14 @@ document.addEventListener("click",e=>{
   if(side.contains(e.target)||$("#menuButton").contains(e.target)||$("#moreAdminButton")?.contains(e.target))return;
   side.classList.remove("open");
 });
-[...$(".nav"),...$(".mobile-nav")].filter(x=>x.dataset.page).forEach(b=>b.onclick=()=>navigate(b.dataset.page));
+[...$$(".nav"),...$$(".mobile-nav")].filter(x=>x.dataset.page).forEach(b=>b.onclick=()=>navigate(b.dataset.page));
 
 function navigate(page,{history=true,loading=true}={}){
   if(!titles[page])page="dashboard";
   if(history&&currentAdminPage&&currentAdminPage!==page)adminPageHistory.push(currentAdminPage);
   currentAdminPage=page;
-  $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
-  $("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+  $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+  $$("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
   $("#headerSectionName").textContent=titles[page]||"إدارة آشور";
   $("#sidebar").classList.remove("open");
   $("#moreAdminButton")?.classList.remove("active");
@@ -391,61 +393,168 @@ async function loadDashboard(){
 }
 
 let userTimer;
-$("#userSearch").oninput=()=>{clearTimeout(userTimer);userTimer=setTimeout(loadUsers,260)};
+let userPage=1;
+let userPages=1;
+
+function resetUserPage(){userPage=1}
+["userStatus","userVerified","userPrivacy"].forEach(id=>{
+  $("#"+id)?.addEventListener("change",()=>{resetUserPage();loadUsers()});
+});
+$("#userSearch").oninput=()=>{
+  clearTimeout(userTimer);
+  userTimer=setTimeout(()=>{resetUserPage();loadUsers()},260);
+};
+$("#usersPrevPage")?.addEventListener("click",()=>{if(userPage>1){userPage--;loadUsers()}});
+$("#usersNextPage")?.addEventListener("click",()=>{if(userPage<userPages){userPage++;loadUsers()}});
+
+function userStatusMeta(u){
+  if(u.deleted_at)return {label:"معطل",cls:"bad"};
+  const temporary=Boolean(u.banned_until&&new Date(u.banned_until)>new Date());
+  if(u.is_banned||temporary)return {label:temporary?"حظر مؤقت":"محظور",cls:"bad"};
+  return {label:"نشط",cls:"ok"};
+}
+
+async function sendUserWarning(userId){
+  const reason=await adminPrompt("إرسال تحذير",{
+    text:"سيُحفظ التحذير في سجل الحساب ويصل للمستخدم كإشعار.",
+    label:"نص التحذير",placeholder:"اكتب سبب التحذير بوضوح",acceptLabel:"إرسال"
+  });
+  if(!reason?.trim())return false;
+  await api("/v1/admin/users/"+userId+"/action",{
+    method:"POST",body:JSON.stringify({action:"warn",reason:reason.trim()})
+  });
+  showToast("تم إرسال التحذير وتسجيله.",{type:"success"});
+  return true;
+}
+
+async function banUserFor(userId,hours){
+  const reason=await adminPrompt(hours>0?"حظر مؤقت":"حظر دائم",{
+    text:hours>0?"مدة الحظر المحددة: "+(hours===1?"ساعة":hours===24?"يوم":hours===168?"أسبوع":"شهر")+".":"سيستمر الحظر حتى يتم رفعه يدويًا.",
+    label:"سبب الحظر",placeholder:"سبب واضح للإجراء",acceptLabel:"تأكيد الحظر"
+  });
+  if(reason===null)return false;
+  await api("/v1/admin/users/"+userId+"/ban",{
+    method:"POST",body:JSON.stringify({banned:true,reason:reason.trim(),duration_hours:hours})
+  });
+  showToast("تم تطبيق الحظر.",{type:"success"});
+  return true;
+}
 
 async function loadUserDetail(id){
   try{
     const d=await api("/v1/admin/users/"+encodeURIComponent(id));
-    const u=d.profile||{};
-    const s=d.stats||{};
+    const u=d.profile||{}, st=d.stats||{}, auth=d.auth||{}, warnings=d.warnings||[];
+    const status=userStatusMeta(u);
+    const banned=status.label!=="نشط"&&status.label!=="معطل";
     $("#userDetail").classList.remove("hidden");
     $("#userDetail").innerHTML=
-      '<div class="panel-head"><div><span class="eyebrow">تفاصيل الحساب</span><h3>'+esc(u.name||u.username||"مستخدم")+'</h3></div><button id="closeUserDetail" class="small" type="button">إغلاق</button></div>'+
-      '<div class="user-detail-grid">'+
-        '<div><span>اسم المستخدم</span><b>@'+esc(u.username||"")+'</b></div>'+
-        '<div><span>المعرف</span><b>'+esc(u.id||"")+'</b></div>'+
-        '<div><span>الحالة</span><b>'+((u.is_banned||u.banned_until)?"محظور":"نشط")+'</b></div>'+
-        '<div><span>التوثيق</span><b>'+(u.is_verified?"موثق":"غير موثق")+'</b></div>'+
-        '<div><span>المنشورات</span><b>'+Number(s.posts||0)+'</b></div>'+
-        '<div><span>الريلز</span><b>'+Number(s.reels||0)+'</b></div>'+
-        '<div><span>المتابعون</span><b>'+Number(s.followers||0)+'</b></div>'+
-        '<div><span>يتابع</span><b>'+Number(s.following||0)+'</b></div>'+
-        '<div><span>البلاغات</span><b>'+Number(s.reports||0)+'</b></div>'+
-        '<div><span>التحذيرات</span><b>'+Number(u.warning_count||0)+'</b></div>'+
+      '<div class="admin-user-hero">'+
+        '<div class="admin-user-cover">'+(u.cover_media_id?'<img data-media-id="'+esc(u.cover_media_id)+'" alt="">':"")+'</div>'+
+        '<div class="admin-user-identity">'+
+          '<div class="admin-user-avatar">'+(u.avatar_media_id?'<img data-media-id="'+esc(u.avatar_media_id)+'" alt="">':'<span>'+esc((u.name||u.username||"م").slice(0,1))+'</span>')+'</div>'+
+          '<div class="grow"><span class="eyebrow">تفاصيل الحساب</span><h3>'+esc(u.name||u.username||"مستخدم")+(u.is_verified?' <span class="verified-admin">✓</span>':"")+'</h3>'+
+          '<div class="meta">@'+esc(u.username||"")+' · '+(u.is_private?"حساب خاص":"حساب عام")+'</div></div>'+
+          '<span class="pill '+status.cls+'">'+status.label+'</span>'+
+          '<button id="closeUserDetail" class="small" type="button">إغلاق</button>'+
+        '</div>'+
       '</div>'+
-      (u.ban_reason?'<div class="info-banner"><span></span><p>سبب الحظر: '+esc(u.ban_reason)+'</p></div>':"")+
-      '<div class="admin-actions">'+
+      '<div class="admin-user-info-grid">'+
+        '<div><span>البريد</span><b>'+esc(auth.email||"غير متوفر")+'</b></div>'+
+        '<div><span>آخر تسجيل دخول</span><b>'+(auth.last_sign_in_at?new Date(auth.last_sign_in_at).toLocaleString("ar-IQ"):"—")+'</b></div>'+
+        '<div><span>آخر نشاط</span><b>'+(u.last_seen_at?new Date(u.last_seen_at).toLocaleString("ar-IQ"):"—")+'</b></div>'+
+        '<div><span>تاريخ الحساب</span><b>'+new Date(u.created_at).toLocaleDateString("ar-IQ")+'</b></div>'+
+      '</div>'+
+      '<div class="user-stats">'+
+        '<div><span>منشورات</span><b>'+Number(st.posts||0)+'</b></div>'+
+        '<div><span>ريلز</span><b>'+Number(st.reels||0)+'</b></div>'+
+        '<div><span>قصص</span><b>'+Number(st.stories||0)+'</b></div>'+
+        '<div><span>تعليقات</span><b>'+Number(st.comments||0)+'</b></div>'+
+        '<div><span>متابعون</span><b>'+Number(st.followers||0)+'</b></div>'+
+        '<div><span>يتابع</span><b>'+Number(st.following||0)+'</b></div>'+
+        '<div><span>بلاغات</span><b>'+Number(st.reports||0)+'</b></div>'+
+        '<div><span>تحذيرات</span><b>'+Number(u.warning_count||0)+'</b></div>'+
+      '</div>'+
+      (u.bio?'<div class="admin-user-bio">'+esc(u.bio)+'</div>':"")+
+      (u.ban_reason?'<div class="info-banner"><span></span><p>سبب الإجراء: '+esc(u.ban_reason)+'</p></div>':"")+
+      '<div class="admin-action-section"><span class="eyebrow">إجراءات الحساب</span><div class="admin-actions">'+
         '<button id="toggleVerifyUser" class="small" type="button">'+(u.is_verified?"إلغاء التوثيق":"توثيق الحساب")+'</button>'+
-        '<button id="warnUserButton" class="small" type="button">إرسال تحذير</button>'+
-        '<button id="banUserDetailButton" class="small '+((u.is_banned||u.banned_until)?"":"danger")+'" type="button">'+((u.is_banned||u.banned_until)?"رفع الحظر":"حظر الحساب")+'</button>'+
-        '<button id="viewUserContentButton" class="small" type="button">عرض محتوى الحساب</button>'+
+        '<button id="warnUserButton" class="small" type="button">تحذير</button>'+
+        '<button id="notifyUserButton" class="small" type="button">إشعار مباشر</button>'+
+        '<button id="forceLogoutUserButton" class="small" type="button">إنهاء الجلسات</button>'+
+        '<button id="viewUserContentButton" class="small" type="button">كل المحتوى</button>'+
+        (u.deleted_at?'<button id="reactivateUserButton" class="small" type="button">إعادة تفعيل الحساب</button>':'<button id="deactivateUserButton" class="small danger" type="button">تعطيل الحساب</button>')+
+      '</div></div>'+
+      '<div class="admin-action-section"><span class="eyebrow">الحظر</span>'+
+        (banned
+          ?'<button id="unbanUserButton" class="small" type="button">رفع الحظر</button>'
+          :'<div class="ban-presets"><button data-ban-hours="1" class="small" type="button">ساعة</button><button data-ban-hours="24" class="small" type="button">يوم</button><button data-ban-hours="168" class="small" type="button">أسبوع</button><button data-ban-hours="720" class="small" type="button">شهر</button><button data-ban-hours="0" class="small danger" type="button">دائم</button></div>')+
+      '</div>'+
+      '<div class="admin-action-section danger-zone"><span class="eyebrow">منطقة خطرة</span><button id="deleteUserPermanently" class="small danger" type="button">حذف الحساب نهائيًا</button></div>'+
+      '<div class="admin-action-section"><div class="panel-head"><div><span class="eyebrow">السجل</span><h3>التحذيرات السابقة</h3></div></div>'+
+        '<div class="warning-history">'+(warnings.map(w=>'<div class="warning-item"><b>'+esc(w.reason)+'</b><span>'+new Date(w.created_at).toLocaleString("ar-IQ")+'</span></div>').join("")||'<div class="meta">لا توجد تحذيرات مسجلة.</div>')+'</div>'+
       '</div>';
+
+    await hydrateAdminMedia($("#userDetail"));
     $("#closeUserDetail").onclick=()=>$("#userDetail").classList.add("hidden");
+
     $("#toggleVerifyUser").onclick=async()=>{
-      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:u.is_verified?"unverify":"verify"})});
-      await loadUserDetail(id); await loadUsers();
+      const reason=await adminPrompt(u.is_verified?"إلغاء توثيق الحساب":"توثيق الحساب",{
+        label:"سبب القرار",placeholder:"ملاحظة داخلية لسجل الإدارة",acceptLabel:u.is_verified?"إلغاء التوثيق":"توثيق"
+      });
+      if(reason===null)return;
+      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:u.is_verified?"unverify":"verify",reason})});
+      showToast("تم تحديث حالة التوثيق.",{type:"success"});
+      await loadUserDetail(id);await loadUsers();
     };
-    $("#warnUserButton").onclick=async()=>{
-      const reason=await adminPrompt("إرسال تحذير",{label:"نص التحذير",placeholder:"اكتب سبب التحذير للمستخدم",acceptLabel:"إرسال"});
-      if(!reason)return;
-      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"warn",reason})});
-      await loadUserDetail(id);
+    $("#warnUserButton").onclick=async()=>{if(await sendUserWarning(id))await loadUserDetail(id)};
+    $("#notifyUserButton").onclick=async()=>{
+      const title=await adminPrompt("عنوان الإشعار",{label:"العنوان",defaultValue:"رسالة من إدارة آشور",acceptLabel:"التالي"});
+      if(title===null)return;
+      const message=await adminPrompt("نص الإشعار",{label:"الرسالة",placeholder:"اكتب الرسالة للمستخدم",acceptLabel:"إرسال"});
+      if(!message?.trim())return;
+      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"notify",title,message})});
+      showToast("تم إرسال الإشعار.",{type:"success"});
     };
-    $("#banUserDetailButton").onclick=async()=>{
-      if(u.is_banned||u.banned_until){
-        await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
-      }else{
-        const reason=(await adminPrompt("سبب الحظر",{label:"السبب",placeholder:"سبب واضح يظهر في سجل الإدارة",acceptLabel:"التالي"}))||"";
-        const choice=await adminPrompt("مدة الحظر",{text:"اكتب عدد الساعات، أو 0 للحظر الدائم.",label:"الساعات",defaultValue:"24",acceptLabel:"حظر"});
-        if(choice===null)return;
-        await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:true,reason,duration_hours:Number(choice||0)})});
-      }
-      await loadUserDetail(id); await loadUsers();
+    $("#forceLogoutUserButton").onclick=async()=>{
+      if(!await adminConfirm("إنهاء كل جلسات المستخدم؟","سيحتاج المستخدم إلى تسجيل الدخول من جديد على أجهزته عند انتهاء رمز الدخول الحالي.",{acceptLabel:"إنهاء الجلسات"}))return;
+      const result=await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"force_logout"})});
+      showToast("تم إلغاء "+Number(result.sessions_revoked||0)+" جلسة.",{type:"success"});
     };
     $("#viewUserContentButton").onclick=()=>{
       navigate("content");
-      $("#contentSearch").value="";
-      loadContent("posts",id);
+      $("#contentAuthor").value=id;
+      contentPage=1;
+      loadContent("posts");
+    };
+    $("#unbanUserButton")?.addEventListener("click",async()=>{
+      await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
+      showToast("تم رفع الحظر.",{type:"success"});await loadUserDetail(id);await loadUsers();
+    });
+    $("#userDetail").querySelectorAll("[data-ban-hours]").forEach(button=>button.onclick=async()=>{
+      if(await banUserFor(id,Number(button.dataset.banHours||0))){await loadUserDetail(id);await loadUsers()}
+    });
+    $("#deactivateUserButton")?.addEventListener("click",async()=>{
+      const reason=await adminPrompt("تعطيل الحساب",{text:"سيتم منع الحساب من استخدام المنصة وإنهاء جلساته.",label:"سبب التعطيل",acceptLabel:"تعطيل"});
+      if(reason===null)return;
+      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"deactivate",reason})});
+      showToast("تم تعطيل الحساب.",{type:"success"});await loadUserDetail(id);await loadUsers();
+    });
+    $("#reactivateUserButton")?.addEventListener("click",async()=>{
+      if(!await adminConfirm("إعادة تفعيل الحساب؟","سيتم رفع حالة التعطيل والحظر الإداري.",{acceptLabel:"إعادة التفعيل"}))return;
+      await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"reactivate"})});
+      showToast("تم إعادة تفعيل الحساب.",{type:"success"});await loadUserDetail(id);await loadUsers();
+    });
+    $("#deleteUserPermanently").onclick=async()=>{
+      const confirmText=await adminPrompt("حذف الحساب نهائيًا",{
+        text:"سيحذف الحساب وبياناته ويبدأ تنظيف وسائطه غير المستخدمة من Telegram. اكتب DELETE للتأكيد.",
+        label:"اكتب DELETE",placeholder:"DELETE",acceptLabel:"متابعة الحذف"
+      });
+      if(confirmText!=="DELETE"){if(confirmText!==null)showToast("لم يتم الحذف لأن كلمة التأكيد غير صحيحة.",{type:"error"});return}
+      if(!await adminConfirm("التأكيد الأخير","هذا الإجراء غير قابل للتراجع.",{acceptLabel:"حذف نهائي",danger:true}))return;
+      const result=await api("/v1/admin/users/"+id,{method:"DELETE",body:JSON.stringify({confirm:"DELETE"})});
+      const pending=(result.cleanup||[]).filter(x=>x.status==="cleanup_pending").length;
+      showToast(pending?"حُذف الحساب، وبعض ملفات Telegram دخلت طابور التنظيف.":"تم حذف الحساب وتنظيف وسائطه.",{type:"success",duration:5000});
+      $("#userDetail").classList.add("hidden");await loadUsers();
     };
   }catch(e){
     $("#userDetail").classList.remove("hidden");
@@ -455,89 +564,186 @@ async function loadUserDetail(id){
 
 async function loadUsers(){
   try{
+    const params=new URLSearchParams({
+      page:String(userPage),limit:"30"
+    });
     const q=$("#userSearch").value.trim();
-    const d=await api("/v1/admin/users?q="+encodeURIComponent(q));
+    if(q)params.set("q",q);
+    if($("#userStatus").value)params.set("status",$("#userStatus").value);
+    if($("#userVerified").value)params.set("verified",$("#userVerified").value);
+    if($("#userPrivacy").value)params.set("privacy",$("#userPrivacy").value);
+    const d=await api("/v1/admin/users?"+params.toString());
+    const p=d.pagination||{};
+    userPages=Math.max(1,Number(p.pages||1));
+    if(userPage>userPages){userPage=userPages;return loadUsers()}
     $("#usersList").innerHTML=(d.items||[]).map(u=>{
-      const banned=u.is_banned||(u.banned_until&&new Date(u.banned_until)>new Date());
-      return '<div class="row-card">'+
-        '<button class="row-main-button grow" data-user-detail="'+esc(u.id)+'" type="button"><b>'+esc(u.name||"مستخدم")+(u.is_verified?' <span class="verified-admin">✓</span>':"")+'</b><div class="meta">@'+esc(u.username||"")+' · '+esc(u.id)+' · '+(u.is_private?"خاص":"عام")+'</div></button>'+
-        '<span class="pill '+(banned?"bad":"ok")+'">'+(banned?"محظور":"نشط")+'</span>'+
-        '<button class="small" data-ban="'+esc(u.id)+'" data-state="'+String(banned)+'">'+(banned?"رفع الحظر":"حظر")+'</button>'+
+      const status=userStatusMeta(u);
+      return '<div class="row-card admin-user-row">'+
+        '<div class="list-avatar">'+(u.avatar_media_id?'<img data-media-id="'+esc(u.avatar_media_id)+'" alt="">':'<span>'+esc((u.name||u.username||"م").slice(0,1))+'</span>')+'</div>'+
+        '<button class="row-main-button grow" data-user-detail="'+esc(u.id)+'" type="button"><b>'+esc(u.name||"مستخدم")+(u.is_verified?' <span class="verified-admin">✓</span>':"")+'</b><div class="meta">@'+esc(u.username||"")+' · '+(u.is_private?"خاص":"عام")+'</div><div class="meta">'+(u.last_seen_at?"آخر نشاط "+new Date(u.last_seen_at).toLocaleString("ar-IQ"):"لا يوجد نشاط حديث")+'</div></button>'+
+        '<span class="pill '+status.cls+'">'+status.label+'</span>'+
       '</div>';
     }).join("")||'<div class="panel">لا توجد نتائج.</div>';
+    await hydrateAdminMedia($("#usersList"));
     $("#usersList").querySelectorAll("[data-user-detail]").forEach(b=>b.onclick=()=>loadUserDetail(b.dataset.userDetail));
-    $("#usersList").querySelectorAll("[data-ban]").forEach(b=>b.onclick=async()=>{
-      if(b.dataset.state==="true"){
-        await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
-      }else{
-        const reason=(await adminPrompt("سبب الحظر",{label:"السبب",placeholder:"سبب واضح يظهر في سجل الإدارة",acceptLabel:"التالي"}))||"";
-        const hours=await adminPrompt("مدة الحظر",{text:"اكتب عدد الساعات، أو 0 للحظر الدائم.",label:"الساعات",defaultValue:"24",acceptLabel:"حظر"});
-        if(hours===null)return;
-        await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:true,reason,duration_hours:Number(hours||0)})});
-      }
-      loadUsers();
-    });
+    $("#usersPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||30));
+    $("#usersPageLabel").textContent=userPage+" / "+userPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#usersPrevPage").disabled=userPage<=1;
+    $("#usersNextPage").disabled=userPage>=userPages;
   }catch(e){$("#usersList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
 let currentContentKind="posts";
 let contentTimer;
+let contentPage=1;
+let contentPages=1;
+let lastContentItems=new Map();
+
+function updateContentFilterVisibility(){
+  const story=currentContentKind==="stories";
+  const reel=currentContentKind==="reels";
+  $("#contentVisibility").disabled=story;
+  $("#contentComments").disabled=story;
+  $("#contentExplore").disabled=!reel;
+}
+function resetContentPage(){contentPage=1}
 $$("[data-content-kind]").forEach(b=>b.onclick=()=>{
   $$("[data-content-kind]").forEach(x=>x.classList.remove("active"));
   b.classList.add("active");
   currentContentKind=b.dataset.contentKind;
+  resetContentPage();
+  updateContentFilterVisibility();
   loadContent(currentContentKind);
 });
-$("#contentSearch").oninput=()=>{clearTimeout(contentTimer);contentTimer=setTimeout(()=>loadContent(currentContentKind),250)};
-$("#contentStatus").onchange=()=>loadContent(currentContentKind);
+$("#contentSearch").oninput=()=>{clearTimeout(contentTimer);contentTimer=setTimeout(()=>{resetContentPage();loadContent(currentContentKind)},250)};
+["contentAuthor","contentStatus","contentVisibility","contentComments","contentExplore","contentReports","contentFrom","contentTo"].forEach(id=>{
+  $("#"+id)?.addEventListener(id==="contentAuthor"?"input":"change",()=>{
+    if(id==="contentAuthor"){
+      clearTimeout(contentTimer);
+      contentTimer=setTimeout(()=>{resetContentPage();loadContent(currentContentKind)},320);
+    }else{
+      resetContentPage();loadContent(currentContentKind);
+    }
+  });
+});
+$("#resetContentFilters")?.addEventListener("click",()=>{
+  ["contentSearch","contentAuthor","contentStatus","contentVisibility","contentComments","contentExplore","contentReports","contentFrom","contentTo"].forEach(id=>{
+    const el=$("#"+id);if(el)el.value="";
+  });
+  resetContentPage();loadContent(currentContentKind);
+});
+$("#contentPrevPage")?.addEventListener("click",()=>{if(contentPage>1){contentPage--;loadContent(currentContentKind)}});
+$("#contentNextPage")?.addEventListener("click",()=>{if(contentPage<contentPages){contentPage++;loadContent(currentContentKind)}});
+
+async function openContentPreview(item){
+  const dialog=$("#contentPreviewDialog");
+  $("#contentPreviewTitle").textContent=({posts:"منشور",reels:"ريلز",stories:"قصة"})[currentContentKind]||"المحتوى";
+  const author=item.author||{};
+  const media=(item.media_ids||[]).map((id,index)=>
+    '<div class="content-preview-media"><img data-media-id="'+esc(id)+'" alt="وسائط '+(index+1)+'"></div>'
+  ).join("");
+  $("#contentPreviewBody").innerHTML=
+    '<div class="content-preview-meta"><div><b>'+esc(author.name||author.username||"مستخدم")+'</b><span>@'+esc(author.username||"")+'</span></div><span class="pill '+pillClass(item.moderation_status)+'">'+statusLabel(item.moderation_status)+'</span></div>'+
+    '<div class="content-preview-gallery">'+(media||'<div class="panel">لا توجد وسائط.</div>')+'</div>'+
+    '<div class="content-preview-caption">'+esc(item.caption||"بدون وصف")+'</div>'+
+    '<div class="content-detail-grid">'+
+      '<div><span>التاريخ</span><b>'+new Date(item.created_at).toLocaleString("ar-IQ")+'</b></div>'+
+      '<div><span>البلاغات</span><b>'+Number(item.report_count||0)+'</b></div>'+
+      (currentContentKind!=="stories"?'<div><span>الخصوصية</span><b>'+(item.visibility==="followers"?"المتابعون":"عام")+'</b></div>':"")+
+      (currentContentKind!=="stories"?'<div><span>التعليقات</span><b>'+(item.comments_enabled===false?"مغلقة":"مفتوحة")+'</b></div>':"")+
+      (currentContentKind==="reels"?'<div><span>الاستكشاف</span><b>'+(item.explore_enabled===false?"معطل":"مفعل")+'</b></div><div><span>المشاهدات</span><b>'+Number(item.view_count||0)+'</b></div>':"")+
+    '</div>';
+  dialog.showModal();
+  await hydrateAdminMedia($("#contentPreviewBody"));
+}
+$("#closeContentPreview")?.addEventListener("click",()=>$("#contentPreviewDialog").close());
 
 async function loadContent(kind=currentContentKind,authorId=""){
   currentContentKind=kind;
+  if(authorId)$("#contentAuthor").value=authorId;
+  updateContentFilterVisibility();
   try{
-    const params=new URLSearchParams({kind});
-    const q=$("#contentSearch")?.value.trim();
-    const status=$("#contentStatus")?.value;
-    if(q)params.set("q",q);
-    if(status)params.set("status",status);
-    if(authorId)params.set("author_id",authorId);
+    const params=new URLSearchParams({kind,page:String(contentPage),limit:"24"});
+    const values={
+      q:$("#contentSearch")?.value.trim(),
+      author:$("#contentAuthor")?.value.trim(),
+      status:$("#contentStatus")?.value,
+      visibility:$("#contentVisibility")?.value,
+      comments:$("#contentComments")?.value,
+      explore:$("#contentExplore")?.value,
+      reports:$("#contentReports")?.value,
+      from:$("#contentFrom")?.value,
+      to:$("#contentTo")?.value
+    };
+    Object.entries(values).forEach(([key,value])=>{if(value)params.set(key,value)});
     const d=await api("/v1/admin/content?"+params.toString());
+    const p=d.pagination||{};
+    contentPages=Math.max(1,Number(p.pages||1));
+    if(contentPage>contentPages){contentPage=contentPages;return loadContent(kind)}
+    lastContentItems=new Map((d.items||[]).map(item=>[String(item.id),item]));
     const kindLabel={posts:"منشور",reels:"ريلز",stories:"قصة"}[kind]||"محتوى";
+
     $("#contentList").innerHTML=(d.items||[]).map(x=>{
       const author=x.author||{};
-      const media=(x.media_ids||[])[0];
       const status=x.moderation_status||"active";
-      return '<div class="moderation-card">'+
-        (media?'<img class="moderation-media" data-media-id="'+esc(media)+'" alt="">':'<div class="moderation-media placeholder">بدون معاينة</div>')+
+      const gallery=(x.media_ids||[]).slice(0,4).map((id,index)=>
+        '<div class="moderation-media-cell"><img class="moderation-media" data-media-id="'+esc(id)+'" alt="">'+((x.media_ids||[]).length>4&&index===3?'<span class="media-more">+'+((x.media_ids||[]).length-4)+'</span>':"")+'</div>'
+      ).join("");
+      return '<div class="moderation-card stage4-content-card">'+
+        '<div class="moderation-media-grid">'+(gallery||'<div class="moderation-media placeholder">بدون معاينة</div>')+'</div>'+
         '<div class="moderation-body grow">'+
           '<div class="moderation-head"><div><b>'+esc(x.caption||kindLabel)+'</b><div class="meta">@'+esc(author.username||"")+' · '+new Date(x.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(status)+'">'+statusLabel(status)+'</span></div>'+
+          '<div class="content-badges">'+
+            '<span>'+Number(x.report_count||0)+' بلاغ</span>'+
+            (kind!=="stories"?'<span>'+(x.visibility==="followers"?"للمتابعين":"عام")+'</span>':"")+
+            (kind!=="stories"?'<span>'+(x.comments_enabled===false?"تعليقات مغلقة":"تعليقات مفتوحة")+'</span>':"")+
+            (kind==="reels"?'<span>'+(x.explore_enabled===false?"خارج الاستكشاف":"في الاستكشاف")+'</span>':"")+
+          '</div>'+
           '<div class="meta mono">'+esc(x.id)+'</div>'+
           '<div class="admin-actions">'+
+            '<button class="small" data-preview-content="'+esc(x.id)+'" type="button">معاينة</button>'+
             '<button class="small" data-open-author="'+esc(x.author_id)+'" type="button">الحساب</button>'+
+            '<button class="small" data-warn-author="'+esc(x.author_id)+'" type="button">تحذير</button>'+
             '<button class="small" data-moderate="'+esc(x.id)+'" data-kind="'+kind+'" data-status="'+esc(status)+'" type="button">'+(status==="hidden"?"استعادة":"إخفاء")+'</button>'+
             (kind!=="stories"?'<button class="small" data-comments-toggle="'+esc(x.id)+'" data-kind="'+kind+'" data-enabled="'+String(x.comments_enabled!==false)+'" type="button">'+(x.comments_enabled===false?"فتح التعليقات":"إغلاق التعليقات")+'</button>':"")+
-            '<button class="small danger" data-delete-content="'+esc(x.id)+'" data-kind="'+kind+'" type="button">حذف نهائي</button>'+
+            '<button class="small danger" data-delete-content="'+esc(x.id)+'" data-kind="'+kind+'" data-media-count="'+Number((x.media_ids||[]).length)+'" type="button">حذف نهائي</button>'+
           '</div>'+
         '</div></div>';
     }).join("")||'<div class="panel">لا يوجد محتوى مطابق.</div>';
+
     await hydrateAdminMedia($("#contentList"));
+    $("#contentList").querySelectorAll("[data-preview-content]").forEach(b=>b.onclick=()=>{
+      const item=lastContentItems.get(String(b.dataset.previewContent));if(item)openContentPreview(item)
+    });
     $("#contentList").querySelectorAll("[data-open-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.openAuthor)});
+    $("#contentList").querySelectorAll("[data-warn-author]").forEach(b=>b.onclick=()=>sendUserWarning(b.dataset.warnAuthor));
     $("#contentList").querySelectorAll("[data-moderate]").forEach(b=>b.onclick=async()=>{
       const next=b.dataset.status==="hidden"?"active":"hidden";
       const reason=next==="hidden"?((await adminPrompt("إخفاء المحتوى",{label:"سبب الإخفاء",placeholder:"سبب الإجراء",acceptLabel:"إخفاء"}))||""):"";
       await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.moderate+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason})});
+      showToast(next==="hidden"?"تم إخفاء المحتوى.":"تمت استعادة المحتوى.",{type:"success"});
       loadContent(currentContentKind);
     });
     $("#contentList").querySelectorAll("[data-comments-toggle]").forEach(b=>b.onclick=async()=>{
       await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.commentsToggle+"/moderate",{
         method:"POST",body:JSON.stringify({status:"active",comments_enabled:b.dataset.enabled!=="true"})
       });
+      showToast("تم تحديث إعداد التعليقات.",{type:"success"});
       loadContent(currentContentKind);
     });
     $("#contentList").querySelectorAll("[data-delete-content]").forEach(b=>b.onclick=async()=>{
-      if(!await adminConfirm("حذف المحتوى نهائيًا؟","هذا الإجراء لا يمكن التراجع عنه من لوحة الإدارة.",{acceptLabel:"حذف نهائي",danger:true}))return;
-      await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.deleteContent,{method:"DELETE"});
+      const mediaCount=Number(b.dataset.mediaCount||0);
+      if(!await adminConfirm("حذف المحتوى نهائيًا؟","سيتم حذف السجل و"+mediaCount+" ملف/ملفات مرتبطة غير مستخدمة من التخزين. أي فشل في Telegram يدخل طابور إعادة المحاولة.",{acceptLabel:"حذف نهائي",danger:true}))return;
+      const result=await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.deleteContent,{method:"DELETE"});
+      const pending=(result.cleanup||[]).filter(item=>item.status==="cleanup_pending").length;
+      showToast(pending?"حُذف المحتوى و"+pending+" ملف دخل طابور التنظيف.":"تم حذف المحتوى وتنظيف وسائطه.",{type:"success",duration:4500});
       loadContent(currentContentKind);
     });
+
+    $("#contentPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||24));
+    $("#contentPageLabel").textContent=contentPage+" / "+contentPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#contentPrevPage").disabled=contentPage<=1;
+    $("#contentNextPage").disabled=contentPage>=contentPages;
   }catch(e){$("#contentList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
@@ -559,10 +765,20 @@ async function loadCommentsAdmin(){
         '<div class="grow"><b>'+esc(row.body||"")+'</b><div class="meta">@'+esc(a.username||"")+' · '+new Date(row.created_at).toLocaleString("ar-IQ")+'</div><div class="meta mono">'+esc(row.id)+'</div></div>'+
         '<span class="pill '+pillClass(status)+'">'+statusLabel(status)+'</span>'+
         '<button class="small" data-comment-author="'+esc(row.author_id)+'" type="button">الحساب</button>'+
+        ((row.post_id||row.reel_id)?'<button class="small" data-comment-target="'+esc(row.post_id||row.reel_id)+'" data-comment-kind="'+(row.post_id?"posts":"reels")+'" type="button">المحتوى الأصلي</button>':"")+
         '<button class="small" data-moderate-comment="'+esc(row.id)+'" data-status="'+esc(status)+'" type="button">'+(status==="hidden"?"استعادة":"إخفاء")+'</button>'+
       '</div>';
     }).join("")||'<div class="panel">لا توجد تعليقات.</div>';
     $("#commentsList").querySelectorAll("[data-comment-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.commentAuthor)});
+    $("#commentsList").querySelectorAll("[data-comment-target]").forEach(b=>b.onclick=()=>{
+      navigate("content");
+      currentContentKind=b.dataset.commentKind;
+      $("[data-content-kind]").forEach(x=>x.classList.toggle("active",x.dataset.contentKind===currentContentKind));
+      $("#contentSearch").value="";
+      $("#contentAuthor").value="";
+      contentPage=1;
+      loadContent(currentContentKind);
+    });
     $("#commentsList").querySelectorAll("[data-moderate-comment]").forEach(b=>b.onclick=async()=>{
       const next=b.dataset.status==="hidden"?"active":"hidden";
       await api("/v1/admin/content/comments/"+b.dataset.moderateComment+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason:next==="hidden"?((await adminPrompt("إخفاء التعليق",{label:"سبب الإخفاء",acceptLabel:"إخفاء"}))||""):""})});

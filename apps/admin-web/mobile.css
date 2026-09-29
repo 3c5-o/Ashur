@@ -414,3 +414,12 @@
   .stage14-audit-meta{display:grid}
   .stage14-audit-meta span{border-radius:11px;justify-content:space-between}
 }
+
+
+@media(max-width:760px){
+  .stage7-owner-transfer{grid-template-columns:1fr}
+  .stage7-owner-summary{grid-template-columns:1fr 1fr}
+}
+@media(max-width:480px){
+  .stage7-owner-summary{grid-template-columns:1fr}
+}

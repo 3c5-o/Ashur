@@ -27,10 +27,10 @@ jobs:
 
       - name: التحقق من أسرار توقيع الإدارة
         env:
-          KEYSTORE_B64: ${{ secrets.ASHUR_ADMIN_KEYSTORE_BASE64 }}
-          STORE_PASS: ${{ secrets.ASHUR_ADMIN_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ASHUR_ADMIN_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.ASHUR_ADMIN_KEY_PASSWORD }}
+          KEYSTORE_B64: ${{ secrets.ASHUR_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ASHUR_KEY_PASSWORD }}
         shell: bash
         run: |
           test -n "$KEYSTORE_B64"
@@ -73,7 +73,7 @@ jobs:
 
       - name: تجهيز مفتاح الإدارة
         env:
-          KEYSTORE_B64: ${{ secrets.ASHUR_ADMIN_KEYSTORE_BASE64 }}
+          KEYSTORE_B64: ${{ secrets.ASHUR_KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/ashur-admin-release.jks"
           chmod 600 "$RUNNER_TEMP/ashur-admin-release.jks"
@@ -82,9 +82,9 @@ jobs:
         env:
           ASHUR_API_URL: ${{ vars.ASHUR_API_URL }}
           ASHUR_KEYSTORE_FILE: ${{ runner.temp }}/ashur-admin-release.jks
-          ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_ADMIN_KEYSTORE_PASSWORD }}
-          ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_ADMIN_KEY_ALIAS }}
-          ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_ADMIN_KEY_PASSWORD }}
+          ASHUR_KEYSTORE_PASSWORD: ${{ secrets.ASHUR_KEYSTORE_PASSWORD }}
+          ASHUR_KEY_ALIAS: ${{ secrets.ASHUR_KEY_ALIAS }}
+          ASHUR_KEY_PASSWORD: ${{ secrets.ASHUR_KEY_PASSWORD }}
           ASHUR_REQUIRE_RELEASE_SIGNING: "true"
         run: gradle -p android/admin :app:assembleRelease --stacktrace
 
@@ -96,9 +96,9 @@ jobs:
           APK="$(find android/admin/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
           VERIFY="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
           echo "$VERIFY"
-          echo "$VERIFY" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
+          echo "$VERIFY" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"\n          echo "$VERIFY" | grep -q "Verified using v3 scheme (APK Signature Scheme v3): true"
           CERT="$(echo "$VERIFY" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
-          test "$CERT" = "59E717D4967D903E99B900F837562F316E13C21ACF07CAC51587CE655D286AC7"
+          test "$CERT" = "3B9CDD06F534CB8A0FD91AFE0A4576E275A9AD7135395E0F22BFE7CD7989029B"
           sha256sum "$APK"
 
       - name: تجهيز APK

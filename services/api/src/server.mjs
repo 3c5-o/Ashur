@@ -2968,7 +2968,7 @@ async function deleteReportedTarget(actorUserId, targetType, targetId) {
     await update("messages", "id=eq." + encodeURIComponent(targetId), {
       is_deleted: true,
       body: "",
-      updated_at: new Date().toISOString(),
+      edited_at: new Date().toISOString(),
     }, { returning: false });
     return { ok: true, soft_deleted: true, media_count: 0, cleanup: [] };
   }

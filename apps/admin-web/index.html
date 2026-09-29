@@ -308,6 +308,25 @@
         <div><b>الإدارة العليا</b><span>المالك والمدير الثانوي يملكان كامل الصلاحيات.</span></div>
         <button id="addAdminButton" class="small" type="button">إضافة مشرف</button>
       </div>
+      <div id="ownerManagementPanel" data-owner-only class="panel stage7-owner-panel hidden">
+        <div class="panel-head">
+          <div><span class="eyebrow">للمالك الرئيسي فقط</span><h3>إدارة مالك التطبيق</h3></div>
+          <span class="pill ok">Owner only</span>
+        </div>
+        <div id="ownerCurrentSummary" class="stage7-owner-summary"></div>
+        <div class="info-banner"><span></span><p>نقل الملكية يغيّر UUID المالك الأساسي. المدير الثانوي والمشرفون لا يمكنهم رؤية هذا القسم أو استدعاء عملية النقل.</p></div>
+        <div class="stage7-owner-transfer">
+          <label class="grow"><span>UUID الحساب الجديد</span><input id="ownerNewUserId" autocomplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+          <label><span>المالك السابق بعد النقل</span>
+            <select id="ownerPreviousAction">
+              <option value="secondary_admin">تحويله إلى مدير ثانوي</option>
+              <option value="remove">إزالة صلاحيات الإدارة</option>
+            </select>
+          </label>
+          <button id="ownerTransferButton" class="danger" type="button">نقل الملكية</button>
+        </div>
+        <p id="ownerTransferMessage" class="message"></p>
+      </div>
       <div id="adminAddPanel" class="panel stage7-admin-panel hidden">
         <div class="panel-head"><div><span class="eyebrow">إضافة مشرف</span><h3>ابحث عن الحساب</h3></div><button id="closeAdminAddPanel" class="small" type="button">إغلاق</button></div>
         <div class="stage7-admin-search">
@@ -594,7 +613,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage14";
+      app.src="./app.js?v=1.3.2-owner";
       document.body.appendChild(app);
     };
     s.onerror=next;

@@ -420,6 +420,138 @@ async function setting(key) {
   return rows?.[0]?.value || {};
 }
 
+async function featureEnabled(key) {
+  const features = await setting("features").catch(() => ({}));
+  return features?.[key] !== false;
+}
+
+async function requireFeature(key, label = "هذه الميزة") {
+  if (await featureEnabled(key)) return;
+  const error = new Error(label + " متوقفة مؤقتًا من إدارة آشور");
+  error.statusCode = 503;
+  throw error;
+}
+
+async function currentAppSettingsSnapshot() {
+  const rows = await select(
+    "app_settings",
+    "select=key,value&key=in.(version,maintenance,limits,features)",
+  );
+  return Object.fromEntries((rows || []).map((row) => [row.key, row.value || {}]));
+}
+
+async function saveAppSettingsSnapshot(actorUserId, source = "admin", reason = "") {
+  const snapshot = await currentAppSettingsSnapshot();
+  const rows = await insert("app_settings_history", {
+    actor_user_id: actorUserId || null,
+    source: String(source || "admin").slice(0, 60),
+    reason: String(reason || "").slice(0, 500),
+    snapshot,
+  });
+  return rows?.[0] || null;
+}
+
+function validReleaseVersion(value) {
+  return /^\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?$/.test(String(value || "").trim());
+}
+
+function validHttpUrl(value) {
+  if (!value) return true;
+  try {
+    const parsed = new URL(String(value));
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function validSha256(value) {
+  return /^[a-f0-9]{64}$/i.test(String(value || "").trim());
+}
+
+async function syncPublishedRelease(release, actorUserId) {
+  if (!release?.id) throw new Error("الإصدار غير موجود");
+  if (!validReleaseVersion(release.version)) {
+    const error = new Error("صيغة رقم الإصدار غير صالحة");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!validHttpUrl(release.download_url) || !release.download_url) {
+    const error = new Error("رابط APK صالح مطلوب قبل النشر");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!validSha256(release.sha256)) {
+    const error = new Error("SHA-256 مكوّن من 64 خانة مطلوب قبل النشر");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await saveAppSettingsSnapshot(actorUserId, "release_publish", "قبل نشر الإصدار " + release.version);
+
+  const currentVersion = await setting("version").catch(() => ({}));
+  const nextVersion = {
+    ...currentVersion,
+    latest: release.version,
+    version_code: Number(release.version_code || 0),
+    minimum: release.minimum_version || release.version,
+    download_url: release.download_url,
+    sha256: String(release.sha256 || "").toLowerCase(),
+    message: release.update_message || release.notes || ("يتوفر الإصدار " + release.version + " من آشور."),
+    required: Boolean(release.required),
+    published_at: new Date().toISOString(),
+  };
+  await upsert("app_settings", {
+    key: "version",
+    value: nextVersion,
+    public_read: true,
+    updated_at: new Date().toISOString(),
+  }, "key");
+
+  const downloadRows = await select(
+    "site_settings",
+    "select=value&key=eq.download&limit=1",
+  ).catch(() => []);
+  const currentDownload = downloadRows?.[0]?.value || {};
+  await upsert("site_settings", {
+    key: "download",
+    value: {
+      ...currentDownload,
+      version: release.version,
+      android_url: release.download_url,
+      download_url: release.download_url,
+      sha256: String(release.sha256 || "").toLowerCase(),
+      updated_at: new Date().toISOString(),
+    },
+    updated_at: new Date().toISOString(),
+  }, "key");
+
+  await update(
+    "app_releases",
+    "status=eq.published&id=neq." + encodeURIComponent(release.id),
+    { status: "retired", updated_at: new Date().toISOString(), updated_by: actorUserId || null },
+    { returning: false },
+  ).catch(() => {});
+
+  const now = new Date().toISOString();
+  await update("app_releases", "id=eq." + encodeURIComponent(release.id), {
+    status: "published",
+    published_at: now,
+    published_by: actorUserId || null,
+    updated_by: actorUserId || null,
+    updated_at: now,
+  }, { returning: false });
+
+  await writeAudit(actorUserId, "publish_release", "app_release", release.id, {
+    version: release.version,
+    version_code: release.version_code,
+    minimum_version: release.minimum_version || release.version,
+    required: Boolean(release.required),
+    sha256: String(release.sha256 || "").toLowerCase(),
+  });
+}
+
+
 async function writeAudit(actorUserId, action, targetType = null, targetId = null, details = {}) {
   return insert("audit_logs", {
     actor_user_id: actorUserId || null,
@@ -488,7 +620,7 @@ async function uploadLimitBytes(kind) {
       profile_cover: limits.image_mb,
       post_image: limits.image_mb,
       post_video: limits.max_upload_mb,
-      reel: limits.max_upload_mb,
+      reel: limits.reel_mb || limits.max_upload_mb,
       reel_cover: limits.image_mb,
       story: limits.story_mb,
       chat_image: limits.image_mb,
@@ -604,6 +736,7 @@ function uploadRetryExpiry() {
 
 async function handleUpload(req, res, url) {
   const user = await currentUser(req);
+  await requireFeature("uploads", "رفع الملفات");
   const profile = await profileFor(user.id);
   if (profileIsBanned(profile)) {
     const error = new Error("الحساب غير مسموح له بالرفع");
@@ -612,6 +745,10 @@ async function handleUpload(req, res, url) {
   }
 
   const kind = url.searchParams.get("kind") || "";
+  if (kind === "reel") await requireFeature("reels", "الريلز");
+  if (kind === "story") await requireFeature("stories", "القصص");
+  if (kind.startsWith("chat_")) await requireFeature("messages", "الرسائل");
+  if (kind === "group_media") await requireFeature("groups", "المجموعات");
   const channelKey = CHANNELS[kind];
   if (!channelKey) {
     const error = new Error("نوع الملف غير مدعوم");
@@ -1363,8 +1500,10 @@ async function removeConversationMember(req, res, conversationId, targetUserId) 
 
 async function createConversation(req, res) {
   const user = await currentUser(req);
+  await requireFeature("messages", "الرسائل");
   const body = await readJson(req);
   const kind = body.kind === "group" ? "group" : "direct";
+  if (kind === "group") await requireFeature("groups", "المجموعات");
   const requested = Array.isArray(body.member_ids)
     ? body.member_ids
     : body.target_user_id
@@ -1554,6 +1693,7 @@ async function validateSharedMessageTarget(user, type, id) {
 
 async function sendConversationMessage(req, res, conversationId) {
   const user = await currentUser(req);
+  await requireFeature("messages", "الرسائل");
   const memberships = await select(
     "conversation_members",
     "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
@@ -2154,6 +2294,7 @@ async function socialSupportReply(req, res, ticketId) {
 
 async function socialSave(req, res) {
   const user = await currentUser(req);
+  await requireFeature("saved", "المحفوظات");
   const body = await readJson(req);
   const kind = body.kind === "reel" ? "reel" : body.kind === "post" ? "post" : "";
   const id = String(body.id || "");
@@ -2170,6 +2311,7 @@ async function socialSave(req, res) {
 
 async function socialSaved(req, res, url) {
   const user = await currentUser(req);
+  await requireFeature("saved", "المحفوظات");
   const kind = url.searchParams.get("kind") === "reels" ? "reels" : "posts";
   const table = kind === "reels" ? "saved_reels" : "saved_posts";
   const idField = kind === "reels" ? "reel_id" : "post_id";
@@ -3893,45 +4035,145 @@ async function replySupport(req, res, ticketId) {
 async function adminReleases(req, res) {
   const actor = await requireAdmin(req, "settings");
   if (req.method === "GET") {
-    const rows = await select(
-      "app_releases",
-      "select=id,version,version_code,download_url,notes,required,minimum_version,status,created_by,created_at,published_at&order=created_at.desc&limit=100",
-    );
-    return json(res, 200, { items: rows || [] });
+    const [rows, publishedCount, testingCount, draftCount, retiredCount] = await Promise.all([
+      select(
+        "app_releases",
+        "select=id,version,version_code,download_url,sha256,notes,update_message,required,minimum_version,status,created_by,updated_by,published_by,created_at,updated_at,published_at&order=version_code.desc,created_at.desc&limit=150",
+      ),
+      count("app_releases", "status=eq.published"),
+      count("app_releases", "status=eq.testing"),
+      count("app_releases", "status=eq.draft"),
+      count("app_releases", "status=eq.retired"),
+    ]);
+    const items = rows || [];
+    return json(res, 200, {
+      items,
+      summary: {
+        total: items.length,
+        published: publishedCount,
+        testing: testingCount,
+        draft: draftCount,
+        retired: retiredCount,
+        highest_version_code: items.reduce((max, row) => Math.max(max, Number(row.version_code || 0)), 0),
+        current: items.find((row) => row.status === "published") || null,
+      },
+    });
   }
+
   const body = await readJson(req);
   const version = String(body.version || "").trim().slice(0, 40);
   const code = Number(body.version_code || 0);
-  if (!version || !Number.isInteger(code) || code < 1) return json(res, 400, { error: "رقم الإصدار غير صالح" });
+  const status = ["draft", "testing", "published", "retired"].includes(body.status) ? body.status : "draft";
+  const downloadUrl = String(body.download_url || "").trim().slice(0, 800);
+  const sha256 = String(body.sha256 || "").trim().toLowerCase().slice(0, 64);
+  const minimumVersion = String(body.minimum_version || version).trim().slice(0, 40);
+  const notes = String(body.notes || "").trim().slice(0, 4000);
+  const updateMessage = String(body.update_message || "").trim().slice(0, 1000);
+
+  if (!validReleaseVersion(version) || !Number.isInteger(code) || code < 1) {
+    return json(res, 400, { error: "تحقق من Version وVersion Code" });
+  }
+  if (minimumVersion && !validReleaseVersion(minimumVersion)) {
+    return json(res, 400, { error: "أقل إصدار مسموح غير صالح" });
+  }
+  if (!validHttpUrl(downloadUrl)) return json(res, 400, { error: "رابط APK غير صالح" });
+  if (sha256 && !validSha256(sha256)) return json(res, 400, { error: "SHA-256 يجب أن يكون 64 خانة" });
+  if (status === "published" && (!downloadUrl || !validSha256(sha256))) {
+    return json(res, 400, { error: "النشر يحتاج رابط APK وSHA-256 صالح" });
+  }
+
   const rows = await insert("app_releases", {
     version,
     version_code: code,
-    download_url: String(body.download_url || "").slice(0, 500),
-    notes: String(body.notes || "").slice(0, 4000),
+    download_url: downloadUrl,
+    sha256,
+    notes,
+    update_message: updateMessage,
     required: Boolean(body.required),
-    minimum_version: String(body.minimum_version || "").slice(0, 40),
-    status: ["draft", "testing", "published", "retired"].includes(body.status) ? body.status : "draft",
+    minimum_version: minimumVersion,
+    status: status === "published" ? "testing" : status,
     created_by: actor.user.id,
-    published_at: body.status === "published" ? new Date().toISOString() : null,
+    updated_by: actor.user.id,
+    updated_at: new Date().toISOString(),
+    published_at: null,
   });
-  await writeAudit(actor.user.id, "create_release", "app_release", rows?.[0]?.id || null, { version, version_code: code });
-  json(res, 201, rows?.[0] || { ok: true });
+  const record = rows?.[0];
+  await writeAudit(actor.user.id, "create_release", "app_release", record?.id || null, {
+    version, version_code: code, status,
+  });
+  if (status === "published" && record) {
+    await syncPublishedRelease({ ...record, status: "published" }, actor.user.id);
+  }
+  const fresh = record
+    ? (await select("app_releases", "select=*&id=eq." + encodeURIComponent(record.id) + "&limit=1"))?.[0] || record
+    : { ok: true };
+  json(res, 201, fresh);
 }
 
 async function updateRelease(req, res, releaseId) {
   const actor = await requireAdmin(req, "settings");
+  const rows = await select(
+    "app_releases",
+    "select=id,version,version_code,download_url,sha256,notes,update_message,required,minimum_version,status,created_at,published_at&id=eq." +
+      encodeURIComponent(releaseId) + "&limit=1",
+  );
+  const current = rows?.[0];
+  if (!current) return json(res, 404, { error: "الإصدار غير موجود" });
+
   const body = await readJson(req);
-  const patch = {};
-  for (const key of ["download_url", "notes", "minimum_version"]) {
-    if (body[key] !== undefined) patch[key] = String(body[key] || "").slice(0, key === "notes" ? 4000 : 500);
+  const next = {
+    ...current,
+    version: body.version !== undefined ? String(body.version || "").trim().slice(0, 40) : current.version,
+    version_code: body.version_code !== undefined ? Number(body.version_code || 0) : Number(current.version_code || 0),
+    download_url: body.download_url !== undefined ? String(body.download_url || "").trim().slice(0, 800) : current.download_url,
+    sha256: body.sha256 !== undefined ? String(body.sha256 || "").trim().toLowerCase().slice(0, 64) : current.sha256,
+    notes: body.notes !== undefined ? String(body.notes || "").trim().slice(0, 4000) : current.notes,
+    update_message: body.update_message !== undefined ? String(body.update_message || "").trim().slice(0, 1000) : current.update_message,
+    minimum_version: body.minimum_version !== undefined ? String(body.minimum_version || "").trim().slice(0, 40) : current.minimum_version,
+    required: body.required !== undefined ? Boolean(body.required) : Boolean(current.required),
+    status: body.status !== undefined && ["draft","testing","published","retired"].includes(body.status) ? body.status : current.status,
+  };
+
+  if (!validReleaseVersion(next.version) || !Number.isInteger(next.version_code) || next.version_code < 1) {
+    return json(res, 400, { error: "تحقق من Version وVersion Code" });
   }
-  if (body.required !== undefined) patch.required = Boolean(body.required);
-  if (body.status !== undefined && ["draft", "testing", "published", "retired"].includes(body.status)) {
-    patch.status = body.status;
-    patch.published_at = body.status === "published" ? new Date().toISOString() : null;
+  if (next.minimum_version && !validReleaseVersion(next.minimum_version)) {
+    return json(res, 400, { error: "أقل إصدار مسموح غير صالح" });
+  }
+  if (!validHttpUrl(next.download_url)) return json(res, 400, { error: "رابط APK غير صالح" });
+  if (next.sha256 && !validSha256(next.sha256)) return json(res, 400, { error: "SHA-256 يجب أن يكون 64 خانة" });
+  if (next.status === "published" && (!next.download_url || !validSha256(next.sha256))) {
+    return json(res, 400, { error: "النشر يحتاج رابط APK وSHA-256 صالح" });
+  }
+
+  const patch = {
+    version: next.version,
+    version_code: next.version_code,
+    download_url: next.download_url,
+    sha256: next.sha256,
+    notes: next.notes,
+    update_message: next.update_message,
+    minimum_version: next.minimum_version,
+    required: next.required,
+    status: next.status === "published" ? current.status : next.status,
+    updated_by: actor.user.id,
+    updated_at: new Date().toISOString(),
+  };
+  if (next.status !== "published") {
+    patch.published_at = next.status === "retired" ? current.published_at : null;
   }
   await update("app_releases", "id=eq." + encodeURIComponent(releaseId), patch, { returning: false });
-  await writeAudit(actor.user.id, "update_release", "app_release", releaseId, patch);
+
+  if (next.status === "published") {
+    await syncPublishedRelease({ ...next, id: releaseId }, actor.user.id);
+  } else {
+    await writeAudit(actor.user.id, "update_release", "app_release", releaseId, {
+      version: next.version,
+      version_code: next.version_code,
+      status: next.status,
+      required: next.required,
+    });
+  }
   json(res, 200, { ok: true });
 }
 
@@ -4654,26 +4896,133 @@ async function adminChannels(req, res) {
 }
 
 async function appSettings(req, res) {
-  await requireAdmin(req, "settings");
+  const actor = await requireAdmin(req, "settings");
   if (req.method === "GET") {
-    const rows = await select(
-      "app_settings",
-      "select=key,value&key=in.(version,maintenance,limits,features)",
-    );
-    return json(res, 200, Object.fromEntries((rows || []).map((x) => [x.key, x.value])));
+    const settings = await currentAppSettingsSnapshot();
+    return json(res, 200, settings);
   }
+
   const body = await readJson(req);
-  for (const key of ["version", "maintenance", "limits", "features"]) {
-    if (body[key] !== undefined) {
-      await upsert("app_settings", {
-        key,
-        value: body[key],
-        public_read: true,
-        updated_at: new Date().toISOString(),
-      }, "key");
-    }
+  const current = await currentAppSettingsSnapshot();
+  const next = { ...current };
+
+  if (body.version !== undefined) {
+    const source = body.version && typeof body.version === "object" ? body.version : {};
+    const latest = String(source.latest ?? current.version?.latest ?? "").trim().slice(0, 40);
+    const minimum = String(source.minimum ?? current.version?.minimum ?? "").trim().slice(0, 40);
+    const downloadUrl = String(source.download_url ?? current.version?.download_url ?? "").trim().slice(0, 800);
+    const sha256 = String(source.sha256 ?? current.version?.sha256 ?? "").trim().toLowerCase().slice(0, 64);
+    if (latest && !validReleaseVersion(latest)) return json(res, 400, { error: "آخر إصدار غير صالح" });
+    if (minimum && !validReleaseVersion(minimum)) return json(res, 400, { error: "أقل إصدار غير صالح" });
+    if (!validHttpUrl(downloadUrl)) return json(res, 400, { error: "رابط التحديث غير صالح" });
+    if (sha256 && !validSha256(sha256)) return json(res, 400, { error: "SHA-256 يجب أن يكون 64 خانة" });
+    next.version = {
+      ...(current.version || {}),
+      latest,
+      minimum,
+      download_url: downloadUrl,
+      sha256,
+      message: String(source.message ?? current.version?.message ?? "").trim().slice(0, 1000),
+      required: Boolean(source.required),
+      version_code: Math.max(0, Number(source.version_code ?? current.version?.version_code ?? 0) || 0),
+    };
   }
-  json(res, 200, { ok: true });
+
+  if (body.maintenance !== undefined) {
+    const source = body.maintenance && typeof body.maintenance === "object" ? body.maintenance : {};
+    const startAt = source.start_at ? new Date(source.start_at) : null;
+    const endAt = source.end_at ? new Date(source.end_at) : null;
+    if (startAt && Number.isNaN(startAt.getTime())) return json(res, 400, { error: "وقت بدء الصيانة غير صالح" });
+    if (endAt && Number.isNaN(endAt.getTime())) return json(res, 400, { error: "وقت انتهاء الصيانة غير صالح" });
+    if (startAt && endAt && endAt <= startAt) return json(res, 400, { error: "وقت انتهاء الصيانة يجب أن يكون بعد البداية" });
+    next.maintenance = {
+      ...(current.maintenance || {}),
+      enabled: Boolean(source.enabled),
+      title: String(source.title ?? current.maintenance?.title ?? "آشور").trim().slice(0, 120),
+      message: String(source.message ?? current.maintenance?.message ?? "").trim().slice(0, 1000),
+      start_at: startAt ? startAt.toISOString() : null,
+      end_at: endAt ? endAt.toISOString() : null,
+    };
+  }
+
+  if (body.features !== undefined) {
+    const source = body.features && typeof body.features === "object" ? body.features : {};
+    const allowed = ["stories","reels","messages","groups","registration","comments","search","explore","saved","notifications","uploads"];
+    const features = { ...(current.features || {}) };
+    for (const key of allowed) {
+      if (source[key] !== undefined) features[key] = Boolean(source[key]);
+    }
+    next.features = features;
+  }
+
+  if (body.limits !== undefined) {
+    const source = body.limits && typeof body.limits === "object" ? body.limits : {};
+    const clamp = (value, fallback, max = 60) => Math.max(1, Math.min(max, Math.floor(Number(value ?? fallback) || fallback)));
+    next.limits = {
+      ...(current.limits || {}),
+      max_upload_mb: clamp(source.max_upload_mb, current.limits?.max_upload_mb || 60),
+      story_mb: clamp(source.story_mb, current.limits?.story_mb || 30),
+      reel_mb: clamp(source.reel_mb, current.limits?.reel_mb || current.limits?.max_upload_mb || 60),
+      image_mb: clamp(source.image_mb, current.limits?.image_mb || 10),
+      chat_video_mb: clamp(source.chat_video_mb, current.limits?.chat_video_mb || 50),
+      audio_mb: clamp(source.audio_mb, current.limits?.audio_mb || 15),
+    };
+  }
+
+  await saveAppSettingsSnapshot(actor.user.id, "admin_update", String(body.reason || "تعديل إعدادات التطبيق").slice(0, 500));
+  const changedKeys = [];
+  for (const key of ["version", "maintenance", "limits", "features"]) {
+    if (body[key] === undefined) continue;
+    await upsert("app_settings", {
+      key,
+      value: next[key] || {},
+      public_read: true,
+      updated_at: new Date().toISOString(),
+    }, "key");
+    changedKeys.push(key);
+  }
+  await writeAudit(actor.user.id, "update_app_settings", "app_settings", null, { keys: changedKeys });
+  json(res, 200, { ok: true, settings: next });
+}
+
+async function appSettingsHistory(req, res) {
+  await requireAdmin(req, "settings");
+  const rows = await select(
+    "app_settings_history",
+    "select=id,actor_user_id,source,reason,snapshot,created_at&order=created_at.desc&limit=60",
+  );
+  json(res, 200, { items: rows || [] });
+}
+
+async function restoreAppSettings(req, res, historyId) {
+  const actor = await requireAdmin(req, "settings");
+  const rows = await select(
+    "app_settings_history",
+    "select=id,source,reason,snapshot,created_at&id=eq." + encodeURIComponent(historyId) + "&limit=1",
+  );
+  const history = rows?.[0];
+  if (!history?.snapshot || typeof history.snapshot !== "object") {
+    return json(res, 404, { error: "نسخة الإعدادات غير موجودة" });
+  }
+
+  await saveAppSettingsSnapshot(actor.user.id, "before_restore", "نسخة تلقائية قبل الاستعادة");
+  const restoredKeys = [];
+  for (const key of ["version","maintenance","limits","features"]) {
+    if (history.snapshot[key] === undefined) continue;
+    await upsert("app_settings", {
+      key,
+      value: history.snapshot[key],
+      public_read: true,
+      updated_at: new Date().toISOString(),
+    }, "key");
+    restoredKeys.push(key);
+  }
+  await writeAudit(actor.user.id, "restore_app_settings", "app_settings_history", historyId, {
+    source: history.source,
+    created_at: history.created_at,
+    keys: restoredKeys,
+  });
+  json(res, 200, { ok: true, restored_keys: restoredKeys });
 }
 
 async function siteSettings(req, res) {
@@ -4910,7 +5259,7 @@ async function collectHealthDetails(includeInternal = false) {
     const memory = process.memoryUsage();
     result.runtime = {
       api_version: "1.3.0",
-      admin_revision: "A10",
+      admin_revision: "A12",
       commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
       uptime_seconds: Math.floor(process.uptime()),
       memory_mb: {
@@ -5330,6 +5679,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/v1/admin/settings/app" && ["GET", "PUT"].includes(req.method)) {
       return appSettings(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/settings/app/history") {
+      return appSettingsHistory(req, res);
+    }
+    const restoreSettingsMatch = /^\/v1\/admin\/settings\/app\/history\/([0-9a-f-]{36})\/restore$/.exec(url.pathname);
+    if (req.method === "POST" && restoreSettingsMatch) {
+      return restoreAppSettings(req, res, restoreSettingsMatch[1]);
     }
     if (url.pathname === "/v1/admin/settings/site" && ["GET", "PUT"].includes(req.method)) {
       return siteSettings(req, res);

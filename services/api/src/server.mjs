@@ -478,14 +478,6 @@ async function logSystemError(service, error, context = {}, userId = null) {
     last_seen_at: now,
     updated_at: now,
   }, { returning: false }).catch(() => {});
-}, userId = null) {
-  return insert("system_errors", {
-    service: String(service || "api").slice(0, 80),
-    code: String(error?.code || error?.statusCode || "").slice(0, 80),
-    message: String(error?.message || error || "Unknown error").slice(0, 1500),
-    context: context || {},
-    user_id: userId || null,
-  }, { returning: false }).catch(() => {});
 }
 
 async function uploadLimitBytes(kind) {
@@ -4947,7 +4939,7 @@ async function healthDetails(res) {
 }
 
 async function adminSystemHealth(req, res) {
-  await requireAdmin(req, "storage");
+  await requireAdmin(req, "analytics");
   json(res, 200, await collectHealthDetails(true));
 }
 

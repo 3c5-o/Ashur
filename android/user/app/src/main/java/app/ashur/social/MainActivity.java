@@ -23,6 +23,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewAssetLoader;
 
 import com.onesignal.Continue;
@@ -46,6 +51,15 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         setContentView(webView);
+
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        ViewCompat.setOnApplyWindowInsetsListener(webView, (view, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            view.setPadding(0, bars.top, 0, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+        ViewCompat.requestApplyInsets(webView);
+        applySystemTheme(false);
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -270,6 +284,19 @@ public class MainActivity extends Activity {
         );
     }
 
+    private void applySystemTheme(boolean light) {
+        if (webView == null) return;
+        int background = light ? Color.rgb(246, 248, 247) : Color.rgb(5, 7, 6);
+        webView.setBackgroundColor(background);
+        getWindow().setStatusBarColor(background);
+        getWindow().setNavigationBarColor(background);
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(getWindow(), webView);
+        if (controller != null) {
+            controller.setAppearanceLightStatusBars(light);
+            controller.setAppearanceLightNavigationBars(light);
+        }
+    }
+
     @Override
     protected void onDestroy() {
         if (webView != null) {
@@ -295,6 +322,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String getApiBaseUrl() {
             return BuildConfig.ASHUR_API_URL == null ? "" : BuildConfig.ASHUR_API_URL;
+        }
+
+        @JavascriptInterface
+        public void setThemeMode(String mode) {
+            runOnUiThread(() -> applySystemTheme("light".equalsIgnoreCase(mode)));
         }
 
         @JavascriptInterface

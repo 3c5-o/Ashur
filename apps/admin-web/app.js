@@ -1,7 +1,14 @@
 (()=>{
 const cfg=window.ASHUR_ADMIN_CONFIG;
 const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey,{auth:{persistSession:true,autoRefreshToken:true}});
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const $=s=>{
+  const selector=String(s||"").trim();
+  return selector?document.querySelector(selector):null;
+};
+const $=s=>{
+  const selector=String(s||"").trim();
+  return selector?[...document.querySelectorAll(selector)]:[];
+};
 const nativeApiBase=()=>{try{return window.AshurNative?.getApiBaseUrl?.()||""}catch{return ""}};
 const apiBase=()=> (cfg.apiBaseUrl||nativeApiBase()||location.origin).replace(/\/$/,"");
 const esc=(v="")=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
@@ -245,26 +252,57 @@ const actionLabel={
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
 async function api(path,opt={}){
-  const h=new Headers(opt.headers||{});
-  const t=await token();
-  if(t)h.set("Authorization","Bearer "+t);
-  if(opt.body&&!h.has("Content-Type"))h.set("Content-Type","application/json");
-  let r;
-  try{
-    r=await fetch(apiBase()+path,{...opt,headers:h});
-    setConnectionState(true);
-  }catch(error){
+  const method=String(opt.method||"GET").toUpperCase();
+  const retrySafe=method==="GET"||method==="HEAD";
+  const maxAttempts=retrySafe?3:1;
+  let currentToken=await token();
+
+  const request=async(accessToken)=>{
+    let lastError=null;
+    for(let attempt=0;attempt<maxAttempts;attempt++){
+      const h=new Headers(opt.headers||{});
+      if(accessToken)h.set("Authorization","Bearer "+accessToken);
+      if(opt.body&&!h.has("Content-Type"))h.set("Content-Type","application/json");
+      const controller=typeof AbortController!=="undefined"?new AbortController():null;
+      const timer=controller?setTimeout(()=>controller.abort(),12000):null;
+      try{
+        const r=await fetch(apiBase()+path,{...opt,headers:h,...(controller?{signal:controller.signal}:{})});
+        if(timer)clearTimeout(timer);
+        if(retrySafe&&[502,503,504].includes(r.status)&&attempt<maxAttempts-1){
+          await new Promise(resolve=>setTimeout(resolve,attempt===0?450:1100));
+          continue;
+        }
+        setConnectionState(true);
+        return r;
+      }catch(error){
+        if(timer)clearTimeout(timer);
+        lastError=error;
+        if(!retrySafe||attempt>=maxAttempts-1)break;
+        await new Promise(resolve=>setTimeout(resolve,attempt===0?450:1100));
+      }
+    }
     setConnectionState(false);
-    const networkError=new Error("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا.");
+    const networkError=new Error("تعذر الاتصال ببوابة آشور. جارٍ إعادة الاتصال.");
     networkError.code="NETWORK_ERROR";
     networkError.path=path;
-    networkError.cause=error;
+    networkError.cause=lastError;
     throw networkError;
+  };
+
+  let r=await request(currentToken);
+  if(r.status===401&&currentToken){
+    const refreshed=await sb.auth.refreshSession();
+    const nextToken=refreshed.data?.session?.access_token||"";
+    if(!refreshed.error&&nextToken){
+      currentToken=nextToken;
+      r=await request(currentToken);
+    }
   }
+
   const b=await r.json().catch(()=>({}));
   if(!r.ok){
     if(r.status===401)showToast("انتهت جلسة الإدارة. سجّل الدخول من جديد.",{type:"error",duration:4500});
-    const requestError=new Error(b.error||"تعذر تنفيذ الطلب");
+    const requestError=new Error(b.error||([502,503,504].includes(r.status)?"بوابة آشور تعيد الاتصال بالخدمة.":"تعذر تنفيذ الطلب"));
     requestError.status=r.status;
     requestError.code=b.code||("HTTP_"+r.status);
     requestError.path=path;
@@ -332,12 +370,15 @@ function showApp(ok){
 }
 function showPageLoading(page){
   const map={
+    dashboard:"#stats",
     users:"#usersList",content:"#contentList",comments:"#commentsList",reports:"#reportsList",
     support:"#supportList",storage:"#channelsList",uploads:"#uploadsList",errors:"#errorsList",
     notifications:"#notificationHistory",admins:"#adminsList",audit:"#auditList",releases:"#releasesList",
     health:"#healthCards"
   };
-  const root=$(map[page]||"");
+  const selector=map[page];
+  if(!selector)return;
+  const root=$(selector);
   if(!root)return;
   root.innerHTML='<div class="admin-skeleton-list">'+Array.from({length:4},()=>'<div class="admin-skeleton-row"><i></i><div><b></b><span></span></div></div>').join("")+'</div>';
 }
@@ -354,7 +395,7 @@ async function reportAdminClientError(stage,error){
         message:String(error?.message||error||"Unknown UI error").slice(0,1000),
         stack:String(error?.stack||"").slice(0,5000),
         page:String(currentAdminPage||"").slice(0,80),
-        admin_version:"1.3.3"
+        admin_version:"1.3.4"
       })
     });
   }catch(_){}

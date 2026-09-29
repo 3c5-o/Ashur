@@ -1901,31 +1901,126 @@ async function socialReport(req, res) {
   json(res, 201, rows?.[0] || { ok: true });
 }
 
+async function supportEvent(ticketId, actorUserId, eventType, note = "", payload = {}) {
+  return insert("support_events", {
+    ticket_id: ticketId,
+    actor_user_id: actorUserId || null,
+    event_type: String(eventType || "update").slice(0, 80),
+    note: String(note || "").slice(0, 1500),
+    payload: payload && typeof payload === "object" ? payload : {},
+  }, { returning: false }).catch(() => {});
+}
+
 async function socialSupport(req, res) {
   const user = await currentUser(req);
   const body = await readJson(req);
   const subject = String(body.subject || "").trim().slice(0, 160);
   const message = String(body.body || "").trim().slice(0, 4000);
+  const category = ["technical","account","content","upload","other","general"].includes(String(body.category || ""))
+    ? String(body.category)
+    : "general";
   if (!subject || !message) return json(res, 400, { error: "اكتب عنوان المشكلة وتفاصيلها" });
+
+  const now = new Date().toISOString();
   const rows = await insert("support_tickets", {
     user_id: user.id,
-    category: String(body.category || "general").slice(0, 60),
+    category,
     subject,
     body: message,
     app_version: String(body.app_version || "").slice(0, 40),
     device_info: String(body.device_info || "").slice(0, 300),
+    priority: "normal",
+    status: "open",
+    unread_by_admin: true,
+    unread_by_user: false,
+    last_message_at: now,
+    last_user_reply_at: now,
   });
-  json(res, 201, rows?.[0] || { ok: true });
+  const ticket = rows?.[0];
+  if (ticket?.id) {
+    await insert("support_messages", {
+      ticket_id: ticket.id,
+      sender_kind: "user",
+      sender_user_id: user.id,
+      body: message,
+      created_at: now,
+    }, { returning: false });
+    await supportEvent(ticket.id, user.id, "ticket_created", "", { category });
+  }
+  json(res, 201, ticket || { ok: true });
 }
 
 async function socialSupportList(req, res) {
   const user = await currentUser(req);
   const rows = await select(
     "support_tickets",
-    "select=id,category,subject,body,status,priority,admin_reply,created_at,updated_at,closed_at&user_id=eq." +
-      encodeURIComponent(user.id) + "&order=created_at.desc&limit=100",
+    "select=id,category,subject,body,status,priority,admin_reply,unread_by_user,last_message_at,created_at,updated_at,closed_at&user_id=eq." +
+      encodeURIComponent(user.id) + "&order=last_message_at.desc.nullslast,created_at.desc&limit=100",
   );
   json(res, 200, { items: rows || [] });
+}
+
+async function socialSupportDetail(req, res, ticketId) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "support_tickets",
+    "select=id,user_id,category,subject,body,status,priority,admin_reply,app_version,device_info,unread_by_user,last_message_at,created_at,updated_at,closed_at&" +
+      "id=eq." + encodeURIComponent(ticketId) + "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const ticket = rows?.[0];
+  if (!ticket) return json(res, 404, { error: "تذكرة الدعم غير موجودة" });
+
+  const messages = await select(
+    "support_messages",
+    "select=id,sender_kind,sender_user_id,body,created_at&ticket_id=eq." +
+      encodeURIComponent(ticketId) + "&order=created_at.asc&limit=500",
+  ).catch(() => []);
+
+  if (ticket.unread_by_user) {
+    await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), {
+      unread_by_user: false,
+      updated_at: new Date().toISOString(),
+    }, { returning: false }).catch(() => {});
+  }
+
+  json(res, 200, { ticket: { ...ticket, unread_by_user: false }, messages: messages || [] });
+}
+
+async function socialSupportReply(req, res, ticketId) {
+  const user = await currentUser(req);
+  const rows = await select(
+    "support_tickets",
+    "select=id,user_id,status,assigned_to&id=eq." + encodeURIComponent(ticketId) +
+      "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const ticket = rows?.[0];
+  if (!ticket) return json(res, 404, { error: "تذكرة الدعم غير موجودة" });
+  if (ticket.status === "closed") return json(res, 409, { error: "هذه التذكرة مغلقة. أنشئ طلب دعم جديدًا إذا احتجت متابعة." });
+
+  const body = await readJson(req);
+  const message = String(body.body || "").trim().slice(0, 4000);
+  if (!message) return json(res, 400, { error: "اكتب رسالتك للدعم" });
+
+  const now = new Date().toISOString();
+  const rowsMsg = await insert("support_messages", {
+    ticket_id: ticketId,
+    sender_kind: "user",
+    sender_user_id: user.id,
+    body: message,
+    created_at: now,
+  });
+
+  await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), {
+    status: "open",
+    unread_by_admin: true,
+    unread_by_user: false,
+    last_message_at: now,
+    last_user_reply_at: now,
+    updated_at: now,
+    closed_at: null,
+  }, { returning: false });
+  await supportEvent(ticketId, user.id, "user_reply", "", {});
+  json(res, 201, rowsMsg?.[0] || { ok: true });
 }
 
 async function socialSave(req, res) {
@@ -2772,39 +2867,278 @@ async function moderateContent(req, res, kind, id) {
   json(res, 200, { ok: true, status });
 }
 
+async function reportEvent(reportId, actorUserId, eventType, note = "", payload = {}) {
+  return insert("report_events", {
+    report_id: reportId,
+    actor_user_id: actorUserId || null,
+    event_type: String(eventType || "update").slice(0, 80),
+    note: String(note || "").slice(0, 1500),
+    payload: payload && typeof payload === "object" ? payload : {},
+  }, { returning: false }).catch(() => {});
+}
+
+async function reportTargetSnapshot(targetType, targetId) {
+  if (targetType === "profile") {
+    const rows = await select(
+      "profiles",
+      "select=id,name,username,bio,avatar_media_id,cover_media_id,is_private,is_verified,is_banned,banned_until,deleted_at,created_at&id=eq." +
+        encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const row = rows?.[0];
+    if (!row) return { type: targetType, id: targetId, missing: true, media_ids: [] };
+    return {
+      type: targetType, id: targetId, author_id: row.id,
+      title: row.name || row.username || "حساب",
+      text: row.bio || "",
+      media_ids: [row.avatar_media_id, row.cover_media_id].filter(Boolean),
+      data: row,
+    };
+  }
+
+  if (targetType === "post") {
+    const rows = await select(
+      "posts",
+      "select=id,author_id,caption,moderation_status,visibility,comments_enabled,created_at,deleted_at&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const row = rows?.[0];
+    if (!row) return { type: targetType, id: targetId, missing: true, media_ids: [] };
+    const media = await select("post_media", "select=media_id,sort_order&post_id=eq." + encodeURIComponent(targetId) + "&order=sort_order.asc").catch(() => []);
+    return { type: targetType, id: targetId, author_id: row.author_id, title: "منشور", text: row.caption || "", media_ids: (media || []).map(x => x.media_id), data: row };
+  }
+
+  if (targetType === "reel") {
+    const rows = await select(
+      "reels",
+      "select=id,author_id,caption,media_id,cover_media_id,moderation_status,visibility,comments_enabled,view_count,created_at,deleted_at&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const row = rows?.[0];
+    if (!row) return { type: targetType, id: targetId, missing: true, media_ids: [] };
+    return { type: targetType, id: targetId, author_id: row.author_id, title: "ريلز", text: row.caption || "", media_ids: [...new Set([row.media_id,row.cover_media_id].filter(Boolean))], data: row };
+  }
+
+  if (targetType === "story") {
+    const rows = await select(
+      "stories",
+      "select=id,author_id,caption,media_id,moderation_status,created_at,expires_at,deleted_at&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const row = rows?.[0];
+    if (!row) return { type: targetType, id: targetId, missing: true, media_ids: [] };
+    return { type: targetType, id: targetId, author_id: row.author_id, title: "قصة", text: row.caption || "", media_ids: [row.media_id].filter(Boolean), data: row };
+  }
+
+  if (targetType === "comment") {
+    const rows = await select(
+      "comments",
+      "select=id,author_id,post_id,reel_id,body,moderation_status,created_at,deleted_at&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const row = rows?.[0];
+    if (!row) return { type: targetType, id: targetId, missing: true, media_ids: [] };
+    return { type: targetType, id: targetId, author_id: row.author_id, title: "تعليق", text: row.body || "", media_ids: [], data: row };
+  }
+
+  if (targetType === "message") {
+    const rows = await select(
+      "messages",
+      "select=id,sender_id,conversation_id,body,media_id,shared_type,shared_id,is_deleted,created_at&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const row = rows?.[0];
+    if (!row) return { type: targetType, id: targetId, missing: true, media_ids: [] };
+    return { type: targetType, id: targetId, author_id: row.sender_id, title: "رسالة", text: row.body || "", media_ids: [row.media_id].filter(Boolean), data: row };
+  }
+
+  return { type: targetType, id: targetId, missing: true, media_ids: [] };
+}
+
+async function reportTargetAuthorProfile(snapshot) {
+  if (!snapshot?.author_id) return null;
+  const rows = await select(
+    "profiles",
+    "select=id,name,username,avatar_media_id,is_verified,is_banned,banned_until,deleted_at&id=eq." +
+      encodeURIComponent(snapshot.author_id) + "&limit=1",
+  ).catch(() => []);
+  return rows?.[0] || null;
+}
+
+async function deleteReportedTarget(actorUserId, targetType, targetId) {
+  if (targetType === "comment") {
+    await remove("comments", "id=eq." + encodeURIComponent(targetId));
+    return { ok: true, media_count: 0, cleanup: [] };
+  }
+  if (targetType === "message") {
+    await update("messages", "id=eq." + encodeURIComponent(targetId), {
+      is_deleted: true,
+      body: "",
+      updated_at: new Date().toISOString(),
+    }, { returning: false });
+    return { ok: true, soft_deleted: true, media_count: 0, cleanup: [] };
+  }
+  const table = ({ post: "posts", reel: "reels", story: "stories" })[targetType];
+  if (!table) throw Object.assign(new Error("هذا النوع لا يدعم الحذف من مركز البلاغات"), { statusCode: 400 });
+
+  const fields = table === "posts" ? "id,author_id" : table === "reels" ? "id,author_id,media_id,cover_media_id" : "id,author_id,media_id";
+  const rows = await select(table, "select=" + fields + "&id=eq." + encodeURIComponent(targetId) + "&limit=1");
+  const content = rows?.[0];
+  if (!content) return { ok: true, missing: true, media_count: 0, cleanup: [] };
+
+  let mediaIds = [];
+  if (targetType === "post") {
+    const media = await select("post_media", "select=media_id&post_id=eq." + encodeURIComponent(targetId)).catch(() => []);
+    mediaIds = (media || []).map(x => x.media_id);
+  } else {
+    if (content.media_id) mediaIds.push(content.media_id);
+    if (content.cover_media_id && content.cover_media_id !== content.media_id) mediaIds.push(content.cover_media_id);
+  }
+  mediaIds = [...new Set(mediaIds.filter(Boolean))];
+  await remove(table, "id=eq." + encodeURIComponent(targetId));
+  const cleanup = [];
+  for (const mediaId of mediaIds) {
+    cleanup.push(await purgeMediaObject(mediaId, actorUserId).catch(error => ({
+      media_id: mediaId,
+      status: "cleanup_pending",
+      error: String(error.message || error),
+    })));
+  }
+  return { ok: true, media_count: mediaIds.length, cleanup };
+}
+
+async function warnReportedUser(actor, userId, reason) {
+  if (!userId) return false;
+  const rows = await select("profiles", "select=id,warning_count&id=eq." + encodeURIComponent(userId) + "&limit=1");
+  if (!rows?.[0]) return false;
+  const message = String(reason || "تم تسجيل مخالفة على حسابك.").trim().slice(0, 500);
+  await insert("admin_user_warnings", {
+    user_id: userId,
+    admin_user_id: actor.user.id,
+    reason: message,
+  }, { returning: false });
+  await update("profiles", "id=eq." + encodeURIComponent(userId), {
+    warning_count: Number(rows[0].warning_count || 0) + 1,
+  }, { returning: false });
+  await insert("notifications", {
+    user_id: userId,
+    actor_id: actor.user.id,
+    kind: "system",
+    title: "تنبيه من إدارة آشور",
+    body: message,
+  }, { returning: false }).catch(() => {});
+  await sendPush({
+    userIds: [userId],
+    title: "تنبيه من إدارة آشور",
+    body: message,
+    data: { kind: "system" },
+  }).catch(() => {});
+  return true;
+}
+
+async function banReportedUser(actor, userId, reason, hours) {
+  if (!userId) return false;
+  const duration = Math.max(0, Math.min(Number(hours || 0), 24 * 365));
+  const temporary = duration > 0;
+  const bannedUntil = temporary ? new Date(Date.now() + duration * 3600_000).toISOString() : null;
+  await update("profiles", "id=eq." + encodeURIComponent(userId), {
+    is_banned: !temporary,
+    banned_until: bannedUntil,
+    ban_reason: String(reason || "إجراء إداري بسبب بلاغ").slice(0, 500),
+  }, { returning: false });
+  await serviceRequest("/rest/v1/rpc/admin_revoke_user_sessions", {
+    method: "POST",
+    body: { p_user_id: userId },
+  }).catch(() => {});
+  return { temporary, banned_until: bannedUntil };
+}
+
 async function reportAction(req, res, reportId) {
   const actor = await requireAdmin(req, "reports");
   const body = await readJson(req);
   const rows = await select(
     "reports",
-    "select=id,target_type,target_id,status&id=eq." + encodeURIComponent(reportId) + "&limit=1",
+    "select=id,reporter_id,target_type,target_id,status,priority,assigned_to,admin_note&id=eq." +
+      encodeURIComponent(reportId) + "&limit=1",
   );
   const report = rows?.[0];
   if (!report) return json(res, 404, { error: "البلاغ غير موجود" });
-  const status = ["open", "review", "resolved", "rejected"].includes(body.status) ? body.status : "resolved";
-  const action = String(body.action || "").slice(0, 80);
-  await update("reports", "id=eq." + encodeURIComponent(reportId), {
-    status,
-    admin_note: String(body.admin_note || "").slice(0, 1500),
-    action_taken: action,
-    handled_by: actor.user.id,
-    resolved_at: ["resolved", "rejected"].includes(status) ? new Date().toISOString() : null,
-    updated_at: new Date().toISOString(),
-  }, { returning: false });
 
-  if (action === "hide_content" && ["post", "reel", "story", "comment"].includes(report.target_type)) {
-    const table = ({ post: "posts", reel: "reels", story: "stories", comment: "comments" })[report.target_type];
+  const action = String(body.action || "update").slice(0, 80);
+  const note = String(body.admin_note || "").trim().slice(0, 1500);
+  const priority = body.priority !== undefined
+    ? (["low","normal","high","urgent"].includes(body.priority) ? body.priority : null)
+    : report.priority;
+  if (!priority) return json(res, 400, { error: "أولوية البلاغ غير صالحة" });
+
+  let assignedTo = report.assigned_to || null;
+  if (body.assigned_to !== undefined) {
+    if (body.assigned_to === "me") assignedTo = actor.user.id;
+    else if (!body.assigned_to) assignedTo = null;
+    else if (/^[0-9a-f-]{36}$/i.test(String(body.assigned_to))) assignedTo = String(body.assigned_to);
+    else return json(res, 400, { error: "معرف المشرف غير صالح" });
+  } else if (["review","hide_content","delete_content","warn_user","ban_user","restore_content"].includes(action) && !assignedTo) {
+    assignedTo = actor.user.id;
+  }
+
+  const snapshot = await reportTargetSnapshot(report.target_type, report.target_id);
+  const targetUserId = snapshot.author_id || null;
+  const result = {};
+
+  if (action === "hide_content" && ["post","reel","story","comment"].includes(report.target_type)) {
+    const table = ({ post:"posts", reel:"reels", story:"stories", comment:"comments" })[report.target_type];
     await update(table, "id=eq." + encodeURIComponent(report.target_id), {
       moderation_status: "hidden",
       hidden_by: actor.user.id,
-    }, { returning: false }).catch(() => {});
+    }, { returning: false });
+    result.hidden = true;
+  } else if (action === "restore_content" && ["post","reel","story","comment"].includes(report.target_type)) {
+    const table = ({ post:"posts", reel:"reels", story:"stories", comment:"comments" })[report.target_type];
+    await update(table, "id=eq." + encodeURIComponent(report.target_id), {
+      moderation_status: "active",
+      hidden_by: null,
+      deleted_at: null,
+    }, { returning: false });
+    result.restored = true;
+  } else if (action === "delete_content") {
+    Object.assign(result, await deleteReportedTarget(actor.user.id, report.target_type, report.target_id));
+  } else if (action === "warn_user") {
+    result.warned = await warnReportedUser(actor, targetUserId, note || "تم تسجيل مخالفة على محتوى في حسابك.");
+  } else if (action === "ban_user") {
+    result.ban = await banReportedUser(actor, targetUserId, note || "إجراء إداري بسبب بلاغ", body.duration_hours);
   }
-  await writeAudit(actor.user.id, "report_" + status, "report", reportId, {
-    action,
+
+  let status = report.status;
+  if (body.status !== undefined) {
+    if (!["open","review","resolved","rejected"].includes(body.status)) return json(res, 400, { error: "حالة البلاغ غير صالحة" });
+    status = body.status;
+  } else if (action === "review") status = "review";
+  else if (["hide_content","delete_content","warn_user","ban_user"].includes(action)) status = "resolved";
+  else if (action === "reject") status = "rejected";
+
+  const patch = {
+    status,
+    priority,
+    assigned_to: assignedTo,
+    admin_note: note || report.admin_note || "",
+    action_taken: action,
+    handled_by: actor.user.id,
+    updated_at: new Date().toISOString(),
+    resolved_at: ["resolved","rejected"].includes(status) ? new Date().toISOString() : null,
+  };
+  if (status === "review" && report.status !== "review") patch.review_started_at = new Date().toISOString();
+  await update("reports", "id=eq." + encodeURIComponent(reportId), patch, { returning: false });
+
+  await reportEvent(reportId, actor.user.id, action, note, {
+    status,
+    priority,
+    assigned_to: assignedTo,
     target_type: report.target_type,
     target_id: report.target_id,
+    result,
   });
-  json(res, 200, { ok: true });
+  await writeAudit(actor.user.id, "report_" + action, "report", reportId, {
+    status,
+    priority,
+    target_type: report.target_type,
+    target_id: report.target_id,
+    result,
+  });
+  json(res, 200, { ok: true, status, priority, assigned_to: assignedTo, result });
 }
 
 async function updateAdminRecord(req, res, adminUserId) {
@@ -2865,29 +3199,166 @@ async function resolveSystemError(req, res, errorId) {
 }
 
 async function adminSupport(req, res, url) {
-  await requireAdmin(req, "support");
+  const actor = await requireAdmin(req, "support");
+  const { page, limit, offset } = pageParams(url, 30, 80);
   const status = String(url.searchParams.get("status") || "").trim();
-  let query = "select=id,user_id,category,subject,body,status,priority,admin_reply,assigned_to,app_version,device_info,created_at,updated_at,closed_at&order=created_at.desc&limit=200";
-  if (status) query += "&status=eq." + encodeURIComponent(status);
+  const priority = String(url.searchParams.get("priority") || "").trim();
+  const category = String(url.searchParams.get("category") || "").trim();
+  const assigned = String(url.searchParams.get("assigned") || "").trim();
+  const unread = String(url.searchParams.get("unread") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+
+  const filters = [];
+  if (status) filters.push("status=eq." + encodeURIComponent(status));
+  if (priority) filters.push("priority=eq." + encodeURIComponent(priority));
+  if (category) filters.push("category=eq." + encodeURIComponent(category));
+  if (unread === "true" || unread === "false") filters.push("unread_by_admin=eq." + unread);
+  if (assigned === "me") filters.push("assigned_to=eq." + encodeURIComponent(actor.user.id));
+  else if (assigned === "unassigned") filters.push("assigned_to=is.null");
+  else if (/^[0-9a-f-]{36}$/i.test(assigned)) filters.push("assigned_to=eq." + encodeURIComponent(assigned));
+  if (q) filters.push("or=(subject.ilike.*" + encodeURIComponent(q) + "*,body.ilike.*" + encodeURIComponent(q) + "*)");
+
+  const filterQuery = filters.join("&");
+  const total = await count("support_tickets", filterQuery);
+  let query = "select=id,user_id,category,subject,body,status,priority,admin_reply,assigned_to,app_version,device_info,unread_by_admin,unread_by_user,last_message_at,last_user_reply_at,last_admin_reply_at,created_at,updated_at,closed_at";
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=unread_by_admin.desc,last_message_at.desc.nullslast,created_at.desc&offset=" + offset + "&limit=" + limit;
+
   const rows = await select("support_tickets", query);
-  json(res, 200, { items: rows || [] });
+  const items = [];
+  for (const row of rows || []) {
+    const [userRows, assigneeRows] = await Promise.all([
+      select("profiles", "select=id,name,username,avatar_media_id,is_verified,is_banned&id=eq." + encodeURIComponent(row.user_id) + "&limit=1").catch(() => []),
+      row.assigned_to
+        ? select("profiles", "select=id,name,username,avatar_media_id&id=eq." + encodeURIComponent(row.assigned_to) + "&limit=1").catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    items.push({
+      ...row,
+      user: userRows?.[0] || null,
+      assignee: assigneeRows?.[0] || null,
+    });
+  }
+
+  json(res, 200, {
+    items,
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+  });
+}
+
+async function adminSupportDetail(req, res, ticketId) {
+  await requireAdmin(req, "support");
+  const rows = await select(
+    "support_tickets",
+    "select=id,user_id,category,subject,body,status,priority,admin_reply,assigned_to,app_version,device_info,resolution_note,unread_by_admin,unread_by_user,last_message_at,last_user_reply_at,last_admin_reply_at,created_at,updated_at,closed_at&id=eq." +
+      encodeURIComponent(ticketId) + "&limit=1",
+  );
+  const ticket = rows?.[0];
+  if (!ticket) return json(res, 404, { error: "تذكرة الدعم غير موجودة" });
+
+  const [messages, events, userRows, assigneeRows] = await Promise.all([
+    select("support_messages", "select=id,sender_kind,sender_user_id,body,created_at&ticket_id=eq." + encodeURIComponent(ticketId) + "&order=created_at.asc&limit=500").catch(() => []),
+    select("support_events", "select=id,actor_user_id,event_type,note,payload,created_at&ticket_id=eq." + encodeURIComponent(ticketId) + "&order=created_at.asc&limit=500").catch(() => []),
+    select("profiles", "select=id,name,username,avatar_media_id,is_verified,is_banned,last_seen_at,created_at&id=eq." + encodeURIComponent(ticket.user_id) + "&limit=1").catch(() => []),
+    ticket.assigned_to
+      ? select("profiles", "select=id,name,username,avatar_media_id&id=eq." + encodeURIComponent(ticket.assigned_to) + "&limit=1").catch(() => [])
+      : Promise.resolve([]),
+  ]);
+
+  if (ticket.unread_by_admin) {
+    await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), {
+      unread_by_admin: false,
+      updated_at: new Date().toISOString(),
+    }, { returning: false }).catch(() => {});
+  }
+
+  json(res, 200, {
+    ticket: { ...ticket, unread_by_admin: false },
+    user: userRows?.[0] || null,
+    assignee: assigneeRows?.[0] || null,
+    messages: messages || [],
+    events: events || [],
+  });
 }
 
 async function replySupport(req, res, ticketId) {
   const actor = await requireAdmin(req, "support");
   const body = await readJson(req);
-  const rows = await select("support_tickets", "select=id,user_id,status&id=eq." + encodeURIComponent(ticketId) + "&limit=1");
+  const rows = await select(
+    "support_tickets",
+    "select=id,user_id,status,priority,assigned_to,resolution_note&id=eq." + encodeURIComponent(ticketId) + "&limit=1",
+  );
   const ticket = rows?.[0];
   if (!ticket) return json(res, 404, { error: "التذكرة غير موجودة" });
+
   const reply = String(body.reply || "").trim().slice(0, 4000);
-  const status = ["open", "in_progress", "answered", "closed"].includes(body.status) ? body.status : "answered";
-  await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), {
-    admin_reply: reply,
-    status,
-    assigned_to: actor.user.id,
-    updated_at: new Date().toISOString(),
-    closed_at: status === "closed" ? new Date().toISOString() : null,
-  }, { returning: false });
+  const nextStatus = body.status !== undefined
+    ? (["open", "in_progress", "answered", "closed"].includes(body.status) ? body.status : null)
+    : ticket.status;
+  if (!nextStatus) return json(res, 400, { error: "حالة التذكرة غير صالحة" });
+
+  const nextPriority = body.priority !== undefined
+    ? (["low","normal","high","urgent"].includes(body.priority) ? body.priority : null)
+    : ticket.priority;
+  if (!nextPriority) return json(res, 400, { error: "أولوية التذكرة غير صالحة" });
+
+  let nextAssigned = ticket.assigned_to || actor.user.id;
+  if (body.assigned_to !== undefined) {
+    if (body.assigned_to === "me") nextAssigned = actor.user.id;
+    else if (!body.assigned_to) nextAssigned = null;
+    else if (/^[0-9a-f-]{36}$/i.test(String(body.assigned_to))) {
+      const adminRows = await select(
+        "admins",
+        "select=user_id,active&user_id=eq." + encodeURIComponent(body.assigned_to) + "&active=eq.true&limit=1",
+      ).catch(() => []);
+      if (!adminRows?.[0] && String(body.assigned_to) !== String(config.ownerUserId || "")) {
+        return json(res, 400, { error: "المشرف المحدد غير نشط" });
+      }
+      nextAssigned = String(body.assigned_to);
+    } else {
+      return json(res, 400, { error: "معرف المشرف غير صالح" });
+    }
+  }
+
+  const resolutionNote = body.resolution_note !== undefined
+    ? String(body.resolution_note || "").trim().slice(0, 1500)
+    : String(ticket.resolution_note || "");
+  const now = new Date().toISOString();
+  const patch = {
+    status: nextStatus,
+    priority: nextPriority,
+    assigned_to: nextAssigned,
+    resolution_note: resolutionNote,
+    updated_at: now,
+    closed_at: nextStatus === "closed" ? now : null,
+    unread_by_admin: false,
+  };
+
+  if (reply) {
+    await insert("support_messages", {
+      ticket_id: ticketId,
+      sender_kind: "admin",
+      sender_user_id: actor.user.id,
+      body: reply,
+      created_at: now,
+    }, { returning: false });
+    patch.admin_reply = reply;
+    patch.last_admin_reply_at = now;
+    patch.last_message_at = now;
+    patch.unread_by_user = true;
+  } else if (nextStatus !== ticket.status) {
+    patch.unread_by_user = true;
+  }
+
+  await update("support_tickets", "id=eq." + encodeURIComponent(ticketId), patch, { returning: false });
+
+  const changes = {};
+  if (nextStatus !== ticket.status) changes.status = { from: ticket.status, to: nextStatus };
+  if (nextPriority !== ticket.priority) changes.priority = { from: ticket.priority, to: nextPriority };
+  if ((nextAssigned || null) !== (ticket.assigned_to || null)) changes.assigned_to = nextAssigned || null;
+  if (reply) changes.reply = true;
+  await supportEvent(ticketId, actor.user.id, reply ? "admin_reply" : "admin_update", resolutionNote, changes);
+
   if (reply) {
     const title = "رد من دعم آشور";
     await insert("notifications", {
@@ -2906,7 +3377,13 @@ async function replySupport(req, res, ticketId) {
       data: { kind: "support", ticket_id: ticketId },
     }).catch(() => {});
   }
-  await writeAudit(actor.user.id, "reply_support", "support_ticket", ticketId, { status });
+
+  await writeAudit(actor.user.id, "update_support", "support_ticket", ticketId, {
+    status: nextStatus,
+    priority: nextPriority,
+    assigned_to: nextAssigned,
+    replied: Boolean(reply),
+  });
   json(res, 200, { ok: true });
 }
 
@@ -3141,37 +3618,110 @@ async function deleteContent(req, res, kind, id) {
   json(res, 200, { ok: true, media_count: mediaIds.length, cleanup });
 }
 
-async function adminReports(req, res) {
-  await requireAdmin(req, "reports");
-  const items = await select(
-    "reports",
-    "select=id,reporter_id,target_type,target_id,reason,details,status,admin_note,handled_by,action_taken,created_at,updated_at,resolved_at&order=created_at.desc&limit=200",
-  );
-  const enriched = [];
-  for (const row of items || []) {
-    const reporter = await select(
-      "profiles",
-      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.reporter_id) + "&limit=1",
-    ).catch(() => []);
-    enriched.push({ ...row, reporter: reporter?.[0] || null });
+async function adminReports(req, res, url) {
+  const actor = await requireAdmin(req, "reports");
+  const { page, limit, offset } = pageParams(url, 30, 80);
+  const status = String(url.searchParams.get("status") || "").trim();
+  const targetType = String(url.searchParams.get("target_type") || "").trim();
+  const priority = String(url.searchParams.get("priority") || "").trim();
+  const assigned = String(url.searchParams.get("assigned") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  const from = String(url.searchParams.get("from") || "").trim();
+  const to = String(url.searchParams.get("to") || "").trim();
+
+  const filters = [];
+  if (status) filters.push("status=eq." + encodeURIComponent(status));
+  if (targetType) filters.push("target_type=eq." + encodeURIComponent(targetType));
+  if (priority) filters.push("priority=eq." + encodeURIComponent(priority));
+  if (assigned === "me") filters.push("assigned_to=eq." + encodeURIComponent(actor.user.id));
+  else if (assigned === "unassigned") filters.push("assigned_to=is.null");
+  else if (/^[0-9a-f-]{36}$/i.test(assigned)) filters.push("assigned_to=eq." + encodeURIComponent(assigned));
+  if (q) filters.push("or=(reason.ilike.*" + encodeURIComponent(q) + "*,details.ilike.*" + encodeURIComponent(q) + "*,admin_note.ilike.*" + encodeURIComponent(q) + "*)");
+  if (from) filters.push("created_at=gte." + encodeURIComponent(new Date(from).toISOString()));
+  if (to) {
+    const end = new Date(to); end.setHours(23,59,59,999);
+    filters.push("created_at=lte." + encodeURIComponent(end.toISOString()));
   }
-  json(res, 200, { items: enriched });
+
+  const filterQuery = filters.join("&");
+  const total = await count("reports", filterQuery);
+  let query = "select=id,reporter_id,target_type,target_id,reason,details,status,priority,assigned_to,admin_note,handled_by,action_taken,review_started_at,created_at,updated_at,resolved_at";
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=created_at.desc&offset=" + offset + "&limit=" + limit;
+  const rows = await select("reports", query);
+
+  const items = [];
+  for (const row of rows || []) {
+    const [reporter, snapshot, duplicateCount, assignee] = await Promise.all([
+      select("profiles", "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.reporter_id) + "&limit=1").catch(() => []),
+      reportTargetSnapshot(row.target_type, row.target_id),
+      count("reports", "target_type=eq." + encodeURIComponent(row.target_type) + "&target_id=eq." + encodeURIComponent(row.target_id)).catch(() => 0),
+      row.assigned_to
+        ? select("profiles", "select=id,name,username,avatar_media_id&id=eq." + encodeURIComponent(row.assigned_to) + "&limit=1").catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    const targetUser = await reportTargetAuthorProfile(snapshot);
+    items.push({
+      ...row,
+      reporter: reporter?.[0] || null,
+      target: snapshot,
+      target_user: targetUser,
+      duplicate_count: Number(duplicateCount || 0),
+      assignee: assignee?.[0] || null,
+    });
+  }
+
+  json(res, 200, {
+    items,
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+  });
+}
+
+async function adminReportDetail(req, res, reportId) {
+  await requireAdmin(req, "reports");
+  const rows = await select(
+    "reports",
+    "select=id,reporter_id,target_type,target_id,reason,details,status,priority,assigned_to,admin_note,handled_by,action_taken,review_started_at,created_at,updated_at,resolved_at&id=eq." +
+      encodeURIComponent(reportId) + "&limit=1",
+  );
+  const report = rows?.[0];
+  if (!report) return json(res, 404, { error: "البلاغ غير موجود" });
+
+  const snapshot = await reportTargetSnapshot(report.target_type, report.target_id);
+  const [reporterRows, targetUser, events, duplicateCount, assigneeRows] = await Promise.all([
+    select("profiles", "select=id,name,username,avatar_media_id,is_verified,created_at&id=eq." + encodeURIComponent(report.reporter_id) + "&limit=1").catch(() => []),
+    reportTargetAuthorProfile(snapshot),
+    select("report_events", "select=id,actor_user_id,event_type,note,payload,created_at&report_id=eq." + encodeURIComponent(reportId) + "&order=created_at.asc&limit=500").catch(() => []),
+    count("reports", "target_type=eq." + encodeURIComponent(report.target_type) + "&target_id=eq." + encodeURIComponent(report.target_id)).catch(() => 0),
+    report.assigned_to
+      ? select("profiles", "select=id,name,username,avatar_media_id&id=eq." + encodeURIComponent(report.assigned_to) + "&limit=1").catch(() => [])
+      : Promise.resolve([]),
+  ]);
+
+  json(res, 200, {
+    report,
+    reporter: reporterRows?.[0] || null,
+    target: snapshot,
+    target_user: targetUser,
+    assignee: assigneeRows?.[0] || null,
+    duplicate_count: Number(duplicateCount || 0),
+    events: events || [],
+  });
 }
 
 async function resolveReport(req, res, reportId) {
   const actor = await requireAdmin(req, "reports");
-  await update(
-    "reports",
-    `id=eq.${encodeURIComponent(reportId)}`,
-    { status: "resolved", resolved_at: new Date().toISOString() },
-    { returning: false },
-  );
-  await insert("audit_logs", {
-    actor_user_id: actor.user.id,
-    action: "resolve_report",
-    target_type: "report",
-    target_id: reportId,
+  const rows = await select("reports", "select=id,status&id=eq." + encodeURIComponent(reportId) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "البلاغ غير موجود" });
+  const now = new Date().toISOString();
+  await update("reports", "id=eq." + encodeURIComponent(reportId), {
+    status: "resolved",
+    handled_by: actor.user.id,
+    resolved_at: now,
+    updated_at: now,
   }, { returning: false });
+  await reportEvent(reportId, actor.user.id, "resolve", "", {});
+  await writeAudit(actor.user.id, "resolve_report", "report", reportId, {});
   json(res, 200, { ok: true });
 }
 
@@ -3518,7 +4068,7 @@ const server = http.createServer(async (req, res) => {
         messaging_revision: "E2",
         stories_revision: "S3",
         content_revision: "C3",
-        admin_revision: "A4",
+        admin_revision: "A6",
         commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
         readiness: readiness()
       });
@@ -3550,6 +4100,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/v1/social/support") {
       if (req.method === "GET") return socialSupportList(req, res);
       if (req.method === "POST") return socialSupport(req, res);
+    }
+    const socialSupportDetailMatch = /^\/v1\/social\/support\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (socialSupportDetailMatch && req.method === "GET") {
+      return socialSupportDetail(req, res, socialSupportDetailMatch[1]);
+    }
+    if (socialSupportDetailMatch && req.method === "POST") {
+      return socialSupportReply(req, res, socialSupportDetailMatch[1]);
     }
     if (req.method === "POST" && url.pathname === "/v1/social/save") {
       return socialSave(req, res);
@@ -3697,7 +4254,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/v1/admin/reports") {
-      return adminReports(req, res);
+      return adminReports(req, res, url);
+    }
+    const adminReportDetailMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && adminReportDetailMatch) {
+      return adminReportDetail(req, res, adminReportDetailMatch[1]);
     }
     const reportActionMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})\/action$/.exec(url.pathname);
     if (req.method === "POST" && reportActionMatch) {
@@ -3732,6 +4293,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/support") {
       return adminSupport(req, res, url);
+    }
+    const adminSupportDetailMatch = /^\/v1\/admin\/support\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (req.method === "GET" && adminSupportDetailMatch) {
+      return adminSupportDetail(req, res, adminSupportDetailMatch[1]);
     }
     const supportReplyMatch = /^\/v1\/admin\/support\/([0-9a-f-]{36})\/reply$/.exec(url.pathname);
     if (req.method === "POST" && supportReplyMatch) {

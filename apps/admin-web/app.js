@@ -1004,7 +1004,7 @@ async function loadReports(){
   }catch(e){$("#reportsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-async function loadStorage(){async function loadStorage(){
+async function loadStorage(){
   try{
     const d=await api("/v1/admin/channels");
     $("#channelsList").innerHTML=(d.items||[]).map(row=>
@@ -1211,7 +1211,7 @@ async function loadSupport(){
   }catch(e){$("#supportList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-$("#notificationAudience").onchange=$("#notificationAudience").onchange=()=>$("#targetUserRow").classList.toggle("hidden",$("#notificationAudience").value!=="user");
+$("#notificationAudience").onchange=()=>$("#targetUserRow").classList.toggle("hidden",$("#notificationAudience").value!=="user");
 $("#notificationForm").onsubmit=async e=>{
   e.preventDefault();
   const scheduled=$("#notificationScheduledAt").value;

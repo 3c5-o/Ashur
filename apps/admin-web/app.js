@@ -209,7 +209,10 @@ const actionLabel={
   update_scheduled_notification:"تعديل إشعار مجدول",
   cancel_notification:"إلغاء إشعار",
   resend_notification:"إعادة إرسال إشعار",
-  reschedule_notification:"إعادة جدولة إشعار"
+  reschedule_notification:"إعادة جدولة إشعار",
+  publish_release:"نشر إصدار",
+  update_app_settings:"تعديل إعدادات التطبيق",
+  restore_app_settings:"استعادة إعدادات التطبيق"
 };
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
@@ -2023,46 +2026,133 @@ async function loadAdmins(){
   }catch(e){$("#adminsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
+let editingReleaseId=null;
+let releasesById=new Map();
+
+function resetReleaseForm(){
+  editingReleaseId=null;
+  $("#releaseForm").reset();
+  $("#releaseFormTitle").textContent="إضافة إصدار";
+  $("#releaseSubmitButton").textContent="إضافة الإصدار";
+  $("#releaseCancelEdit").classList.add("hidden");
+  $("#releaseMessage").textContent="";
+  const highest=[...releasesById.values()].reduce((max,row)=>Math.max(max,Number(row.version_code||0)),0);
+  if(highest)$("#releaseCode").value=highest+1;
+}
+function editRelease(id){
+  const r=releasesById.get(String(id));if(!r)return;
+  editingReleaseId=String(id);
+  $("#releaseFormTitle").textContent="تعديل الإصدار v"+(r.version||"");
+  $("#releaseSubmitButton").textContent="حفظ التعديلات";
+  $("#releaseCancelEdit").classList.remove("hidden");
+  $("#releaseVersion").value=r.version||"";
+  $("#releaseCode").value=Number(r.version_code||0)||"";
+  $("#releaseUrl").value=r.download_url||"";
+  $("#releaseSha256").value=r.sha256||"";
+  $("#releaseUpdateMessage").value=r.update_message||"";
+  $("#releaseNotes").value=r.notes||"";
+  $("#releaseMinimum").value=r.minimum_version||r.version||"";
+  $("#releaseStatus").value=r.status||"draft";
+  $("#releaseRequired").checked=!!r.required;
+  window.scrollTo({top:$("#releases").offsetTop,behavior:"smooth"});
+}
+$("#releaseCancelEdit")?.addEventListener("click",resetReleaseForm);
+
 async function loadReleases(){
   try{
     const d=await api("/v1/admin/releases");
-    $("#releasesList").innerHTML=(d.items||[]).map(r=>
-      '<div class="release-card">'+
+    const items=d.items||[];
+    releasesById=new Map(items.map(r=>[String(r.id),r]));
+    const sum=d.summary||{};
+    $("#releaseSummary").innerHTML=[
+      ["الإجمالي",sum.total||0],
+      ["منشور",sum.published||0],
+      ["اختبار",sum.testing||0],
+      ["مسودة",sum.draft||0],
+      ["أعلى Version Code",sum.highest_version_code||0]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0).toLocaleString("ar-IQ")+'</b></div>').join("");
+
+    const current=sum.current;
+    $("#currentPublishedRelease").innerHTML=current
+      ?'<div class="stage11-current-head"><div><span class="eyebrow">الإصدار المنشور</span><h3>v'+esc(current.version)+'</h3><div class="meta">Version Code '+Number(current.version_code||0)+' · '+(current.required?"إجباري":"اختياري")+'</div></div><span class="pill ok">منشور</span></div>'+
+       '<div class="stage11-current-meta"><span>أقل إصدار <b>'+esc(current.minimum_version||"—")+'</b></span><span>SHA-256 <code>'+esc(current.sha256||"—")+'</code></span></div>'+
+       (current.update_message?'<p>'+esc(current.update_message)+'</p>':"")
+      :'<div class="meta">لا يوجد إصدار منشور حاليًا.</div>';
+
+    $("#releasesList").innerHTML=items.map(r=>
+      '<div class="release-card stage11-release-card">'+
         '<div class="grow"><div class="moderation-head"><div><b>v'+esc(r.version)+'</b><div class="meta">Version Code '+Number(r.version_code||0)+' · '+new Date(r.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(r.status)+'">'+statusLabel(r.status)+'</span></div>'+
+        (r.update_message?'<div class="stage11-update-message"><b>رسالة التحديث</b><p>'+esc(r.update_message)+'</p></div>':"")+
         (r.notes?'<p>'+esc(r.notes)+'</p>':"")+
-        '<div class="meta">أقل إصدار: '+esc(r.minimum_version||"—")+' · '+(r.required?"إجباري":"اختياري")+'</div>'+
+        '<div class="stage11-release-meta">'+
+          '<span>أقل إصدار <b>'+esc(r.minimum_version||"—")+'</b></span>'+
+          '<span>'+(r.required?"إجباري":"اختياري")+'</span>'+
+          (r.sha256?'<span class="stage11-sha">SHA <code>'+esc(r.sha256)+'</code></span>':"")+
+        '</div>'+
         '<div class="admin-actions">'+
-          (r.status!=="published"?'<button class="small" data-release-publish="'+esc(r.id)+'" type="button">اعتماد كمنشور</button>':"")+
-          (r.status!=="testing"?'<button class="small" data-release-testing="'+esc(r.id)+'" type="button">وضع الاختبار</button>':"")+
-          (r.status!=="retired"?'<button class="small" data-release-retire="'+esc(r.id)+'" type="button">إيقاف الإصدار</button>':"")+
+          '<button class="small" data-release-edit="'+esc(r.id)+'" type="button">تعديل</button>'+
+          (r.status!=="published"?'<button class="small" data-release-publish="'+esc(r.id)+'" type="button">نشر</button>':"")+
+          (r.status!=="testing"?'<button class="small" data-release-testing="'+esc(r.id)+'" type="button">اختبار</button>':"")+
+          (r.status!=="retired"?'<button class="small danger" data-release-retire="'+esc(r.id)+'" type="button">إيقاف</button>':"")+
         '</div>'+
       '</div>'
     ).join("")||'<div class="panel">لا توجد إصدارات مسجلة.</div>';
-    const change=async(id,status)=>{
-      await api("/v1/admin/releases/"+id,{method:"PATCH",body:JSON.stringify({status})});
+
+    $("#releasesList").querySelectorAll("[data-release-edit]").forEach(b=>b.onclick=()=>editRelease(b.dataset.releaseEdit));
+    $("#releasesList").querySelectorAll("[data-release-publish]").forEach(b=>b.onclick=async()=>{
+      const r=releasesById.get(String(b.dataset.releasePublish));if(!r)return;
+      if(!r.download_url||!r.sha256){
+        showToast("أكمل رابط APK وSHA-256 قبل النشر.",{type:"error"});editRelease(r.id);return;
+      }
+      if(!await adminConfirm("نشر الإصدار v"+r.version+"؟","سيصبح هذا الإصدار هو التحديث الحالي، وستتحدث إعدادات التطبيق ورابط الموقع تلقائيًا.",{acceptLabel:"نشر الإصدار"}))return;
+      await api("/v1/admin/releases/"+r.id,{method:"PATCH",body:JSON.stringify({status:"published"})});
+      showToast("تم نشر الإصدار ومزامنة التحديث.",{type:"success"});
       await loadReleases();
-    };
-    $("#releasesList").querySelectorAll("[data-release-publish]").forEach(b=>b.onclick=()=>change(b.dataset.releasePublish,"published"));
-    $("#releasesList").querySelectorAll("[data-release-testing]").forEach(b=>b.onclick=()=>change(b.dataset.releaseTesting,"testing"));
-    $("#releasesList").querySelectorAll("[data-release-retire]").forEach(b=>b.onclick=()=>change(b.dataset.releaseRetire,"retired"));
+      if(editingReleaseId===String(r.id))resetReleaseForm();
+    });
+    $("#releasesList").querySelectorAll("[data-release-testing]").forEach(b=>b.onclick=async()=>{
+      await api("/v1/admin/releases/"+b.dataset.releaseTesting,{method:"PATCH",body:JSON.stringify({status:"testing"})});
+      showToast("تم تحويل الإصدار إلى الاختبار.",{type:"success"});loadReleases();
+    });
+    $("#releasesList").querySelectorAll("[data-release-retire]").forEach(b=>b.onclick=async()=>{
+      if(!await adminConfirm("إيقاف الإصدار؟","سيبقى في السجل كإصدار متقاعد.",{acceptLabel:"إيقاف"}))return;
+      await api("/v1/admin/releases/"+b.dataset.releaseRetire,{method:"PATCH",body:JSON.stringify({status:"retired"})});
+      showToast("تم إيقاف الإصدار.",{type:"success"});loadReleases();
+    });
+    if(!editingReleaseId&&!$("#releaseCode").value&&Number(sum.highest_version_code||0)>0){
+      $("#releaseCode").value=Number(sum.highest_version_code)+1;
+    }
   }catch(e){$("#releasesList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 $("#releaseForm").onsubmit=async e=>{
   e.preventDefault();
+  const status=$("#releaseStatus").value;
+  if(status==="published"&&!await adminConfirm("نشر هذا الإصدار مباشرة؟","سيتم تحديث التطبيق والموقع بهذا الإصدار فور الحفظ.",{acceptLabel:"حفظ ونشر"}))return;
   $("#releaseMessage").textContent="جارٍ الحفظ...";
+  const payload={
+    version:$("#releaseVersion").value.trim(),
+    version_code:Number($("#releaseCode").value||0),
+    download_url:$("#releaseUrl").value.trim(),
+    sha256:$("#releaseSha256").value.trim(),
+    update_message:$("#releaseUpdateMessage").value.trim(),
+    notes:$("#releaseNotes").value.trim(),
+    minimum_version:$("#releaseMinimum").value.trim(),
+    status,
+    required:$("#releaseRequired").checked
+  };
   try{
-    await api("/v1/admin/releases",{method:"POST",body:JSON.stringify({
-      version:$("#releaseVersion").value.trim(),
-      version_code:Number($("#releaseCode").value||0),
-      download_url:$("#releaseUrl").value.trim(),
-      notes:$("#releaseNotes").value.trim(),
-      minimum_version:$("#releaseMinimum").value.trim(),
-      status:$("#releaseStatus").value,
-      required:$("#releaseRequired").checked
-    })});
-    $("#releaseMessage").textContent="تمت إضافة الإصدار إلى السجل.";
-    $("#releaseForm").reset();
+    if(editingReleaseId){
+      await api("/v1/admin/releases/"+editingReleaseId,{method:"PATCH",body:JSON.stringify(payload)});
+      $("#releaseMessage").textContent="تم تحديث الإصدار.";
+      showToast(status==="published"?"تم الحفظ والنشر والمزامنة.":"تم حفظ تعديلات الإصدار.",{type:"success"});
+    }else{
+      await api("/v1/admin/releases",{method:"POST",body:JSON.stringify(payload)});
+      $("#releaseMessage").textContent="تمت إضافة الإصدار.";
+      showToast(status==="published"?"تمت إضافة الإصدار ونشره.":"تمت إضافة الإصدار إلى السجل.",{type:"success"});
+    }
+    editingReleaseId=null;
     await loadReleases();
+    resetReleaseForm();
   }catch(error){$("#releaseMessage").textContent=error.message}
 };
 
@@ -2079,15 +2169,59 @@ async function loadAudit(){
   }catch(e){$("#auditList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
 }
 
+function toLocalDateTimeValue(value){
+  if(!value)return "";
+  const d=new Date(value);if(Number.isNaN(d.getTime()))return "";
+  const local=new Date(d.getTime()-d.getTimezoneOffset()*60000);
+  return local.toISOString().slice(0,16);
+}
+function maintenanceActiveNow(value){
+  if(!value?.enabled)return false;
+  const now=Date.now();
+  const start=value.start_at?new Date(value.start_at).getTime():null;
+  const end=value.end_at?new Date(value.end_at).getTime():null;
+  if(start&&now<start)return false;
+  if(end&&now>=end)return false;
+  return true;
+}
+async function loadSettingsHistory(){
+  try{
+    const d=await api("/v1/admin/settings/app/history");
+    $("#settingsHistory").innerHTML=(d.items||[]).map(row=>{
+      const snap=row.snapshot||{};
+      const version=snap.version?.latest||"—";
+      const maintenance=maintenanceActiveNow(snap.maintenance)?"صيانة فعالة":"تشغيل طبيعي";
+      const source=({migration:"قبل المرحلة 12",admin_update:"تعديل الإدارة",release_publish:"نشر إصدار",before_restore:"قبل استعادة"})[row.source]||row.source||"سجل";
+      return '<div class="stage12-history-card"><div class="grow"><b>'+esc(source)+'</b><div class="meta">'+new Date(row.created_at).toLocaleString("ar-IQ")+' · إصدار '+esc(version)+'</div>'+
+        '<p>'+esc(row.reason||"بدون ملاحظة")+'</p><div class="stage12-history-meta"><span>'+maintenance+'</span><span>'+Object.values(snap.features||{}).filter(v=>v!==false).length+' ميزة مفعلة</span></div></div>'+
+        '<button class="small" data-restore-settings="'+esc(row.id)+'" type="button">استعادة</button></div>';
+    }).join("")||'<div class="meta">لا توجد نسخ سابقة بعد.</div>';
+    $("#settingsHistory").querySelectorAll("[data-restore-settings]").forEach(btn=>btn.onclick=async()=>{
+      if(!await adminConfirm("استعادة هذه الإعدادات؟","سيتم حفظ نسخة من الوضع الحالي أولًا، ثم استعادة النسخة المحددة.",{acceptLabel:"استعادة"}))return;
+      await api("/v1/admin/settings/app/history/"+btn.dataset.restoreSettings+"/restore",{method:"POST"});
+      showToast("تمت استعادة الإعدادات السابقة.",{type:"success"});
+      await Promise.all([loadAppSettings(),loadSettingsHistory()]);
+    });
+  }catch(e){$("#settingsHistory").innerHTML='<div class="error-text">'+esc(e.message)+'</div>'}
+}
+$("#refreshSettingsHistory")?.addEventListener("click",()=>loadSettingsHistory());
+
 async function loadAppSettings(){
   try{
     const d=await api("/v1/admin/settings/app");
     $("#latestVersion").value=d.version?.latest||"";
+    $("#latestVersionCode").value=Number(d.version?.version_code||0)||"";
     $("#minimumVersion").value=d.version?.minimum||"";
     $("#appDownloadUrl").value=d.version?.download_url||"";
+    $("#appUpdateSha256").value=d.version?.sha256||"";
+    $("#appUpdateMessage").value=d.version?.message||"";
     $("#requiredUpdate").checked=!!d.version?.required;
+
     $("#maintenanceEnabled").checked=!!d.maintenance?.enabled;
+    $("#maintenanceTitle").value=d.maintenance?.title||"آشور";
     $("#maintenanceMessage").value=d.maintenance?.message||"";
+    $("#maintenanceStartAt").value=toLocalDateTimeValue(d.maintenance?.start_at);
+    $("#maintenanceEndAt").value=toLocalDateTimeValue(d.maintenance?.end_at);
 
     const feat=d.features||{};
     $("#featureStories").checked=feat.stories!==false;
@@ -2105,23 +2239,44 @@ async function loadAppSettings(){
     const lim=d.limits||{};
     $("#limitGeneral").value=lim.max_upload_mb||60;
     $("#limitStory").value=lim.story_mb||30;
+    $("#limitReel").value=lim.reel_mb||lim.max_upload_mb||60;
     $("#limitImage").value=lim.image_mb||10;
     $("#limitChatVideo").value=lim.chat_video_mb||50;
     $("#limitAudio").value=lim.audio_mb||15;
-  }catch(e){}
+
+    const enabledFeatures=["stories","reels","messages","groups","registration","comments","search","explore","saved","notifications","uploads"].filter(k=>feat[k]!==false).length;
+    $("#appSettingsSummary").innerHTML=[
+      ["آخر إصدار",d.version?.latest||"—"],
+      ["أقل إصدار",d.version?.minimum||"—"],
+      ["المزايا المفعلة",enabledFeatures+" / 11"],
+      ["الصيانة",maintenanceActiveNow(d.maintenance)?"فعالة":d.maintenance?.enabled?"مجدولة":"متوقفة"]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+esc(value)+'</b></div>').join("");
+    await loadSettingsHistory();
+  }catch(e){
+    $("#appSettingsMessage").textContent=e.message;
+  }
 }
 $("#appSettingsForm").onsubmit=async e=>{
   e.preventDefault();
-  await api("/v1/admin/settings/app",{method:"PUT",body:JSON.stringify({
+  const start=$("#maintenanceStartAt").value;
+  const end=$("#maintenanceEndAt").value;
+  const payload={
+    reason:$("#appSettingsReason").value.trim()||"تعديل إعدادات التطبيق",
     version:{
-      latest:$("#latestVersion").value,
-      minimum:$("#minimumVersion").value,
-      download_url:$("#appDownloadUrl").value,
+      latest:$("#latestVersion").value.trim(),
+      version_code:Number($("#latestVersionCode").value||0),
+      minimum:$("#minimumVersion").value.trim(),
+      download_url:$("#appDownloadUrl").value.trim(),
+      sha256:$("#appUpdateSha256").value.trim(),
+      message:$("#appUpdateMessage").value.trim(),
       required:$("#requiredUpdate").checked
     },
     maintenance:{
       enabled:$("#maintenanceEnabled").checked,
-      message:$("#maintenanceMessage").value
+      title:$("#maintenanceTitle").value.trim(),
+      message:$("#maintenanceMessage").value.trim(),
+      start_at:start?new Date(start).toISOString():null,
+      end_at:end?new Date(end).toISOString():null
     },
     features:{
       stories:$("#featureStories").checked,
@@ -2139,12 +2294,21 @@ $("#appSettingsForm").onsubmit=async e=>{
     limits:{
       max_upload_mb:Number($("#limitGeneral").value||60),
       story_mb:Number($("#limitStory").value||30),
+      reel_mb:Number($("#limitReel").value||60),
       image_mb:Number($("#limitImage").value||10),
       chat_video_mb:Number($("#limitChatVideo").value||50),
       audio_mb:Number($("#limitAudio").value||15)
     }
-  })});
-  showToast("تم حفظ إعدادات التطبيق",{type:"success"})
+  };
+  if($("#maintenanceEnabled").checked&&!await adminConfirm("حفظ إعدادات الصيانة؟","وضع الصيانة قد يمنع المستخدمين من دخول التطبيق خلال الفترة المحددة.",{acceptLabel:"حفظ"}))return;
+  $("#appSettingsMessage").textContent="جارٍ الحفظ...";
+  try{
+    await api("/v1/admin/settings/app",{method:"PUT",body:JSON.stringify(payload)});
+    $("#appSettingsMessage").textContent="تم حفظ الإعدادات وإنشاء نسخة سابقة.";
+    $("#appSettingsReason").value="";
+    showToast("تم حفظ إعدادات التطبيق.",{type:"success"});
+    await loadAppSettings();
+  }catch(error){$("#appSettingsMessage").textContent=error.message}
 };
 
 async function loadSiteSettings(){

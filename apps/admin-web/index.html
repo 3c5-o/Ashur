@@ -179,15 +179,33 @@
     </section>
 
     <section id="storage" class="page">
-      <div class="page-title"><div><span class="eyebrow">الوسائط</span><h2>التخزين</h2><p>حالة القنوات المربوطة من بوت التخزين.</p></div></div>
-      <div class="info-banner"><span></span><p>ربط القنوات وتغييرها يتم من داخل بوت تخزين آشور، بينما هذه الصفحة للمتابعة والفحص.</p></div>
-      <div id="channelsList" class="cards"></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 8</span><h2>مركز التخزين</h2><p>مراقبة قنوات Telegram، أحجام الملفات، الصحة والاتصال بدون تغيير معرفات القنوات من الإدارة.</p></div></div>
+      <div class="info-banner"><span></span><p>معرف القناة وربط قناة جديدة يبقى من بوت تخزين آشور فقط. هنا تقدر تختبر، تعطل، تفعل أو تعيد الاتصال بأمان.</p></div>
+      <div id="storageSummary" class="stage8-summary"></div>
+      <div class="toolbar stage8-storage-toolbar">
+        <button id="testAllChannels" class="small" type="button">فحص جميع القنوات</button>
+        <span id="storageLiveState" class="live-state"><i></i> مراقبة التخزين</span>
+      </div>
+      <div id="channelsList" class="cards stage8-channel-grid"></div>
     </section>
 
     <section id="uploads" class="page">
-      <div class="page-title"><div><span class="eyebrow">الوسائط</span><h2>عمليات الرفع</h2><p>متابعة الملفات الجارية والفاشلة والمكتملة.</p></div></div>
-      <div class="toolbar"><select id="uploadStatus"><option value="">كل العمليات</option><option value="queued">بالانتظار</option><option value="receiving">جارٍ الاستلام</option><option value="storing">جارٍ التخزين</option><option value="completed">مكتمل</option><option value="failed">فشل</option><option value="cancelled">ملغي</option></select></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 8</span><h2>عمليات الرفع</h2><p>متابعة مباشرة للتقدم، المستخدم، الحالة، الإلغاء وإعادة محاولة التخزين عند توفر الملف المؤقت.</p></div></div>
+      <div id="uploadSummary" class="stage8-summary"></div>
+      <div class="toolbar admin-filter-bar upload-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="uploadSearch" class="search" placeholder="ابحث باسم الملف"></div>
+        <input id="uploadUser" placeholder="@username أو UUID" aria-label="المستخدم">
+        <select id="uploadStatus"><option value="">كل الحالات</option><option value="queued">بالانتظار</option><option value="receiving">جارٍ الاستلام</option><option value="storing">جارٍ التخزين</option><option value="completed">مكتمل</option><option value="failed">فشل</option><option value="cancelled">ملغي</option></select>
+        <select id="uploadKind"><option value="">كل الأنواع</option><option value="profile">صورة حساب</option><option value="profile_cover">غلاف حساب</option><option value="post_image">صورة منشور</option><option value="post_video">فيديو منشور</option><option value="reel">ريلز</option><option value="reel_cover">غلاف ريلز</option><option value="story">قصة</option><option value="chat_image">صورة محادثة</option><option value="chat_video">فيديو محادثة</option><option value="chat_audio">صوتية</option><option value="chat_file">ملف محادثة</option><option value="group_media">وسائط مجموعة</option><option value="file">ملف عام</option></select>
+        <button id="resetUploadFilters" class="small" type="button">مسح الفلاتر</button>
+        <span class="live-state"><i></i> تحديث مباشر</span>
+      </div>
       <div id="uploadsList" class="table-list"></div>
+      <div id="uploadsPager" class="admin-pager hidden">
+        <button id="uploadsPrevPage" class="small" type="button">السابق</button>
+        <span id="uploadsPageLabel">1 / 1</span>
+        <button id="uploadsNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="errors" class="page">
@@ -223,8 +241,24 @@
     </section>
 
     <section id="admins" class="page">
-      <div class="page-title"><div><span class="eyebrow">الصلاحيات</span><h2>المشرفون</h2><p>الحسابات الإدارية والأدوار والصلاحيات.</p></div></div>
-      <div class="panel admin-summary"><div><b>المالك</b><span>كامل الصلاحيات</span></div><button id="addAdminButton" class="small" type="button">إضافة مشرف</button></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 7</span><h2>المشرفون والصلاحيات</h2><p>إضافة المشرف بالاسم أو اليوزر، تحديد الدور، ومنح أو منع صلاحية كل قسم بشكل مستقل.</p></div></div>
+      <div class="panel admin-summary stage7-admin-summary">
+        <div><b>الإدارة العليا</b><span>المالك والمدير الثانوي يملكان كامل الصلاحيات.</span></div>
+        <button id="addAdminButton" class="small" type="button">إضافة مشرف</button>
+      </div>
+      <div id="adminAddPanel" class="panel stage7-admin-panel hidden">
+        <div class="panel-head"><div><span class="eyebrow">إضافة مشرف</span><h3>ابحث عن الحساب</h3></div><button id="closeAdminAddPanel" class="small" type="button">إغلاق</button></div>
+        <div class="stage7-admin-search">
+          <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="adminCandidateSearch" class="search" placeholder="الاسم أو @username"></div>
+          <select id="newAdminRole"><option value="moderator">مشرف</option><option value="content_moderator">مشرف محتوى</option><option value="support">الدعم</option><option value="analyst">محلل</option><option value="secondary_admin">مدير ثانوي</option></select>
+        </div>
+        <div id="adminCandidateResults" class="table-list compact"><div class="meta">اكتب حرفين على الأقل للبحث.</div></div>
+        <div id="newAdminSelected" class="stage7-selected-admin hidden"></div>
+        <div id="newAdminPermissions" class="stage7-permissions"></div>
+        <button id="confirmAddAdmin" class="primary hidden" type="button">إضافة المشرف</button>
+        <p id="addAdminMessage" class="message"></p>
+      </div>
+      <div id="adminPermissionPanel" class="panel stage7-admin-panel hidden"></div>
       <div id="adminsList" class="table-list"></div>
     </section>
 
@@ -369,7 +403,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage6";
+      app.src="./app.js?v=1.3.0-stage8";
       document.body.appendChild(app);
     };
     s.onerror=next;

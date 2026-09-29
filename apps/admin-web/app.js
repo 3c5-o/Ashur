@@ -156,6 +156,8 @@ let adminAccess=null;
 let adminRoleDefaults={};
 let uploadsLiveTimer=null;
 let storageLiveTimer=null;
+let errorsLiveTimer=null;
+let healthLiveTimer=null;
 
 function adminCan(permission){
   if(!permission)return true;
@@ -199,7 +201,15 @@ const actionLabel={
   reconnect_storage_channel:"إعادة اتصال قناة",
   test_storage_channel:"اختبار قناة تخزين",
   test_all_storage_channels:"فحص جميع قنوات التخزين",
-  retry_upload:"إعادة محاولة رفع"
+  retry_upload:"إعادة محاولة رفع",
+  reopen_system_error:"إعادة فتح خطأ",
+  create_notification_template:"إنشاء قالب إشعار",
+  update_notification_template:"تعديل قالب إشعار",
+  delete_notification_template:"حذف قالب إشعار",
+  update_scheduled_notification:"تعديل إشعار مجدول",
+  cancel_notification:"إلغاء إشعار",
+  resend_notification:"إعادة إرسال إشعار",
+  reschedule_notification:"إعادة جدولة إشعار"
 };
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
@@ -371,6 +381,8 @@ function navigate(page,{history=true,loading=true}={}){
   }
   if(page!=="uploads"&&uploadsLiveTimer){clearInterval(uploadsLiveTimer);uploadsLiveTimer=null}
   if(page!=="storage"&&storageLiveTimer){clearInterval(storageLiveTimer);storageLiveTimer=null}
+  if(page!=="errors"&&errorsLiveTimer){clearInterval(errorsLiveTimer);errorsLiveTimer=null}
+  if(page!=="health"&&healthLiveTimer){clearInterval(healthLiveTimer);healthLiveTimer=null}
   if(history&&currentAdminPage&&currentAdminPage!==page)adminPageHistory.push(currentAdminPage);
   currentAdminPage=page;
   $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
@@ -390,7 +402,7 @@ function navigate(page,{history=true,loading=true}={}){
     storage:loadStorage,
     uploads:loadUploads,
     errors:loadErrors,
-    notifications:loadNotificationHistory,
+    notifications:loadNotificationCenter,
     admins:loadAdmins,
     audit:loadAudit,
     releases:loadReleases,
@@ -1248,24 +1260,114 @@ async function loadUploads({quiet=false}={}){
   }finally{uploadLoading=false}
 }
 
-$("#errorStatus").onchange=loadErrors;
-async function loadErrors(){
+let errorPage=1;
+let errorPages=1;
+let errorSearchTimer;
+const errorSeverityLabels={critical:"حرج",error:"خطأ",warning:"تحذير",info:"معلومة"};
+function errorSeverityClass(value){
+  return value==="critical"?"bad":value==="warning"?"warn":value==="info"?"":"bad";
+}
+function resetErrorPage(){errorPage=1}
+["errorStatus","errorSeverity","errorService"].forEach(id=>{
+  $("#"+id)?.addEventListener("change",()=>{resetErrorPage();loadErrors()});
+});
+$("#errorSearch")?.addEventListener("input",()=>{
+  clearTimeout(errorSearchTimer);
+  errorSearchTimer=setTimeout(()=>{resetErrorPage();loadErrors()},260);
+});
+$("#resetErrorFilters")?.addEventListener("click",()=>{
+  ["errorSearch","errorStatus","errorSeverity","errorService"].forEach(id=>{const el=$("#"+id);if(el)el.value=""});
+  resetErrorPage();loadErrors();
+});
+$("#errorsPrevPage")?.addEventListener("click",()=>{if(errorPage>1){errorPage--;loadErrors()}});
+$("#errorsNextPage")?.addEventListener("click",()=>{if(errorPage<errorPages){errorPage++;loadErrors()}});
+function errorContextMarkup(context){
+  const entries=Object.entries(context&&typeof context==="object"?context:{});
+  if(!entries.length)return "";
+  return '<details class="stage9-error-context"><summary>السياق التقني</summary><div>'+
+    entries.slice(0,20).map(([key,value])=>'<span><b>'+esc(key)+'</b><code>'+esc(typeof value==="object"?JSON.stringify(value):String(value??""))+'</code></span>').join("")+
+    '</div></details>';
+}
+async function loadErrors({quiet=false}={}){
   try{
-    const status=$("#errorStatus")?.value||"";
-    const d=await api("/v1/admin/errors"+(status?"?status="+encodeURIComponent(status):""));
-    $("#errorsList").innerHTML=(d.items||[]).map(row=>
-      '<div class="report-card"><div class="grow">'+
-        '<div class="moderation-head"><div><b>'+esc(row.service||"system")+'</b><div class="meta">'+new Date(row.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(row.status)+'">'+statusLabel(row.status)+'</span></div>'+
-        '<p>'+esc(row.message||"")+'</p>'+
-        (row.code?'<div class="meta">الكود: '+esc(row.code)+'</div>':"")+
-        (row.status!=="resolved"?'<button class="small" data-resolve-error="'+esc(row.id)+'" type="button">تمت المعالجة</button>':"")+
-      '</div></div>'
-    ).join("")||'<div class="panel">لا توجد أخطاء.</div>';
-    $("#errorsList").querySelectorAll("[data-resolve-error]").forEach(b=>b.onclick=async()=>{
-      await api("/v1/admin/errors/"+b.dataset.resolveError+"/resolve",{method:"POST"});
-      loadErrors();
+    const params=new URLSearchParams({page:String(errorPage),limit:"30"});
+    const values={
+      q:$("#errorSearch")?.value.trim(),
+      status:$("#errorStatus")?.value,
+      severity:$("#errorSeverity")?.value,
+      service:$("#errorService")?.value
+    };
+    Object.entries(values).forEach(([k,v])=>{if(v)params.set(k,v)});
+    const d=await api("/v1/admin/errors?"+params.toString());
+    const p=d.pagination||{};
+    errorPages=Math.max(1,Number(p.pages||1));
+    if(errorPage>errorPages){errorPage=errorPages;return loadErrors({quiet})}
+    const summary=d.summary||{};
+    $("#errorSummary").innerHTML=[
+      ["مفتوحة",summary.open||0],
+      ["حرجة",summary.critical||0],
+      ["آخر 24 ساعة",summary.last_24h||0],
+      ["تم حلها",summary.resolved||0]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0).toLocaleString("ar-IQ")+'</b></div>').join("");
+
+    const services=summary.services||[];
+    const serviceSelect=$("#errorService");
+    const selectedService=serviceSelect?.value||"";
+    if(serviceSelect){
+      serviceSelect.innerHTML='<option value="">كل الخدمات</option>'+services.map(x=>'<option value="'+esc(x.service)+'">'+esc(x.service)+' ('+Number(x.occurrences||0).toLocaleString("ar-IQ")+')</option>').join("");
+      serviceSelect.value=selectedService;
+    }
+    $("#errorServiceBreakdown").innerHTML=services.slice(0,8).map(x=>
+      '<button type="button" data-error-service="'+esc(x.service)+'"><b>'+esc(x.service)+'</b><span>'+Number(x.occurrences||0).toLocaleString("ar-IQ")+' تكرار</span>'+(x.critical?'<i>'+Number(x.critical)+' حرج</i>':"")+'</button>'
+    ).join("");
+    $("#errorServiceBreakdown").querySelectorAll("[data-error-service]").forEach(btn=>btn.onclick=()=>{
+      $("#errorService").value=btn.dataset.errorService;errorPage=1;loadErrors();
     });
-  }catch(e){$("#errorsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+
+    $("#errorsList").innerHTML=(d.items||[]).map(row=>{
+      const last=row.last_seen_at||row.created_at;
+      const count=Math.max(1,Number(row.occurrence_count||1));
+      return '<div class="report-card stage9-error-card"><div class="grow">'+
+        '<div class="moderation-head"><div><div class="stage9-error-title"><b>'+esc(row.service||"system")+'</b><span class="pill '+errorSeverityClass(row.severity)+'">'+esc(errorSeverityLabels[row.severity]||row.severity||"خطأ")+'</span></div>'+
+        '<div class="meta">آخر ظهور: '+new Date(last).toLocaleString("ar-IQ")+(count>1?' · '+count.toLocaleString("ar-IQ")+' تكرار':"")+'</div></div>'+
+        '<span class="pill '+pillClass(row.status)+'">'+statusLabel(row.status)+'</span></div>'+
+        '<p>'+esc(row.message||"")+'</p>'+
+        '<div class="stage9-error-meta">'+
+          (row.code?'<span>الكود <b>'+esc(row.code)+'</b></span>':"")+
+          (row.user_id?'<span>المستخدم <code>'+esc(row.user_id)+'</code></span>':"")+
+          (row.first_seen_at?'<span>أول ظهور <b>'+new Date(row.first_seen_at).toLocaleString("ar-IQ")+'</b></span>':"")+
+        '</div>'+
+        errorContextMarkup(row.context)+
+        (row.resolution_note?'<div class="stage9-resolution-note"><b>ملاحظة الحل</b><p>'+esc(row.resolution_note)+'</p></div>':"")+
+        '<div class="admin-actions">'+
+          (row.status!=="resolved"?'<button class="small" data-resolve-error="'+esc(row.id)+'" type="button">تمت المعالجة</button>':'<button class="small" data-reopen-error="'+esc(row.id)+'" type="button">إعادة فتح</button>')+
+        '</div></div></div>';
+    }).join("")||'<div class="panel">لا توجد أخطاء مطابقة.</div>';
+
+    $("#errorsList").querySelectorAll("[data-resolve-error]").forEach(b=>b.onclick=async()=>{
+      const note=await adminPrompt("إغلاق الخطأ",{text:"أضف ملاحظة مختصرة عن المعالجة لتبقى في سجل النظام.",label:"ملاحظة الحل",placeholder:"مثال: تم إصلاح الاتصال وإعادة تشغيل الخدمة",acceptLabel:"تمت المعالجة"});
+      if(note===null)return;
+      await api("/v1/admin/errors/"+b.dataset.resolveError+"/resolve",{method:"POST",body:JSON.stringify({note:note.trim()})});
+      showToast("تم إغلاق مجموعة الخطأ.",{type:"success"});loadErrors();
+    });
+    $("#errorsList").querySelectorAll("[data-reopen-error]").forEach(b=>b.onclick=async()=>{
+      if(!await adminConfirm("إعادة فتح الخطأ؟","سيعود الخطأ إلى قائمة المتابعة.",{acceptLabel:"إعادة فتح"}))return;
+      await api("/v1/admin/errors/"+b.dataset.reopenError+"/reopen",{method:"POST"});
+      showToast("تمت إعادة فتح الخطأ.",{type:"success"});loadErrors();
+    });
+
+    $("#errorsPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||30));
+    $("#errorsPageLabel").textContent=errorPage+" / "+errorPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#errorsPrevPage").disabled=errorPage<=1;
+    $("#errorsNextPage").disabled=errorPage>=errorPages;
+    if(currentAdminPage==="errors"&&!errorsLiveTimer){
+      errorsLiveTimer=setInterval(()=>{
+        if(document.visibilityState==="visible"&&currentAdminPage==="errors")loadErrors({quiet:true}).catch(()=>{});
+      },5000);
+    }
+  }catch(e){
+    if(!quiet)$("#errorsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>';
+  }
 }
 
 const supportCategoryLabels={technical:"تقنية",account:"الحساب",content:"المحتوى",upload:"الرفع",other:"أخرى",general:"عام"};
@@ -1410,37 +1512,316 @@ async function loadSupport(){
   }catch(e){$("#supportList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-$("#notificationAudience").onchange=()=>$("#targetUserRow").classList.toggle("hidden",$("#notificationAudience").value!=="user");
+let selectedNotificationUsers=new Map();
+let notificationTemplates=[];
+let notificationHistoryPage=1;
+let notificationHistoryPages=1;
+let notificationUserSearchTimer;
+let notificationPreviewTimer;
+let notificationHistorySearchTimer;
+let editingScheduledNotificationId=null;
+
+const notificationAudienceLabels={all:"الجميع",user:"مستخدم",users:"مستخدمون",verified:"موثقون",active:"نشطون",inactive:"غير نشطين"};
+
+function notificationTargetIds(){
+  return [...selectedNotificationUsers.keys()];
+}
+function renderSelectedNotificationUsers(){
+  const root=$("#notificationSelectedUsers");
+  if(!root)return;
+  root.innerHTML=notificationTargetIds().map(id=>{
+    const user=selectedNotificationUsers.get(id)||{};
+    return '<span class="stage10-user-chip">'+esc(user.name||user.username||id.slice(0,8))+
+      (user.username?' <small>@'+esc(user.username)+'</small>':"")+
+      '<button type="button" data-remove-notification-user="'+esc(id)+'">×</button></span>';
+  }).join("");
+  root.querySelectorAll("[data-remove-notification-user]").forEach(btn=>btn.onclick=()=>{
+    selectedNotificationUsers.delete(btn.dataset.removeNotificationUser);
+    renderSelectedNotificationUsers();
+    refreshNotificationRecipientPreview();
+  });
+}
+function setNotificationAudienceUI(){
+  const audience=$("#notificationAudience").value;
+  $("#targetUserRow").classList.toggle("hidden",!["user","users"].includes(audience));
+  if(audience==="user"&&selectedNotificationUsers.size>1){
+    const first=[...selectedNotificationUsers.entries()][0];
+    selectedNotificationUsers=new Map(first?[first]:[]);
+    renderSelectedNotificationUsers();
+  }
+  refreshNotificationRecipientPreview();
+  updateNotificationPreviewUI();
+}
+$("#notificationAudience")?.addEventListener("change",setNotificationAudienceUI);
+
+$("#notificationUserSearch")?.addEventListener("input",()=>{
+  clearTimeout(notificationUserSearchTimer);
+  const q=$("#notificationUserSearch").value.trim();
+  if(q.length<2){$("#notificationUserResults").innerHTML="";return}
+  notificationUserSearchTimer=setTimeout(async()=>{
+    $("#notificationUserResults").innerHTML='<div class="meta">جارٍ البحث...</div>';
+    try{
+      const d=await api("/v1/admin/notifications/users?q="+encodeURIComponent(q));
+      const map=new Map((d.items||[]).map(x=>[String(x.id),x]));
+      $("#notificationUserResults").innerHTML=(d.items||[]).map(u=>
+        '<button type="button" class="stage10-user-result" data-notification-user="'+esc(u.id)+'">'+
+          '<div class="list-avatar">'+(u.avatar_media_id?'<img data-media-id="'+esc(u.avatar_media_id)+'" alt="">':'<span>'+esc((u.name||u.username||"م").slice(0,1))+'</span>')+'</div>'+
+          '<div class="grow"><b>'+esc(u.name||u.username||"مستخدم")+'</b><div class="meta">@'+esc(u.username||"")+'</div></div>'+
+          (u.is_verified?'<span class="pill ok">موثق</span>':"")+
+        '</button>'
+      ).join("")||'<div class="meta">لا توجد نتائج.</div>';
+      await hydrateAdminMedia($("#notificationUserResults"));
+      $("#notificationUserResults").querySelectorAll("[data-notification-user]").forEach(btn=>btn.onclick=()=>{
+        const u=map.get(btn.dataset.notificationUser);if(!u)return;
+        if($("#notificationAudience").value==="user")selectedNotificationUsers.clear();
+        selectedNotificationUsers.set(String(u.id),u);
+        renderSelectedNotificationUsers();
+        $("#notificationUserResults").innerHTML="";
+        $("#notificationUserSearch").value="";
+        refreshNotificationRecipientPreview();
+      });
+    }catch(error){$("#notificationUserResults").innerHTML='<div class="error-text">'+esc(error.message)+'</div>'}
+  },260);
+});
+
+function notificationFormTarget(){
+  const audience=$("#notificationAudience").value;
+  const ids=notificationTargetIds();
+  return {
+    audience,
+    user_id:audience==="user"?(ids[0]||null):null,
+    user_ids:audience==="users"?ids:[]
+  };
+}
+async function refreshNotificationRecipientPreview(){
+  clearTimeout(notificationPreviewTimer);
+  notificationPreviewTimer=setTimeout(async()=>{
+    const target=notificationFormTarget();
+    if((target.audience==="user"&&!target.user_id)||(target.audience==="users"&&!target.user_ids.length)){
+      $("#notificationRecipientPreview").textContent="اختر المستلمين أولًا.";
+      $("#notificationPreviewCount").textContent="0";
+      return;
+    }
+    try{
+      const params=new URLSearchParams({audience:target.audience});
+      if(target.user_id)params.set("user_id",target.user_id);
+      if(target.user_ids.length)params.set("user_ids",target.user_ids.join(","));
+      const d=await api("/v1/admin/notifications/preview?"+params.toString());
+      const count=Number(d.count||0);
+      $("#notificationRecipientPreview").innerHTML='<b>'+count.toLocaleString("ar-IQ")+'</b> مستلم مطابق للاستهداف';
+      $("#notificationPreviewCount").textContent=count.toLocaleString("ar-IQ");
+    }catch(error){
+      $("#notificationRecipientPreview").textContent=error.message;
+      $("#notificationPreviewCount").textContent="—";
+    }
+  },180);
+}
+function updateNotificationPreviewUI(){
+  const title=$("#notificationTitle")?.value.trim()||"عنوان الإشعار";
+  const body=$("#notificationBody")?.value.trim()||"سيظهر نص الإشعار هنا.";
+  $("#notificationPreviewCard").innerHTML='<span>آشور</span><b>'+esc(title)+'</b><p>'+esc(body)+'</p>';
+  const when=$("#notificationScheduledAt")?.value;
+  $("#notificationPreviewTime").textContent=when?new Date(when).toLocaleString("ar-IQ"):"فوري";
+  const type=$("#notificationEntityType")?.value;
+  const id=$("#notificationEntityId")?.value.trim();
+  $("#notificationPreviewLink").textContent=type?(type+(id?" · "+id.slice(0,8):"")):"بدون وجهة";
+}
+["notificationTitle","notificationBody","notificationScheduledAt","notificationEntityType","notificationEntityId"].forEach(id=>{
+  $("#"+id)?.addEventListener("input",updateNotificationPreviewUI);
+  $("#"+id)?.addEventListener("change",updateNotificationPreviewUI);
+});
+
+function resetNotificationComposer(){
+  editingScheduledNotificationId=null;
+  $("#notificationForm").reset();
+  selectedNotificationUsers.clear();
+  renderSelectedNotificationUsers();
+  $("#notificationUserResults").innerHTML="";
+  $("#notificationTemplate").value="";
+  $("#notificationSubmitButton").textContent="إرسال / جدولة الإشعار";
+  $("#notificationMessage").textContent="";
+  setNotificationAudienceUI();
+  updateNotificationPreviewUI();
+}
+function applyNotificationRecordToComposer(record,{editing=false}={}){
+  editingScheduledNotificationId=editing?record.id:null;
+  $("#notificationTitle").value=record.title||"";
+  $("#notificationBody").value=record.body||"";
+  $("#notificationAudience").value=record.audience||"all";
+  $("#notificationEntityType").value=record.deep_link?.entity_type||"";
+  $("#notificationEntityId").value=record.deep_link?.entity_id||"";
+  $("#notificationScheduledAt").value=record.scheduled_at?new Date(new Date(record.scheduled_at).getTime()-new Date(record.scheduled_at).getTimezoneOffset()*60000).toISOString().slice(0,16):"";
+  selectedNotificationUsers.clear();
+  if(record.target_user_id)selectedNotificationUsers.set(String(record.target_user_id),{id:record.target_user_id,name:"المستخدم المحدد"});
+  (Array.isArray(record.target_user_ids)?record.target_user_ids:[]).forEach(id=>selectedNotificationUsers.set(String(id),{id,name:"مستخدم محدد"}));
+  renderSelectedNotificationUsers();
+  setNotificationAudienceUI();
+  updateNotificationPreviewUI();
+  $("#notificationSubmitButton").textContent=editing?"حفظ تعديل الجدولة":"إرسال / جدولة الإشعار";
+  window.scrollTo({top:$("#notifications").offsetTop,behavior:"smooth"});
+}
+
 $("#notificationForm").onsubmit=async e=>{
   e.preventDefault();
+  const target=notificationFormTarget();
   const scheduled=$("#notificationScheduledAt").value;
   const when=scheduled?new Date(scheduled).toISOString():null;
   const isScheduled=when&&new Date(when)>new Date(Date.now()+15000);
+  if(target.audience==="user"&&!target.user_id){showToast("اختر المستخدم المستلم.",{type:"error"});return}
+  if(target.audience==="users"&&!target.user_ids.length){showToast("اختر مستخدمًا واحدًا على الأقل.",{type:"error"});return}
+  const entityType=$("#notificationEntityType").value;
+  const entityId=$("#notificationEntityId").value.trim();
+  const payload={
+    title:$("#notificationTitle").value.trim(),
+    body:$("#notificationBody").value.trim(),
+    ...target,
+    scheduled_at:when,
+    template_id:$("#notificationTemplate").value||null,
+    deep_link:entityType?{entity_type:entityType,entity_id:entityId||null}:{}
+  };
+  if(editingScheduledNotificationId){
+    if(!isScheduled){showToast("تعديل الإشعار المجدول يحتاج موعدًا مستقبليًا.",{type:"error"});return}
+    if(!await adminConfirm("حفظ تعديل الإشعار المجدول؟","سيتم تحديث الموعد والنص والاستهداف قبل الإرسال.",{acceptLabel:"حفظ التعديل"}))return;
+    $("#notificationMessage").textContent="جارٍ حفظ التعديل...";
+    try{
+      await api("/v1/admin/notifications/"+editingScheduledNotificationId,{method:"PATCH",body:JSON.stringify(payload)});
+      showToast("تم تحديث الإشعار المجدول.",{type:"success"});
+      resetNotificationComposer();
+      await loadNotificationHistory();
+    }catch(err){$("#notificationMessage").textContent=err.message}
+    return;
+  }
   if(!await adminConfirm(isScheduled?"جدولة الإشعار؟":"إرسال الإشعار؟",isScheduled?"سيتم إرسال الإشعار تلقائيًا في الموعد المحدد.":"سيبدأ الإرسال فور التأكيد.",{acceptLabel:isScheduled?"جدولة":"إرسال"}))return;
   $("#notificationMessage").textContent=isScheduled?"جارٍ الجدولة...":"جارٍ الإرسال...";
   try{
-    const entityType=$("#notificationEntityType").value;
-    const entityId=$("#notificationEntityId").value.trim();
-    await api("/v1/admin/notifications/send",{method:"POST",body:JSON.stringify({
-      title:$("#notificationTitle").value.trim(),
-      body:$("#notificationBody").value.trim(),
-      audience:$("#notificationAudience").value,
-      user_id:$("#notificationUser").value.trim()||null,
-      scheduled_at:when,
-      deep_link:entityType?{entity_type:entityType,entity_id:entityId||null}:{}
-    })});
+    const d=await api("/v1/admin/notifications/send",{method:"POST",body:JSON.stringify(payload)});
     $("#notificationMessage").textContent=isScheduled?"تمت جدولة الإشعار.":"تم إرسال الإشعار.";
+    showToast((isScheduled?"تمت الجدولة لـ ":"تم الإرسال إلى ")+Number(d.recipient_count||0).toLocaleString("ar-IQ")+" مستلم.",{type:"success"});
     await loadNotificationHistory();
   }catch(err){$("#notificationMessage").textContent=err.message}
 };
 
+async function loadNotificationTemplates(){
+  try{
+    const d=await api("/v1/admin/notification-templates");
+    notificationTemplates=d.items||[];
+    const current=$("#notificationTemplate").value;
+    $("#notificationTemplate").innerHTML='<option value="">بدون قالب</option>'+notificationTemplates.filter(x=>x.enabled!==false).map(t=>'<option value="'+esc(t.id)+'">'+esc(t.name)+'</option>').join("");
+    if(notificationTemplates.some(x=>x.id===current))$("#notificationTemplate").value=current;
+    $("#notificationTemplates").innerHTML=notificationTemplates.map(t=>
+      '<div class="stage10-template-card"><div class="grow"><b>'+esc(t.name)+'</b><span>'+esc(t.title)+'</span><p>'+esc(t.body)+'</p><small>'+esc(notificationAudienceLabels[t.audience]||t.audience)+'</small></div>'+
+      '<div class="admin-actions"><button class="small" data-apply-template="'+esc(t.id)+'" type="button">تطبيق</button><button class="small" data-update-template="'+esc(t.id)+'" type="button">تحديث</button><button class="small danger" data-delete-template="'+esc(t.id)+'" type="button">حذف</button></div></div>'
+    ).join("")||'<div class="meta">لا توجد قوالب محفوظة.</div>';
+    $("#notificationTemplates").querySelectorAll("[data-apply-template]").forEach(btn=>btn.onclick=()=>applyNotificationTemplate(btn.dataset.applyTemplate));
+    $("#notificationTemplates").querySelectorAll("[data-update-template]").forEach(btn=>btn.onclick=()=>updateNotificationTemplateFromComposer(btn.dataset.updateTemplate));
+    $("#notificationTemplates").querySelectorAll("[data-delete-template]").forEach(btn=>btn.onclick=()=>deleteNotificationTemplate(btn.dataset.deleteTemplate));
+  }catch(e){$("#notificationTemplates").innerHTML='<div class="error-text">'+esc(e.message)+'</div>'}
+}
+function applyNotificationTemplate(id){
+  const t=notificationTemplates.find(x=>String(x.id)===String(id));if(!t)return;
+  $("#notificationTemplate").value=t.id;
+  $("#notificationTitle").value=t.title||"";
+  $("#notificationBody").value=t.body||"";
+  $("#notificationAudience").value=t.audience||"all";
+  $("#notificationEntityType").value=t.deep_link?.entity_type||"";
+  $("#notificationEntityId").value=t.deep_link?.entity_id||"";
+  selectedNotificationUsers.clear();
+  renderSelectedNotificationUsers();
+  setNotificationAudienceUI();
+  updateNotificationPreviewUI();
+}
+$("#notificationTemplate")?.addEventListener("change",()=>{if($("#notificationTemplate").value)applyNotificationTemplate($("#notificationTemplate").value)});
+$("#saveNotificationTemplate")?.addEventListener("click",async()=>{
+  const name=await adminPrompt("حفظ قالب إشعار",{text:"سيُحفظ العنوان والنص والاستهداف والوجهة الحالية لإعادة استخدامها.",label:"اسم القالب",placeholder:"مثال: تحديث جديد",acceptLabel:"حفظ القالب"});
+  if(!name?.trim())return;
+  const entityType=$("#notificationEntityType").value;
+  const entityId=$("#notificationEntityId").value.trim();
+  try{
+    await api("/v1/admin/notification-templates",{method:"POST",body:JSON.stringify({
+      name:name.trim(),title:$("#notificationTitle").value.trim(),body:$("#notificationBody").value.trim(),
+      audience:$("#notificationAudience").value,deep_link:entityType?{entity_type:entityType,entity_id:entityId||null}:{}
+    })});
+    showToast("تم حفظ قالب الإشعار.",{type:"success"});await loadNotificationTemplates();
+  }catch(error){showToast(error.message,{type:"error"})}
+});
+async function updateNotificationTemplateFromComposer(id){
+  const t=notificationTemplates.find(x=>String(x.id)===String(id));if(!t)return;
+  if(!await adminConfirm("تحديث القالب؟","سيتم استبدال محتوى القالب بالقيم الحالية في نموذج الإشعار.",{acceptLabel:"تحديث"}))return;
+  const entityType=$("#notificationEntityType").value;
+  const entityId=$("#notificationEntityId").value.trim();
+  await api("/v1/admin/notification-templates/"+id,{method:"PATCH",body:JSON.stringify({
+    title:$("#notificationTitle").value.trim(),body:$("#notificationBody").value.trim(),
+    audience:$("#notificationAudience").value,deep_link:entityType?{entity_type:entityType,entity_id:entityId||null}:{}
+  })});
+  showToast("تم تحديث القالب.",{type:"success"});await loadNotificationTemplates();
+}
+async function deleteNotificationTemplate(id){
+  if(!await adminConfirm("حذف القالب؟","لن يؤثر الحذف على الإشعارات التي أُرسلت سابقًا.",{acceptLabel:"حذف"}))return;
+  await api("/v1/admin/notification-templates/"+id,{method:"DELETE"});
+  showToast("تم حذف القالب.",{type:"success"});await loadNotificationTemplates();
+}
+
+$("#notificationHistorySearch")?.addEventListener("input",()=>{
+  clearTimeout(notificationHistorySearchTimer);
+  notificationHistorySearchTimer=setTimeout(()=>{notificationHistoryPage=1;loadNotificationHistory()},260);
+});
+["notificationHistoryStatus","notificationHistoryAudience"].forEach(id=>$("#"+id)?.addEventListener("change",()=>{notificationHistoryPage=1;loadNotificationHistory()}));
+$("#resetNotificationHistoryFilters")?.addEventListener("click",()=>{
+  ["notificationHistorySearch","notificationHistoryStatus","notificationHistoryAudience"].forEach(id=>{const el=$("#"+id);if(el)el.value=""});
+  notificationHistoryPage=1;loadNotificationHistory();
+});
+$("#notificationHistoryPrev")?.addEventListener("click",()=>{if(notificationHistoryPage>1){notificationHistoryPage--;loadNotificationHistory()}});
+$("#notificationHistoryNext")?.addEventListener("click",()=>{if(notificationHistoryPage<notificationHistoryPages){notificationHistoryPage++;loadNotificationHistory()}});
+
 async function loadNotificationHistory(){
   try{
-    const d=await api("/v1/admin/notifications/history");
-    $("#notificationHistory").innerHTML=(d.items||[]).map(n=>
-      '<div class="row-card"><div class="grow"><b>'+esc(n.title||"إشعار")+'</b><div class="meta">'+esc(n.audience||"all")+' · '+new Date(n.created_at).toLocaleString("ar-IQ")+'</div><p>'+esc(n.body||"")+'</p></div><span class="pill '+pillClass(n.status)+'">'+statusLabel(n.status)+'</span></div>'
-    ).join("")||'<div class="meta">لا توجد إشعارات مرسلة بعد.</div>';
+    const params=new URLSearchParams({page:String(notificationHistoryPage),limit:"30"});
+    const q=$("#notificationHistorySearch")?.value.trim();
+    const status=$("#notificationHistoryStatus")?.value;
+    const audience=$("#notificationHistoryAudience")?.value;
+    if(q)params.set("q",q);if(status)params.set("status",status);if(audience)params.set("audience",audience);
+    const d=await api("/v1/admin/notifications/history?"+params.toString());
+    const p=d.pagination||{};notificationHistoryPages=Math.max(1,Number(p.pages||1));
+    if(notificationHistoryPage>notificationHistoryPages){notificationHistoryPage=notificationHistoryPages;return loadNotificationHistory()}
+    const sum=d.summary||{};
+    $("#notificationSummary").innerHTML=[
+      ["الإجمالي",sum.total||0],["مرسل",sum.sent||0],["مجدول",sum.scheduled||0],["فشل",sum.failed||0],["ملغي",sum.cancelled||0]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0).toLocaleString("ar-IQ")+'</b></div>').join("");
+    const records=new Map((d.items||[]).map(x=>[String(x.id),x]));
+    $("#notificationHistory").innerHTML=(d.items||[]).map(n=>{
+      const target=notificationAudienceLabels[n.audience]||n.audience||"الجميع";
+      const time=n.scheduled_at&&n.status==="scheduled"?"موعد: "+new Date(n.scheduled_at).toLocaleString("ar-IQ"):"إنشاء: "+new Date(n.created_at).toLocaleString("ar-IQ");
+      const recipients=Number(n.recipient_count||0);
+      return '<div class="row-card stage10-history-card"><div class="grow"><div class="moderation-head"><div><b>'+esc(n.title||"إشعار")+'</b><div class="meta">'+esc(target)+' · '+esc(time)+'</div></div><span class="pill '+pillClass(n.status)+'">'+statusLabel(n.status)+'</span></div>'+
+        '<p>'+esc(n.body||"")+'</p><div class="stage10-history-meta"><span>'+recipients.toLocaleString("ar-IQ")+' مستلم</span>'+
+        (n.deep_link?.entity_type?'<span>وجهة: '+esc(n.deep_link.entity_type)+'</span>':"")+
+        (n.failure_count?'<span class="error-text">'+Number(n.failure_count).toLocaleString("ar-IQ")+' فشل</span>':"")+'</div>'+
+        '<div class="admin-actions">'+
+          (n.status==="scheduled"?'<button class="small" data-edit-notification="'+esc(n.id)+'" type="button">تعديل</button><button class="small danger" data-cancel-notification="'+esc(n.id)+'" type="button">إلغاء الجدولة</button>':"")+
+          (["sent","failed","cancelled"].includes(n.status)?'<button class="small" data-resend-notification="'+esc(n.id)+'" type="button">إعادة الإرسال</button>':"")+
+        '</div></div></div>';
+    }).join("")||'<div class="meta">لا توجد إشعارات مطابقة.</div>';
+    $("#notificationHistory").querySelectorAll("[data-edit-notification]").forEach(btn=>btn.onclick=()=>applyNotificationRecordToComposer(records.get(btn.dataset.editNotification),{editing:true}));
+    $("#notificationHistory").querySelectorAll("[data-cancel-notification]").forEach(btn=>btn.onclick=async()=>{
+      if(!await adminConfirm("إلغاء الإشعار المجدول؟","لن يتم إرساله في الموعد المحدد.",{acceptLabel:"إلغاء الجدولة"}))return;
+      await api("/v1/admin/notifications/"+btn.dataset.cancelNotification+"/cancel",{method:"POST"});
+      showToast("تم إلغاء الجدولة.",{type:"success"});loadNotificationHistory();
+    });
+    $("#notificationHistory").querySelectorAll("[data-resend-notification]").forEach(btn=>btn.onclick=async()=>{
+      if(!await adminConfirm("إعادة إرسال الإشعار؟","سيتم إنشاء عملية إرسال جديدة بنفس المحتوى والاستهداف.",{acceptLabel:"إعادة الإرسال"}))return;
+      await api("/v1/admin/notifications/"+btn.dataset.resendNotification+"/resend",{method:"POST",body:"{}"});
+      showToast("تمت إعادة إرسال الإشعار.",{type:"success"});loadNotificationHistory();
+    });
+    $("#notificationHistoryPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||30));
+    $("#notificationHistoryPageLabel").textContent=notificationHistoryPage+" / "+notificationHistoryPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#notificationHistoryPrev").disabled=notificationHistoryPage<=1;
+    $("#notificationHistoryNext").disabled=notificationHistoryPage>=notificationHistoryPages;
   }catch(e){$("#notificationHistory").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+}
+async function loadNotificationCenter(){
+  await Promise.all([loadNotificationTemplates(),loadNotificationHistory()]);
+  setNotificationAudienceUI();
+  updateNotificationPreviewUI();
 }
 
 let adminCandidateTimer;
@@ -1794,14 +2175,35 @@ $("#siteSettingsForm").onsubmit=async e=>{
 
 async function loadHealth(){
   try{
-    const d=await api("/health/details");
-    $("#healthCards").innerHTML=Object.entries(d.services||{}).map(([k,v])=>`
-      <div class="health-card">
-        <div class="grow"><b>${esc(v.label||k)}</b><div class="meta">${esc(v.detail||"")}</div></div>
-        <span class="pill ${v.ok?"ok":"bad"}">${v.ok?"يعمل":"متوقف"}</span>
-      </div>`).join("")
-  }catch(e){$("#healthCards").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+    const d=await api("/v1/admin/system/health");
+    $("#healthCards").innerHTML=Object.entries(d.services||{}).map(([k,v])=>
+      '<div class="health-card"><div class="grow"><b>'+esc(v.label||k)+'</b><div class="meta">'+esc(v.detail||"")+'</div></div>'+
+      '<span class="pill '+(v.ok?"ok":"bad")+'">'+(v.ok?"يعمل":"متوقف")+'</span></div>'
+    ).join("");
+    const runtime=d.runtime||{};
+    $("#healthRuntime").innerHTML=
+      '<div><span>الإصدار</span><b>'+esc(runtime.api_version||"—")+' / '+esc(runtime.admin_revision||"—")+'</b></div>'+
+      '<div><span>مدة التشغيل</span><b>'+Math.floor(Number(runtime.uptime_seconds||0)/60).toLocaleString("ar-IQ")+' دقيقة</b></div>'+
+      '<div><span>الذاكرة</span><b>'+Number(runtime.memory_mb?.rss||0).toLocaleString("ar-IQ")+' MB</b></div>'+
+      '<div><span>آخر فحص</span><b>'+new Date(d.checked_at||Date.now()).toLocaleTimeString("ar-IQ")+'</b></div>';
+    const q=d.queues||{};
+    const queueItems=[
+      ["رفع بالانتظار",q.uploads_queued],["رفع نشط",q.uploads_active],["رفع فاشل",q.uploads_failed],
+      ["تنظيف وسائط",q.cleanup_pending],["تنظيف فاشل",q.cleanup_failed],["إشعارات داخل الطابور",q.notification_outbox],
+      ["إشعارات مجدولة",q.notifications_scheduled],["إشعارات فاشلة",q.notifications_failed],["أخطاء مفتوحة",q.errors_open],
+      ["قنوات تخزين متصلة",q.storage_connected]
+    ];
+    $("#healthQueues").innerHTML=queueItems.map(([label,value])=>
+      '<div class="'+(Number(value||0)>0&&/فاشل|أخطاء/.test(label)?"attention":"")+'"><span>'+label+'</span><b>'+Number(value||0).toLocaleString("ar-IQ")+'</b></div>'
+    ).join("");
+    if(currentAdminPage==="health"&&!healthLiveTimer){
+      healthLiveTimer=setInterval(()=>{
+        if(document.visibilityState==="visible"&&currentAdminPage==="health")loadHealth().catch(()=>{});
+      },10000);
+    }
+  }catch(e){$("#healthCards").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
+$("#refreshSystemHealth")?.addEventListener("click",()=>loadHealth());
 
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible")setConnectionState(navigator.onLine);

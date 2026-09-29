@@ -32,7 +32,7 @@
       <a id="downloadButton" class="primary disabled">تحميل للأندرويد</a>
       <a id="webButton" class="secondary disabled">استخدام عبر المتصفح</a>
     </div>
-    <div id="versionInfo" class="version"></div>
+    <div id="versionInfo" class="version"></div><div id="siteUpdateNote" class="site-update-note hidden"></div>
     <div class="trust-row">
       <span>حسابات عامة وخاصة</span>
       <span>رسائل ومجموعات</span>
@@ -72,7 +72,7 @@
 
 <section id="features" class="section">
   <div class="section-title"><span>المميزات</span><h2>كل ما تحتاجه للتواصل في مكان واحد</h2><p>واجهة بسيطة وسريعة، مع تحكم واضح بالخصوصية والمحتوى.</p></div>
-  <div class="features">
+  <div id="siteFeaturesGrid" class="features">
     <article><div class="feature-icon">01</div><b>المنشورات</b><p>شارك الصور والفيديو والنصوص مع التعليقات والإعجابات والحفظ والمشاركة.</p></article>
     <article><div class="feature-icon">02</div><b>الريلز</b><p>مشاهدة عمودية بملء الشاشة مع تفاعل سريع وانتقال سلس.</p></article>
     <article><div class="feature-icon">03</div><b>القصص</b><p>شارك لحظاتك لمدة ٢٤ ساعة وشاهد قصص من تتابعهم.</p></article>
@@ -152,7 +152,7 @@
 <footer>
   <a class="logo" href="#"><img src="./assets/logo.svg" alt=""><span>آشور</span></a>
   <span>منصة اجتماعية عربية حديثة</span>
-  <div><a href="#">سياسة الخصوصية</a><a href="#">شروط الاستخدام</a><a href="#faq">المساعدة</a></div>
+  <div><a id="sitePrivacyLink" href="#" class="disabled-link">سياسة الخصوصية</a><a id="siteTermsLink" href="#" class="disabled-link">شروط الاستخدام</a><a id="siteSupportLink" href="#faq">المساعدة</a></div>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"></script>

@@ -521,11 +521,13 @@ async function loadUserDetail(id){
       showToast("تم إلغاء "+Number(result.sessions_revoked||0)+" جلسة.",{type:"success"});
     };
     $("#viewUserContentButton").onclick=()=>{
-      navigate("content");
-      $("#contentAuthor").value=id;
+      currentContentKind="posts";
       contentTargetId="";
       contentPage=1;
-      loadContent("posts");
+      $("#contentSearch").value="";
+      $("#contentAuthor").value=id;
+      $$("[data-content-kind]").forEach(x=>x.classList.toggle("active",x.dataset.contentKind==="posts"));
+      navigate("content");
     };
     $("#unbanUserButton")?.addEventListener("click",async()=>{
       await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
@@ -774,14 +776,13 @@ async function loadCommentsAdmin(){
     }).join("")||'<div class="panel">لا توجد تعليقات.</div>';
     $("#commentsList").querySelectorAll("[data-comment-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.commentAuthor)});
     $("#commentsList").querySelectorAll("[data-comment-target]").forEach(b=>b.onclick=()=>{
-      navigate("content");
       currentContentKind=b.dataset.commentKind;
-      $$("[data-content-kind]").forEach(x=>x.classList.toggle("active",x.dataset.contentKind===currentContentKind));
-      $("#contentSearch").value="";
-      $("#contentAuthor").value="";
       contentTargetId=b.dataset.commentTarget;
       contentPage=1;
-      loadContent(currentContentKind);
+      $("#contentSearch").value="";
+      $("#contentAuthor").value="";
+      $$("[data-content-kind]").forEach(x=>x.classList.toggle("active",x.dataset.contentKind===currentContentKind));
+      navigate("content");
     });
     $("#commentsList").querySelectorAll("[data-moderate-comment]").forEach(b=>b.onclick=async()=>{
       const next=b.dataset.status==="hidden"?"active":"hidden";

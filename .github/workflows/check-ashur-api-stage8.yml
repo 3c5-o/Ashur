@@ -1,0 +1,22 @@
+name: فحص API آشور Stage 8
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/check-ashur-api-stage8.yml"
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: فحص رابط API الحالي
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 25 \
+            https://exciting-miracle-production-b2cf.up.railway.app/health \
+            -o /tmp/health.json
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json

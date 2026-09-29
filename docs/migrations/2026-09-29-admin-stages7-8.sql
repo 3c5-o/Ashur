@@ -8,6 +8,13 @@ alter table public.storage_channels
   add column if not exists last_error text not null default '',
   add column if not exists last_health_at timestamptz;
 
+alter table public.storage_channels
+  drop constraint if exists storage_channels_status_check;
+
+alter table public.storage_channels
+  add constraint storage_channels_status_check
+  check (status in ('connected','disabled','error','checking'));
+
 alter table public.upload_jobs
   add column if not exists mime_type text not null default '',
   add column if not exists sha256 text not null default '',
@@ -32,6 +39,16 @@ end $$;
 create index if not exists upload_jobs_retryable_idx
   on public.upload_jobs(retry_expires_at)
   where retry_available = true;
+
+create index if not exists upload_jobs_status_created_idx
+  on public.upload_jobs(status, created_at desc);
+
+create index if not exists upload_jobs_user_created_idx
+  on public.upload_jobs(user_id, created_at desc)
+  where user_id is not null;
+
+create index if not exists upload_jobs_kind_created_idx
+  on public.upload_jobs(kind, created_at desc);
 
 create or replace function private.refresh_storage_channel_counters()
 returns trigger
@@ -81,6 +98,10 @@ after insert or delete or update of channel_key,size_bytes,status
 on public.media_objects
 for each row
 execute function private.refresh_storage_channel_counters();
+
+revoke all on function private.refresh_storage_channel_counters() from public;
+revoke all on function private.refresh_storage_channel_counters() from anon;
+revoke all on function private.refresh_storage_channel_counters() from authenticated;
 
 update public.storage_channels sc
 set files_count = coalesce((

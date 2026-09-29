@@ -14,7 +14,34 @@
   });
 
   const $ = (s) => document.querySelector(s);
-  const $$ = (s) => [...document.querySelectorAll(s)];
+  const $ = (s) => [...document.querySelectorAll(s)];
+
+  const THEME_KEY="ashur_theme_v1";
+  function currentTheme(){
+    try{return localStorage.getItem(THEME_KEY)==="light"?"light":"dark"}catch{return "dark"}
+  }
+  function syncThemeControls(theme=currentTheme()){
+    $("[data-theme-choice]").forEach(button=>{
+      const active=button.dataset.themeChoice===theme;
+      button.classList.toggle("active",active);
+      button.setAttribute("aria-checked",active?"true":"false");
+    });
+  }
+  function applyTheme(theme,{persist=false}={}){
+    const next=theme==="light"?"light":"dark";
+    document.documentElement.dataset.theme=next;
+    document.documentElement.style.colorScheme=next;
+    const meta=document.querySelector('meta[name="theme-color"]');
+    if(meta)meta.setAttribute("content",next==="light"?"#f6f8f7":"#050706");
+    if(persist){
+      try{localStorage.setItem(THEME_KEY,next)}catch(_){}
+    }
+    syncThemeControls(next);
+    try{window.AshurNative?.setThemeMode?.(next)}catch(_){}
+    return next;
+  }
+  applyTheme(currentTheme());
+
   const store = window.AshurCore.createStore({
     user:null,
     profile:null,
@@ -2848,20 +2875,23 @@
         const canRole=isOwner&&member.role!=="owner"&&member.user_id!==state.user.id;
         const canRemove=canManage&&member.role!=="owner"&&member.user_id!==state.user.id&&(isOwner||member.role==="member");
         const manageTools=canManage
-          ?'<div class="group-member-manage">'+
-            '<label class="group-nickname-field"><span>الكنية</span><input data-member-nickname="'+escapeHtml(member.user_id)+'" maxlength="32" value="'+escapeHtml(member.nickname||"")+'" placeholder="بدون كنية"></label>'+
+          ?'<div class="group-member-menu hidden" data-member-menu-panel="'+escapeHtml(member.user_id)+'">'+
+            '<label class="group-nickname-field"><span>الكنية داخل المجموعة</span><input data-member-nickname="'+escapeHtml(member.user_id)+'" maxlength="32" value="'+escapeHtml(member.nickname||"")+'" placeholder="بدون كنية"></label>'+
             '<button class="member-tool save" data-save-member-nickname="'+escapeHtml(member.user_id)+'" type="button">حفظ الكنية</button>'+
             (canRole?'<button class="member-tool role" data-toggle-member-role="'+escapeHtml(member.user_id)+'" type="button">'+(member.role==="admin"?"إلغاء الإشراف":"تعيين مشرف")+'</button>':"")+
-            (canRemove?'<button class="member-tool danger" data-remove-member="'+escapeHtml(member.user_id)+'" type="button">إزالة</button>':"")+
+            (canRemove?'<button class="member-tool danger" data-remove-member="'+escapeHtml(member.user_id)+'" type="button">إزالة العضو</button>':"")+
           '</div>'
           :"";
         return '<article class="conversation-member-card" data-group-member-card data-member-search="'+escapeHtml(searchText)+'">'+
-          '<button class="conversation-member-row" data-info-profile="'+escapeHtml(member.user_id)+'" type="button">'+
-            avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||profile.username||"مستخدم")+
-            (profile.is_verified?'<span class="verified-inline">✓</span>':"")+'</b>'+
-            '<small>@'+escapeHtml(profile.username||"")+(member.nickname?' · '+escapeHtml(member.nickname):"")+'</small></span>'+
-            '<span class="group-role-badge '+escapeHtml(member.role||"member")+'">'+roleLabel+'</span>'+
-          '</button>'+manageTools+
+          '<div class="conversation-member-mainline">'+
+            '<button class="conversation-member-row" data-info-profile="'+escapeHtml(member.user_id)+'" type="button">'+
+              avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||profile.username||"مستخدم")+
+              (profile.is_verified?'<span class="verified-inline">✓</span>':"")+'</b>'+
+              '<small>@'+escapeHtml(profile.username||"")+(member.nickname?' · '+escapeHtml(member.nickname):"")+'</small></span>'+
+              '<span class="group-role-badge '+escapeHtml(member.role||"member")+'">'+roleLabel+'</span>'+
+            '</button>'+
+            (canManage?'<button class="group-member-more" data-member-menu="'+escapeHtml(member.user_id)+'" type="button" aria-label="خيارات العضو">•••</button>':"")+
+          '</div>'+manageTools+
         '</article>';
       }).join("");
 
@@ -3001,6 +3031,19 @@
           card.classList.toggle("hidden",Boolean(q)&&!String(card.dataset.memberSearch||"").includes(q));
         });
       };
+
+      body.querySelectorAll("[data-member-menu]").forEach(button=>button.onclick=event=>{
+        event.stopPropagation();
+        const userId=button.dataset.memberMenu;
+        const panel=body.querySelector('[data-member-menu-panel="'+CSS.escape(userId)+'"]');
+        const open=panel&&!panel.classList.contains("hidden");
+        body.querySelectorAll("[data-member-menu-panel]").forEach(item=>item.classList.add("hidden"));
+        body.querySelectorAll("[data-member-menu]").forEach(item=>item.classList.remove("active"));
+        if(panel&&!open){
+          panel.classList.remove("hidden");
+          button.classList.add("active");
+        }
+      });
 
       body.querySelectorAll("[data-save-member-nickname]").forEach(button=>button.onclick=async()=>{
         const userId=button.dataset.saveMemberNickname;
@@ -4683,6 +4726,8 @@
     $("#composerFileMeta").classList.add("hidden");
     $("#storyTextOverlay").innerHTML="";
     $("#storyTextOverlay").classList.add("hidden");
+    $("#storyEditorControls")?.classList.add("hidden");
+    $("#storyEditorDock")?.querySelectorAll("[data-story-tool]").forEach(button=>button.classList.remove("active"));
     $("#composerCameraFile").value="";
     $("#composerFile").value="";
     const upload=$("#uploadProgress");
@@ -4709,6 +4754,81 @@
   $("#storyOverlayColor").oninput=updateStoryOverlayPreview;
   $("#storyOverlayY").oninput=updateStoryOverlayPreview;
   $("#storyOverlayBg").onchange=updateStoryOverlayPreview;
+
+  function setStoryToolPanel(tool){
+    const panel=$("#storyEditorControls");
+    if(!panel)return;
+    const title=$("#storyToolPanelTitle");
+    const label=tool==="style"?"اللون والخلفية":tool==="position"?"موضع النص":"النص";
+    if(title)title.textContent=label;
+    panel.classList.remove("hidden");
+    $("#storyEditorDock [data-story-tool]").forEach(button=>button.classList.toggle("active",button.dataset.storyTool===tool));
+    if(tool==="text")setTimeout(()=>$("#storyOverlayInput")?.focus(),60);
+    if(tool==="style")setTimeout(()=>$("#storyOverlayColor")?.focus(),60);
+    if(tool==="position")setTimeout(()=>$("#storyOverlayY")?.focus(),60);
+  }
+
+  function updateStoryEffectLabel(){
+    const label=$("#storyEffectLabel");
+    if(!label)return;
+    const filter=state.mediaEdit?.filter||"none";
+    label.textContent="التأثير الحالي: "+(filter==="vivid"?"حيوي":filter==="warm"?"دافئ":filter==="mono"?"أبيض وأسود":"بدون فلتر");
+  }
+
+  $("#closeStoryToolPanel")?.addEventListener("click",()=>{
+    $("#storyEditorControls")?.classList.add("hidden");
+    $("#storyEditorDock [data-story-tool]").forEach(button=>button.classList.remove("active"));
+  });
+
+  $("#storyEditorDock [data-story-tool]").forEach(button=>button.onclick=()=>{
+    const tool=button.dataset.storyTool;
+    if(tool==="text"||tool==="style"||tool==="position"){
+      setStoryToolPanel(tool);
+      return;
+    }
+    if(tool==="mention"){
+      setStoryToolPanel("text");
+      const input=$("#storyOverlayInput");
+      if(input){
+        const base=input.value||"";
+        input.value=base+(base&&!/\s$/.test(base)?" ":"")+"@";
+        updateStoryOverlayPreview();
+        input.focus();
+        try{input.setSelectionRange(input.value.length,input.value.length)}catch(_){}
+      }
+      scheduleComposerDraftSave();
+      return;
+    }
+    if(tool==="effect"){
+      const file=(state.composerFiles||[])[0];
+      if(!file?.type?.startsWith("image/")){
+        $("#composerMessage").textContent="تأثيرات هذه النسخة متاحة للصور داخل القصة.";
+        return;
+      }
+      const filters=["none","vivid","warm","mono"];
+      const edit=state.mediaEdit||(state.mediaEdit={rotation:0,scale:1,filter:"none"});
+      const index=filters.indexOf(edit.filter||"none");
+      edit.filter=filters[(index+1)%filters.length];
+      if($("#mediaEditFilter"))$("#mediaEditFilter").value=edit.filter;
+      applyMediaEditPreview();
+      updateStoryEffectLabel();
+      button.classList.toggle("active",edit.filter!=="none");
+      scheduleComposerDraftSave();
+      return;
+    }
+    if(tool==="reset"){
+      $("#storyOverlayInput").value="";
+      $("#storyOverlayColor").value="#ffffff";
+      $("#storyOverlayY").value="50";
+      $("#storyOverlayBg").checked=true;
+      updateStoryOverlayPreview();
+      resetMediaEdit();
+      updateStoryEffectLabel();
+      $("#storyEditorControls")?.classList.add("hidden");
+      $("#storyEditorDock [data-story-tool]").forEach(item=>item.classList.remove("active"));
+      scheduleComposerDraftSave();
+    }
+  });
 
   function mediaFilterCss(filter){
     return filter==="vivid"?"saturate(1.35) contrast(1.08)":filter==="warm"?"sepia(.16) saturate(1.22) brightness(1.04)":filter==="mono"?"grayscale(1) contrast(1.08)":"none";
@@ -4742,6 +4862,7 @@
     const edit=state.mediaEdit||(state.mediaEdit={rotation:0,scale:1,filter:"none"});
     edit.filter=e.currentTarget.value||"none";
     applyMediaEditPreview();
+    updateStoryEffectLabel();
   });
 
   async function editedImageFile(file){
@@ -5207,8 +5328,10 @@
     if(privateAccount)$("#composerVisibility").value="followers";
     $("#composerExploreRow").classList.toggle("hidden",current!=="reel");
     $("#composerOptions").classList.toggle("hidden",current==="story");
-    $("#storyEditorControls").classList.toggle("hidden",current!=="story");
-    $$("#cameraStudioDialog [data-camera-publish]").forEach(button=>{
+    $("#composerDialog").classList.toggle("story-mode",current==="story");
+    $("#storyEditorDock")?.classList.toggle("hidden",current!=="story");
+    $("#storyEditorControls")?.classList.add("hidden");
+    $("#cameraStudioDialog [data-camera-publish]").forEach(button=>{
       button.classList.toggle("active",button.dataset.cameraPublish===current);
       button.setAttribute("aria-selected",button.dataset.cameraPublish===current?"true":"false");
     });
@@ -5957,6 +6080,7 @@
 
   async function openSettings(){
     openDialog($("#settingsDialog"));
+    syncThemeControls(currentTheme());
     try{
       const {data,error}=await client.from("notification_preferences")
         .select("*").eq("user_id",state.user.id).maybeSingle();
@@ -5978,6 +6102,9 @@
     }
   }
   $("#closeSettings").onclick=()=>$("#settingsDialog").close();
+  $("[data-theme-choice]").forEach(button=>button.onclick=()=>{
+    applyTheme(button.dataset.themeChoice,{persist:true});
+  });
   $("#settingsLogoutButton").onclick=async()=>{
     const button=$("#settingsLogoutButton");
     button.disabled=true;

@@ -3089,8 +3089,17 @@ async function reportAction(req, res, reportId) {
   if (body.assigned_to !== undefined) {
     if (body.assigned_to === "me") assignedTo = actor.user.id;
     else if (!body.assigned_to) assignedTo = null;
-    else if (/^[0-9a-f-]{36}$/i.test(String(body.assigned_to))) assignedTo = String(body.assigned_to);
-    else return json(res, 400, { error: "معرف المشرف غير صالح" });
+    else if (/^[0-9a-f-]{36}$/i.test(String(body.assigned_to))) {
+      const candidate = String(body.assigned_to);
+      const adminRows = await select(
+        "admins",
+        "select=user_id,active&user_id=eq." + encodeURIComponent(candidate) + "&active=eq.true&limit=1",
+      ).catch(() => []);
+      if (!adminRows?.[0] && candidate !== String(config.ownerUserId || "")) {
+        return json(res, 400, { error: "المشرف المحدد غير نشط" });
+      }
+      assignedTo = candidate;
+    } else return json(res, 400, { error: "معرف المشرف غير صالح" });
   } else if (["review","hide_content","delete_content","warn_user","ban_user","restore_content"].includes(action) && !assignedTo) {
     assignedTo = actor.user.id;
   }
@@ -3394,6 +3403,25 @@ async function replySupport(req, res, ticketId) {
       userIds: [ticket.user_id],
       title,
       body: reply.slice(0, 200),
+      data: { kind: "support", ticket_id: ticketId },
+    }).catch(() => {});
+  } else if (nextStatus !== ticket.status) {
+    const statusLabel = ({ open: "جديد", in_progress: "قيد المتابعة", answered: "تم الرد", closed: "مغلق" })[nextStatus] || nextStatus;
+    const title = "تحديث على طلب الدعم";
+    const message = "تم تحديث حالة طلب الدعم إلى: " + statusLabel;
+    await insert("notifications", {
+      user_id: ticket.user_id,
+      actor_id: actor.user.id,
+      kind: "support",
+      title,
+      body: message,
+      entity_type: "support_ticket",
+      entity_id: ticketId,
+    }, { returning: false }).catch(() => {});
+    await sendPush({
+      userIds: [ticket.user_id],
+      title,
+      body: message,
       data: { kind: "support", ticket_id: ticketId },
     }).catch(() => {});
   }

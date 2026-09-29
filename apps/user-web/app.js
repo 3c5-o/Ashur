@@ -5114,12 +5114,12 @@
     closeCameraStudio({returnToComposer:true});
   });
 
-  $("#cameraStudioDialog [data-camera-mode]").forEach(button=>button.onclick=()=>{
+  $$("#cameraStudioDialog [data-camera-mode]").forEach(button=>button.onclick=()=>{
     if(state.cameraRecorder?.state==="recording")return;
     setCameraMode(button.dataset.cameraMode);
   });
 
-  $("#cameraStudioDialog [data-camera-publish]").forEach(button=>button.onclick=()=>{
+  $$("#cameraStudioDialog [data-camera-publish]").forEach(button=>button.onclick=()=>{
     switchQuickPublishType(button.dataset.cameraPublish).catch(showCameraError);
   });
 

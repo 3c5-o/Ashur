@@ -211,6 +211,8 @@ function adminHasPermission(admin, permission) {
   if (!admin || !admin.active) return false;
   if (!permission) return true;
   if (admin.role === "owner" || admin.role === "secondary_admin") return true;
+  if (permission === "admins") return false;
+  if (permission === "analytics") return true;
   if (admin.permissions?.[permission] === true) return true;
   if (admin.permissions?.[permission] === false) return false;
   return ADMIN_ROLE_PERMISSIONS[admin.role]?.has(permission) || false;
@@ -3411,7 +3413,7 @@ async function adminUploads(req, res, url) {
 
 async function adminCancelUpload(req, res, jobId) {
   const actor = await requireAdmin(req, "storage");
-  const rows = await select("upload_jobs", "select=id,status& id=eq." + encodeURIComponent(jobId) + "&limit=1").catch(() => []);
+  const rows = await select("upload_jobs", "select=id,status&id=eq." + encodeURIComponent(jobId) + "&limit=1").catch(() => []);
   const job = rows?.[0];
   if (!job) return json(res, 404, { error: "عملية الرفع غير موجودة" });
   if (["completed","failed","cancelled"].includes(job.status)) {

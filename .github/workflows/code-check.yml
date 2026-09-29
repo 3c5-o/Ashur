@@ -141,6 +141,9 @@ jobs:
           const fs=require('fs');
           const app=fs.readFileSync('apps/admin-web/app.js','utf8');
           const index=fs.readFileSync('apps/admin-web/index.html','utf8');
+          const adminStyle=fs.readFileSync('apps/admin-web/style.css','utf8');
+          const userApp=fs.readFileSync('apps/user-web/app.js','utf8');
+          const userStyle=fs.readFileSync('apps/user-web/style.css','utf8');
           const server=fs.readFileSync('services/api/src/server.mjs','utf8');
           const telegram=fs.readFileSync('services/api/src/telegram.mjs','utf8');
           const failures={
@@ -153,10 +156,21 @@ jobs:
             missingCommentPagination:!index.includes('id="commentsPager"')||!app.includes('commentsPage=1'),
             missingCleanupQueue:!server.includes('media_cleanup_jobs')||!server.includes('processMediaCleanupJobs'),
             missingTelegramDelete:!telegram.includes('deleteChannelMessage')||!server.includes('purgeMediaObject'),
-            missingSessionRevoke:!server.includes('admin_revoke_user_sessions')
+            missingSessionRevoke:!server.includes('admin_revoke_user_sessions'),
+            missingStage5ReportsLayout:!index.includes('id="reportDetail"')||!index.includes('id="reportsPager"')||!index.includes('id="reportPriority"'),
+            missingStage5ReportsApi:!server.includes('async function adminReportDetail')||!server.includes('report_events')||!server.includes('reportTargetSnapshot')||!server.includes('deleteReportedTarget'),
+            missingStage5ReportsActions:!app.includes('openReportDetail')||!app.includes('data-report-ban-hours')||!app.includes('reportDeleteTarget')||!app.includes('reportToggleHidden'),
+            missingStage5ReportsStyle:!adminStyle.includes('Ashur Admin stages 5-6')||!adminStyle.includes('.report-target-gallery')||!adminStyle.includes('.stage56-timeline'),
+            missingStage6SupportLayout:!index.includes('id="supportDetail"')||!index.includes('id="supportPager"')||!index.includes('id="supportUnread"'),
+            missingStage6SupportApi:!server.includes('async function socialSupportDetail')||!server.includes('async function socialSupportReply')||!server.includes('async function adminSupportDetail')||!server.includes('support_messages')||!server.includes('support_events'),
+            missingStage6SupportAdminUi:!app.includes('openSupportDetail')||!app.includes('support-thread-message')||!app.includes('supportSendReply'),
+            missingStage6SupportUserUi:!userApp.includes('openSupportCenter(initialTicketId')||!userApp.includes('user-support-thread')||!userApp.includes('/v1/social/support/"+encodeURIComponent(ticketId)'),
+            missingStage6SupportStyle:!userStyle.includes('Ashur threaded support stage 6')||!userStyle.includes('.user-support-message'),
+            missingAdminA6Revision:!server.includes('admin_revision: "A6"'),
+            missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };
           if(Object.values(failures).some(Boolean)){
-            console.error('Admin stage 3/4 guard failed',failures);
+            console.error('Admin stage 3-6 guard failed',failures);
             process.exit(1);
           }
           NODE

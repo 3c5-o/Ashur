@@ -77,6 +77,24 @@ async function adminConfirm(title,text="",options={}){
 async function adminPrompt(title,{text="",label="القيمة",defaultValue="",placeholder="",acceptLabel="حفظ"}={}){
   return openAdminDialog({title,text,acceptLabel,input:true,inputLabel:label,defaultValue,placeholder});
 }
+async function adminSensitiveConfirm(title,text="",options={}){
+  const phrase=String(options.phrase||"CONFIRM");
+  const typed=await adminPrompt(title,{
+    text:(text?text+" ":"")+"اكتب "+phrase+" للمتابعة.",
+    label:"كلمة التأكيد",
+    placeholder:phrase,
+    acceptLabel:"متابعة"
+  });
+  if(typed===null)return false;
+  if(String(typed).trim()!==phrase){
+    showToast("كلمة التأكيد غير صحيحة.",{type:"error"});
+    return false;
+  }
+  return adminConfirm("التأكيد الأخير","هذا إجراء حساس وسيتم تسجيله في سجل الإدارة.",{
+    acceptLabel:options.acceptLabel||"تأكيد",
+    danger:options.danger!==false
+  });
+}
 
 $("#adminActionForm")?.addEventListener("submit",event=>{
   event.preventDefault();
@@ -212,7 +230,14 @@ const actionLabel={
   reschedule_notification:"إعادة جدولة إشعار",
   publish_release:"نشر إصدار",
   update_app_settings:"تعديل إعدادات التطبيق",
-  restore_app_settings:"استعادة إعدادات التطبيق"
+  restore_app_settings:"استعادة إعدادات التطبيق",
+  update_site_settings:"تعديل الموقع الرسمي",
+  delete_user_permanently:"حذف حساب نهائي",
+  force_logout:"إنهاء جلسات مستخدم",
+  deactivate_user:"تعطيل حساب",
+  reactivate_user:"إعادة تفعيل حساب",
+  delete_report_target:"حذف هدف بلاغ",
+  update_support:"تحديث تذكرة دعم"
 };
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
@@ -819,7 +844,7 @@ async function loadContent(kind=currentContentKind,authorId=""){
     });
     $("#contentList").querySelectorAll("[data-delete-content]").forEach(b=>b.onclick=async()=>{
       const mediaCount=Number(b.dataset.mediaCount||0);
-      if(!await adminConfirm("حذف المحتوى نهائيًا؟","سيتم حذف السجل و"+mediaCount+" ملف/ملفات مرتبطة غير مستخدمة من التخزين. أي فشل في Telegram يدخل طابور إعادة المحاولة.",{acceptLabel:"حذف نهائي",danger:true}))return;
+      if(!await adminSensitiveConfirm("حذف المحتوى نهائيًا؟","سيتم حذف السجل و"+mediaCount+" ملف/ملفات مرتبطة غير مستخدمة من التخزين. أي فشل في Telegram يدخل طابور إعادة المحاولة.",{phrase:"DELETE",acceptLabel:"حذف نهائي"}))return;
       const result=await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.deleteContent,{method:"DELETE"});
       const pending=(result.cleanup||[]).filter(item=>item.status==="cleanup_pending").length;
       showToast(pending?"حُذف المحتوى و"+pending+" ملف دخل طابور التنظيف.":"تم حذف المحتوى وتنظيف وسائطه.",{type:"success",duration:4500});
@@ -2156,18 +2181,82 @@ $("#releaseForm").onsubmit=async e=>{
   }catch(error){$("#releaseMessage").textContent=error.message}
 };
 
+let auditPage=1;
+let auditPages=1;
+let auditTimer=null;
+
+function resetAuditPage(){auditPage=1}
+function auditDetailsMarkup(details){
+  const value=details&&typeof details==="object"?details:{};
+  const keys=Object.keys(value);
+  if(!keys.length)return "";
+  return '<details class="stage14-details"><summary>التفاصيل</summary><pre>'+esc(JSON.stringify(value,null,2))+'</pre></details>';
+}
+function auditSensitive(action){
+  return /delete|remove|ban|deactivate|force_logout|publish_release|restore_app_settings|disable_storage/i.test(String(action||""));
+}
 async function loadAudit(){
   try{
-    const d=await api("/v1/admin/audit");
-    $("#auditList").innerHTML=(d.items||[]).map(row=>`
-      <div class="row-card">
-        <div class="grow">
-          <b>${actionLabel[row.action]||esc(row.action)}</b>
-          <div class="meta">${row.target_type?esc(row.target_type)+" · ":""}${row.target_id?esc(row.target_id)+" · ":""}${new Date(row.created_at).toLocaleString("ar-IQ")}</div>
-        </div>
-      </div>`).join("")||'<div class="panel">السجل فارغ.</div>'
-  }catch(e){$("#auditList").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
+    const params=new URLSearchParams({page:String(auditPage),limit:"40"});
+    const values={
+      q:$("#auditSearch")?.value.trim(),
+      actor:$("#auditActor")?.value.trim(),
+      role:$("#auditRole")?.value,
+      action:$("#auditAction")?.value.trim(),
+      target_type:$("#auditTargetType")?.value.trim(),
+      from:$("#auditFrom")?.value,
+      to:$("#auditTo")?.value
+    };
+    for(const [key,value] of Object.entries(values))if(value)params.set(key,value);
+    const d=await api("/v1/admin/audit?"+params.toString());
+    const p=d.pagination||{};
+    auditPages=Math.max(1,Number(p.pages||1));
+    if(auditPage>auditPages){auditPage=auditPages;return loadAudit()}
+    const summary=d.summary||{};
+    $("#auditSummary").innerHTML=[
+      ["كل العمليات",summary.total||0],
+      ["آخر 24 ساعة",summary.last_24h||0],
+      ["عمليات حساسة",summary.destructive||0],
+      ["حماية السجل",summary.append_only?"غير قابل للحذف":"—"]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+esc(value)+'</b></div>').join("");
+
+    $("#auditList").innerHTML=(d.items||[]).map(row=>{
+      const actor=row.actor_name||row.actor_username||row.actor_telegram_id||"النظام";
+      const username=row.actor_username?"@"+row.actor_username:"";
+      const role=row.actor_role?roleLabel[row.actor_role]||row.actor_role:(row.actor_telegram_id?"بوت Telegram":"النظام");
+      const sensitive=auditSensitive(row.action);
+      return '<article class="stage14-audit-card '+(sensitive?"sensitive":"")+'">'+
+        '<div class="stage14-audit-head"><div class="grow"><b>'+esc(actionLabel[row.action]||row.action)+'</b>'+
+          '<div class="meta">'+esc(actor)+(username?' · '+esc(username):'')+' · '+esc(role)+'</div></div>'+
+          '<span class="pill '+(sensitive?"bad":"ok")+'">'+(sensitive?"حساس":"مسجل")+'</span></div>'+
+        '<div class="stage14-audit-meta">'+
+          '<span>الوقت <b>'+new Date(row.created_at).toLocaleString("ar-IQ")+'</b></span>'+
+          '<span>الهدف <b>'+esc(row.target_type||"—")+'</b></span>'+
+          '<span class="mono">'+esc(row.target_id||"—")+'</span>'+
+        '</div>'+
+        auditDetailsMarkup(row.details)+
+      '</article>';
+    }).join("")||'<div class="panel">لا توجد عمليات مطابقة.</div>';
+
+    $("#auditPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||40));
+    $("#auditPageLabel").textContent=auditPage+" / "+auditPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#auditPrevPage").disabled=auditPage<=1;
+    $("#auditNextPage").disabled=auditPage>=auditPages;
+  }catch(e){$("#auditList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
+["auditSearch","auditActor","auditAction","auditTargetType"].forEach(id=>{
+  $("#"+id)?.addEventListener("input",()=>{
+    clearTimeout(auditTimer);
+    auditTimer=setTimeout(()=>{resetAuditPage();loadAudit()},280);
+  });
+});
+["auditRole","auditFrom","auditTo"].forEach(id=>$("#"+id)?.addEventListener("change",()=>{resetAuditPage();loadAudit()}));
+$("#resetAuditFilters")?.addEventListener("click",()=>{
+  ["auditSearch","auditActor","auditRole","auditAction","auditTargetType","auditFrom","auditTo"].forEach(id=>{const el=$("#"+id);if(el)el.value=""});
+  resetAuditPage();loadAudit();
+});
+$("#auditPrevPage")?.addEventListener("click",()=>{if(auditPage>1){auditPage--;loadAudit()}});
+$("#auditNextPage")?.addEventListener("click",()=>{if(auditPage<auditPages){auditPage++;loadAudit()}});
 
 function toLocalDateTimeValue(value){
   if(!value)return "";
@@ -2311,6 +2400,21 @@ $("#appSettingsForm").onsubmit=async e=>{
   }catch(error){$("#appSettingsMessage").textContent=error.message}
 };
 
+const defaultSiteFeatures=[
+  ["المنشورات","شارك الصور والفيديو والنصوص مع التفاعل والحفظ والمشاركة."],
+  ["الريلز","فيديو عمودي سريع مع التفاعل والمشاهدة السلسة."],
+  ["القصص","شارك لحظاتك لمدة 24 ساعة."],
+  ["الرسائل","محادثات خاصة ومجموعات وتنبيهات فورية."],
+  ["الخصوصية","حساب عام أو خاص وتحكم بطلبات المتابعة."],
+  ["هوية آشور","واجهة عربية موحدة بتصميم آشور."]
+];
+function collectSiteFeatures(){
+  return Array.from({length:6},(_,i)=>({
+    title:$("#siteFeatureTitle"+i).value.trim(),
+    description:$("#siteFeatureDescription"+i).value.trim(),
+    enabled:$("#siteFeatureEnabled"+i).checked
+  })).filter(item=>item.title);
+}
 async function loadSiteSettings(){
   try{
     const d=await api("/v1/admin/settings/site");
@@ -2319,22 +2423,63 @@ async function loadSiteSettings(){
     $("#siteAndroidUrl").value=d.download?.android_url||"";
     $("#siteWebUrl").value=d.download?.web_url||"";
     $("#siteVersion").value=d.download?.version||"";
-    $("#siteSize").value=d.download?.size||""
-  }catch(e){}
+    $("#siteSize").value=d.download?.size||"";
+    $("#siteSha256").value=d.download?.sha256||"";
+    $("#siteUpdateLabel").value=d.update?.label||"آخر تحديث";
+    $("#siteUpdateText").value=d.update?.text||"";
+    $("#siteSupportLabel").value=d.support?.label||"الدعم والمساعدة";
+    $("#siteSupportUrl").value=d.support?.url||"";
+    $("#siteSupportEmail").value=d.support?.email||"";
+    $("#sitePrivacyUrl").value=d.legal?.privacy_url||"";
+    $("#siteTermsUrl").value=d.legal?.terms_url||"";
+
+    const features=Array.isArray(d.features?.items)&&d.features.items.length?d.features.items:defaultSiteFeatures.map(([title,description])=>({title,description,enabled:true}));
+    for(let i=0;i<6;i++){
+      const item=features[i]||{title:"",description:"",enabled:false};
+      $("#siteFeatureTitle"+i).value=item.title||"";
+      $("#siteFeatureDescription"+i).value=item.description||"";
+      $("#siteFeatureEnabled"+i).checked=item.enabled!==false&&Boolean(item.title);
+    }
+    const active=features.filter(item=>item.enabled!==false&&item.title).length;
+    const latest=Object.values(d._meta||{}).map(v=>v?.updated_at).filter(Boolean).sort().at(-1);
+    $("#siteSettingsSummary").innerHTML=[
+      ["الإصدار",d.download?.version||"—"],
+      ["مميزات ظاهرة",active],
+      ["الدعم",d.support?.url||d.support?.email?"مربوط":"غير محدد"],
+      ["آخر حفظ",latest?new Date(latest).toLocaleString("ar-IQ"):"—"]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+esc(value)+'</b></div>').join("");
+    $("#siteSettingsMessage").textContent="";
+  }catch(e){$("#siteSettingsMessage").textContent=e.message}
 }
 $("#siteSettingsForm").onsubmit=async e=>{
   e.preventDefault();
-  await api("/v1/admin/settings/site",{method:"PUT",body:JSON.stringify({
-    hero:{title:$("#siteTitle").value,subtitle:$("#siteSubtitle").value},
-    download:{
-      android_url:$("#siteAndroidUrl").value,
-      web_url:$("#siteWebUrl").value,
-      version:$("#siteVersion").value,
-      size:$("#siteSize").value,
-      updated_at:new Date().toISOString()
-    }
-  })});
-  showToast("تم تحديث الموقع",{type:"success"})
+  $("#siteSettingsMessage").textContent="جارٍ حفظ إعدادات الموقع...";
+  try{
+    await api("/v1/admin/settings/site",{method:"PUT",body:JSON.stringify({
+      hero:{title:$("#siteTitle").value.trim(),subtitle:$("#siteSubtitle").value.trim()},
+      download:{
+        android_url:$("#siteAndroidUrl").value.trim(),
+        web_url:$("#siteWebUrl").value.trim(),
+        version:$("#siteVersion").value.trim(),
+        size:$("#siteSize").value.trim(),
+        sha256:$("#siteSha256").value.trim()
+      },
+      features:{items:collectSiteFeatures()},
+      update:{label:$("#siteUpdateLabel").value.trim(),text:$("#siteUpdateText").value.trim()},
+      support:{
+        label:$("#siteSupportLabel").value.trim(),
+        url:$("#siteSupportUrl").value.trim(),
+        email:$("#siteSupportEmail").value.trim()
+      },
+      legal:{
+        privacy_url:$("#sitePrivacyUrl").value.trim(),
+        terms_url:$("#siteTermsUrl").value.trim()
+      }
+    })});
+    $("#siteSettingsMessage").textContent="تم حفظ الموقع وتسجيل العملية في سجل الإدارة.";
+    showToast("تم تحديث الموقع الرسمي.",{type:"success"});
+    await loadSiteSettings();
+  }catch(error){$("#siteSettingsMessage").textContent=error.message}
 };
 
 async function loadHealth(){

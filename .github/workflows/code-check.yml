@@ -144,6 +144,7 @@ jobs:
           const adminStyle=fs.readFileSync('apps/admin-web/style.css','utf8');
           const userApp=fs.readFileSync('apps/user-web/app.js','utf8');
           const userStyle=fs.readFileSync('apps/user-web/style.css','utf8');
+          const stage78Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages7-8.sql','utf8');
           const server=fs.readFileSync('services/api/src/server.mjs','utf8');
           const telegram=fs.readFileSync('services/api/src/telegram.mjs','utf8');
           const failures={
@@ -169,9 +170,15 @@ jobs:
             missingStage7AdminSearch:!index.includes('id="adminCandidateSearch"')||!app.includes('/v1/admin/admin-candidates')||!server.includes('async function adminCandidates'),
             missingStage7Permissions:!app.includes('effective_permissions')||!app.includes('collectPermissionOverrides')||!server.includes('sanitizeAdminPermissions')||!server.includes('effectiveAdminPermissions'),
             missingStage7SectionGuard:!app.includes('pagePermission')||!app.includes('permission-hidden')||!app.includes('adminCanPage'),
+            missingStage7Style:!adminStyle.includes('.stage7-admin-card')||!adminStyle.includes('.stage7-permission-row')||!adminStyle.includes('.stage7-candidate'),
+            missingStage7TempBanProtection:!server.includes('temporarilyBanned')||!server.includes('is_banned,banned_until,deleted_at'),
             missingStage8StorageHealth:!index.includes('id="storageSummary"')||!app.includes('testAllChannels')||!server.includes('async function adminTestAllChannels')||!server.includes('files_count,bytes_total'),
+            missingStage8StorageState:!server.includes('async function testStorageChannel(channel, force = false)')||!server.includes('status: "disabled"')||!server.includes('status: "checking"'),
+            missingStage8Style:!adminStyle.includes('.stage8-summary')||!adminStyle.includes('.stage8-channel-card')||!adminStyle.includes('.stage8-upload-card'),
             missingStage8UploadLive:!index.includes('id="uploadsPager"')||!app.includes('uploadsLiveTimer')||!app.includes('data-retry-upload')||!server.includes('async function adminRetryUpload'),
             missingStage8RetryCache:!server.includes('retryUploadCachePath')||!server.includes('retry_available')||!server.includes('failure_stage'),
+            missingStage8TelegramCleanup:!server.includes('deleteChannelMessage({ channelId: channel.channel_id, messageId: telegramUpload.messageId })')||!server.includes('deleteChannelMessage({ channelId: channel.channel_id, messageId: uploaded.messageId })'),
+            missingStage8Migration:!stage78Migration.includes("'checking'")||!stage78Migration.includes('refresh_storage_channel_counters')||!stage78Migration.includes('revoke all on function private.refresh_storage_channel_counters() from public'),
             missingAdminA8Revision:!server.includes('admin_revision: "A8"'),
             missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };

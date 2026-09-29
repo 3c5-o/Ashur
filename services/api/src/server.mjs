@@ -575,16 +575,6 @@ async function writeAudit(actorUserId, action, targetType = null, targetId = nul
     target_id: targetId == null ? null : String(targetId),
     details: details || {},
   }, { returning: false }).catch(() => {});
-}) {
-  return insert("audit_logs", {
-    actor_user_id: actorUserId || null,
-    action,
-    target_type: targetType,
-    target_id: targetId == null ? null : String(targetId),
-    details: details || {},
-  }, { returning: false }).catch(() => {});
-}
-
 async function logSystemError(service, error, context = {}, userId = null) {
   const serviceName = String(service || "api").slice(0, 80);
   const code = String(error?.code || error?.statusCode || "").slice(0, 80);

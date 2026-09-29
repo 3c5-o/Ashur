@@ -3352,7 +3352,11 @@ async function warnReportedUser(actor, userId, reason) {
 
 async function banReportedUser(actor, userId, reason, hours) {
   if (!userId) return false;
-  if (userId === actor.user.id || (config.ownerUserId && userId === config.ownerUserId)) {
+  const ownerRows = await select(
+    "admins",
+    "select=user_id&user_id=eq." + encodeURIComponent(userId) + "&role=eq.owner&active=eq.true&limit=1",
+  ).catch(() => []);
+  if (userId === actor.user.id || ownerRows?.length) {
     const error = new Error("لا يمكن حظر حساب الإدارة الحالي أو حساب المالك من مركز البلاغات");
     error.statusCode = 400;
     throw error;
@@ -3400,7 +3404,7 @@ async function reportAction(req, res, reportId) {
         "admins",
         "select=user_id,active&user_id=eq." + encodeURIComponent(candidate) + "&active=eq.true&limit=1",
       ).catch(() => []);
-      if (!adminRows?.[0] && candidate !== String(config.ownerUserId || "")) {
+      if (!adminRows?.[0]) {
         return json(res, 400, { error: "المشرف المحدد غير نشط" });
       }
       assignedTo = candidate;
@@ -3492,7 +3496,6 @@ async function adminCandidates(req, res, url) {
     select("admins", "select=user_id&limit=1000").catch(() => []),
   ]);
   const excluded = new Set((adminRows || []).map(x => x.user_id));
-  if (config.ownerUserId) excluded.add(config.ownerUserId);
 
   const items = (profiles || []).filter(profile =>
     profile &&
@@ -3971,7 +3974,7 @@ async function replySupport(req, res, ticketId) {
         "admins",
         "select=user_id,active&user_id=eq." + encodeURIComponent(body.assigned_to) + "&active=eq.true&limit=1",
       ).catch(() => []);
-      if (!adminRows?.[0] && String(body.assigned_to) !== String(config.ownerUserId || "")) {
+      if (!adminRows?.[0]) {
         return json(res, 400, { error: "المشرف المحدد غير نشط" });
       }
       nextAssigned = String(body.assigned_to);

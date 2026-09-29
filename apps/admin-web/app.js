@@ -5,7 +5,7 @@ const $=s=>{
   const selector=String(s||"").trim();
   return selector?document.querySelector(selector):null;
 };
-const $=s=>{
+const $$=s=>{
   const selector=String(s||"").trim();
   return selector?[...document.querySelectorAll(selector)]:[];
 };

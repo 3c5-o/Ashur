@@ -336,24 +336,43 @@ async function verify(){
   try{
     const me=await api("/v1/admin/me");
     applyAdminAccess(me);
+    $("#loginMessage").textContent="";
     showApp(true);
     const start=adminCanPage("dashboard")?"dashboard":Object.keys(titles).find(adminCanPage)||"dashboard";
     navigate(start,{history:false,loading:true});
+    return true;
   }catch(e){
     showApp(false);
-    if((await sb.auth.getSession()).data.session)$("#loginMessage").textContent=e.message==="تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا."?e.message:"هذا الحساب لا يملك صلاحية الإدارة.";
+    const session=(await sb.auth.getSession()).data.session;
+    if(session){
+      if(e.message==="تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا."){
+        $("#loginMessage").textContent=e.message;
+      }else{
+        $("#loginMessage").textContent="تم تسجيل الحساب، لكن لا يملك صلاحية الإدارة أو أن ربط المالك غير صحيح.";
+      }
+    }
+    return false;
   }
 }
 
 $("#loginForm").onsubmit=async e=>{
   e.preventDefault();
   const button=$("#loginSubmitButton");
+  const email=$("#email").value.trim();
+  const password=$("#password").value;
   button.disabled=true;
   $("#loginMessage").textContent="جارٍ التحقق من الحساب...";
   try{
-    const {error}=await sb.auth.signInWithPassword({email:$("#email").value.trim(),password:$("#password").value});
-    if(error)throw error;
-    await verify();
+    const {data,error}=await sb.auth.signInWithPassword({email,password});
+    if(error){
+      if(error.code==="invalid_credentials"||/Invalid login credentials/i.test(error.message||"")){
+        throw new Error("البريد الإلكتروني أو كلمة المرور غير صحيحة.");
+      }
+      throw error;
+    }
+    if(!data?.session)throw new Error("تم قبول الحساب لكن لم تُنشأ جلسة دخول. حاول مجددًا.");
+    const ok=await verify();
+    if(!ok)await sb.auth.signOut().catch(()=>{});
   }catch(error){
     $("#loginMessage").textContent=error.message||"تعذر تسجيل الدخول.";
   }finally{button.disabled=false}
@@ -2517,5 +2536,9 @@ $("#refreshSystemHealth")?.addEventListener("click",()=>loadHealth());
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible")setConnectionState(navigator.onLine);
 });
-verify();
+(async()=>{
+  const session=(await sb.auth.getSession()).data.session;
+  if(session)await verify();
+  else showApp(false);
+})();
 })();

@@ -125,7 +125,7 @@ async function currentUser(req, required = true) {
     const profile = await profileFor(user.id).catch(() => null);
     if (profile) {
       const until = profile.banned_until ? new Date(profile.banned_until) : null;
-      if (until && until <= new Date() && profile.is_banned) {
+      if (until && until <= new Date()) {
         await update("profiles", "id=eq." + encodeURIComponent(user.id), {
           is_banned: false,
           banned_until: null,
@@ -133,6 +133,7 @@ async function currentUser(req, required = true) {
         }, { returning: false }).catch(() => {});
         profile.is_banned = false;
         profile.banned_until = null;
+        profile.ban_reason = "";
       }
       if (profileIsBanned(profile)) {
         const error = new Error(profile.deleted_at ? "هذا الحساب معطل" : "هذا الحساب موقوف");

@@ -4,13 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#050706">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="dark light">
 <title>إدارة آشور</title>
 <link rel="stylesheet" href="./style.css">
 <link rel="stylesheet" href="./mobile.css">
 </head>
 <body>
 <div id="loginView" class="login-view">
+  <button id="loginThemeButton" class="floating-theme-button" type="button" aria-label="تغيير المظهر">
+    <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-.9-.1-1.4A7 7 0 0 1 12 3Z"/></svg>
+  </button>
   <form id="loginForm" class="login-card">
     <div class="admin-login-brand">
       <div class="admin-login-logo"><img src="./assets/logo.svg" alt="آشور"></div>
@@ -18,7 +21,8 @@
     </div>
     <label><span>البريد الإلكتروني</span><input id="email" type="email" required placeholder="البريد الإلكتروني"></label>
     <label><span>كلمة المرور</span><input id="password" type="password" required placeholder="كلمة المرور"></label>
-    <button class="primary">دخول الإدارة</button>
+    <button id="loginSubmitButton" class="primary">دخول الإدارة</button>
+    <button id="forgotPasswordButton" class="text-button" type="button">نسيت كلمة المرور؟</button>
     <div id="loginMessage" class="message"></div>
   </form>
 </div>
@@ -29,32 +33,37 @@
       <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
     <div class="header-title"><span id="headerSectionName">الرئيسية</span><small>إدارة آشور</small></div>
-    <button id="refreshButton" class="icon-button" aria-label="تحديث">
-      <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></svg>
-    </button>
+    <div class="header-actions">
+      <button id="themeButton" class="icon-button" aria-label="تغيير المظهر">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-.9-.1-1.4A7 7 0 0 1 12 3Z"/></svg>
+      </button>
+      <button id="refreshButton" class="icon-button" aria-label="تحديث">
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></svg>
+      </button>
+    </div>
   </header>
 
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-brand"><img src="./assets/logo.svg" alt=""><div><b>آشور</b><span>الإدارة</span></div></div>
     <div class="sidebar-group-label">الإدارة</div>
-    <button class="nav active" data-page="dashboard"><span class="nav-dot"></span>الرئيسية</button>
-    <button class="nav" data-page="users"><span class="nav-dot"></span>المستخدمون</button>
-    <button class="nav" data-page="content"><span class="nav-dot"></span>المحتوى</button>
-    <button class="nav" data-page="comments"><span class="nav-dot"></span>التعليقات</button>
-    <button class="nav" data-page="reports"><span class="nav-dot"></span>البلاغات</button>
-    <button class="nav" data-page="support"><span class="nav-dot"></span>الدعم</button>
+    <button class="nav active" data-page="dashboard"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3Z"/><path d="M9 20v-6h6v6"/></svg></span>الرئيسية</button>
+    <button class="nav" data-page="users"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-5 4-7 7-7s6 2 7 7"/><path d="M16 5c3 0 5 2 5 5M18 14c2 1 3 3 4 6"/></svg></span>المستخدمون</button>
+    <button class="nav" data-page="content"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></span>المحتوى</button>
+    <button class="nav" data-page="comments"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v12H9l-5 4Z"/><path d="M8 9h8M8 13h5"/></svg></span>التعليقات</button>
+    <button class="nav" data-page="reports"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M5 3h14v18l-7-3-7 3Z"/><path d="M9 8h6M9 12h6"/></svg></span>البلاغات</button>
+    <button class="nav" data-page="support"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13v-2a8 8 0 0 1 16 0v2"/><path d="M4 13h3v6H5a1 1 0 0 1-1-1ZM20 13h-3v6h2a1 1 0 0 0 1-1Z"/><path d="M17 19c-1 2-3 2-5 2"/></svg></span>الدعم</button>
     <div class="sidebar-group-label">النظام</div>
-    <button class="nav" data-page="storage"><span class="nav-dot"></span>التخزين</button>
-    <button class="nav" data-page="uploads"><span class="nav-dot"></span>عمليات الرفع</button>
-    <button class="nav" data-page="errors"><span class="nav-dot"></span>الأخطاء</button>
-    <button class="nav" data-page="notifications"><span class="nav-dot"></span>الإشعارات</button>
-    <button class="nav" data-page="admins"><span class="nav-dot"></span>المشرفون</button>
-    <button class="nav" data-page="audit"><span class="nav-dot"></span>سجل الإدارة</button>
-    <button class="nav" data-page="releases"><span class="nav-dot"></span>الإصدارات</button>
-    <button class="nav" data-page="appSettings"><span class="nav-dot"></span>إعدادات التطبيق</button>
-    <button class="nav" data-page="siteSettings"><span class="nav-dot"></span>الموقع الرسمي</button>
-    <button class="nav" data-page="health"><span class="nav-dot"></span>حالة النظام</button>
-    <button id="logoutButton" class="nav danger"><span class="nav-dot"></span>تسجيل الخروج</button>
+    <button class="nav" data-page="storage"><span class="nav-icon"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 2 4 3 8 3s8-1 8-3V6"/><path d="M4 12v6c0 2 4 3 8 3s8-1 8-3v-6"/></svg></span>التخزين</button>
+    <button class="nav" data-page="uploads"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v5h16v-5"/></svg></span>عمليات الرفع</button>
+    <button class="nav" data-page="errors"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17h.01"/></svg></span>الأخطاء</button>
+    <button class="nav" data-page="notifications"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0v5l2 3H4l2-3Z"/><path d="M10 20h4"/></svg></span>الإشعارات</button>
+    <button class="nav" data-page="admins"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-5 4-7 7-7 2 0 4 1 5 2"/><path d="m18 14 1 2 2 .5-1.5 1.5.5 2-2-1-2 1 .5-2L15 16.5l2-.5Z"/></svg></span>المشرفون</button>
+    <button class="nav" data-page="audit"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 3h12v18H6Z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>سجل الإدارة</button>
+    <button class="nav" data-page="releases"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M5 19h14"/></svg></span>الإصدارات</button>
+    <button class="nav" data-page="appSettings"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.8-1.8.9-1.9-2.1-2.1-1.9.9-1.8-.8L10.5 2h-3l-.7 2.1-1.8.8-1.9-.9L1 6.1 2 8l-.8 1.8-2 .7v3l2 .7L2 16l-1 1.9L3.1 20l1.9-.9 1.8.8.7 2.1h3l.8-2.1 1.8-.8 1.9.9 2.1-2.1-1-1.9.8-1.8Z" transform="translate(2 0) scale(.82)"/></svg></span>إعدادات التطبيق</button>
+    <button class="nav" data-page="siteSettings"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4 6 4 9s-1 6-4 9c-3-3-4-6-4-9s1-6 4-9Z"/></svg></span>الموقع الرسمي</button>
+    <button class="nav" data-page="health"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg></span>حالة النظام</button>
+    <button id="logoutButton" class="nav danger"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/></svg></span>تسجيل الخروج</button>
   </aside>
 
   <main class="content">
@@ -254,6 +263,30 @@
     <button id="moreAdminButton" class="mobile-nav" type="button"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>المزيد</span></button>
   </nav>
 </div>
+
+<div id="connectionBanner" class="connection-banner hidden" role="status">
+  <span class="connection-dot"></span>
+  <div><b>لا يوجد اتصال بالإنترنت</b><small>يمكنك البقاء في الصفحة، وسنعيد المحاولة عند عودة الاتصال.</small></div>
+  <button id="retryConnectionButton" type="button">إعادة المحاولة</button>
+</div>
+
+<div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+<dialog id="adminActionDialog" class="admin-dialog">
+  <form id="adminActionForm" method="dialog" class="admin-dialog-card">
+    <div class="admin-dialog-head">
+      <div><span id="adminDialogEyebrow" class="eyebrow">إدارة آشور</span><h3 id="adminDialogTitle">تأكيد الإجراء</h3></div>
+      <button id="adminDialogClose" class="dialog-close" type="button" aria-label="إغلاق">×</button>
+    </div>
+    <p id="adminDialogText" class="admin-dialog-text"></p>
+    <label id="adminDialogInputRow" class="hidden"><span id="adminDialogInputLabel">القيمة</span><input id="adminDialogInput" autocomplete="off"></label>
+    <div class="admin-dialog-actions">
+      <button id="adminDialogCancel" class="dialog-secondary" type="button">إلغاء</button>
+      <button id="adminDialogAccept" class="primary" type="submit">تأكيد</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="./config.js"></script>
 <script>
 (() => {
@@ -269,7 +302,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.2.0";
+      app.src="./app.js?v=1.3.0-stage2";
       document.body.appendChild(app);
     };
     s.onerror=next;

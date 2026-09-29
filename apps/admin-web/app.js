@@ -816,41 +816,195 @@ async function loadCommentsAdmin(){
   }catch(e){$("#commentsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-$("#reportStatus").onchange=loadReports;
+const priorityLabels={urgent:"عاجل",high:"عالية",normal:"عادية",low:"منخفضة"};
+const reportTypeLabels={profile:"حساب",post:"منشور",reel:"ريلز",story:"قصة",comment:"تعليق",message:"رسالة"};
+const reportEventLabels={
+  review:"بدء المراجعة",update:"تحديث البلاغ",hide_content:"إخفاء المحتوى",
+  restore_content:"استعادة المحتوى",delete_content:"حذف الهدف",warn_user:"تحذير المستخدم",
+  ban_user:"حظر المستخدم",resolve:"حل البلاغ",reject:"رفض البلاغ"
+};
+let reportPage=1;
+let reportPages=1;
+let reportTimer;
+
+function reportPriorityClass(priority){
+  return priority==="urgent"||priority==="high"?"bad":priority==="low"?"":"ok";
+}
+function resetReportPage(){reportPage=1}
+$("#reportSearch").oninput=()=>{
+  clearTimeout(reportTimer);
+  reportTimer=setTimeout(()=>{resetReportPage();loadReports()},280);
+};
+["reportStatus","reportType","reportPriority","reportAssigned","reportFrom","reportTo"].forEach(id=>{
+  $("#"+id)?.addEventListener("change",()=>{resetReportPage();loadReports()});
+});
+$("#resetReportFilters")?.addEventListener("click",()=>{
+  ["reportSearch","reportStatus","reportType","reportPriority","reportAssigned","reportFrom","reportTo"].forEach(id=>{
+    const el=$("#"+id);if(el)el.value="";
+  });
+  resetReportPage();loadReports();
+});
+$("#reportsPrevPage")?.addEventListener("click",()=>{if(reportPage>1){reportPage--;loadReports()}});
+$("#reportsNextPage")?.addEventListener("click",()=>{if(reportPage<reportPages){reportPage++;loadReports()}});
+
+async function runReportAction(reportId,payload,{success="تم تحديث البلاغ.",reloadDetail=true}={}){
+  const result=await api("/v1/admin/reports/"+reportId+"/action",{
+    method:"POST",body:JSON.stringify(payload)
+  });
+  showToast(success,{type:"success"});
+  await loadReports();
+  if(reloadDetail&&!$("#reportDetail").classList.contains("hidden"))await openReportDetail(reportId);
+  return result;
+}
+
+async function openReportDetail(reportId){
+  try{
+    const d=await api("/v1/admin/reports/"+encodeURIComponent(reportId));
+    const r=d.report||{}, reporter=d.reporter||{}, target=d.target||{}, targetUser=d.target_user||{}, assignee=d.assignee||{};
+    const targetData=target.data||{};
+    const canModerate=["post","reel","story","comment"].includes(r.target_type);
+    const canDelete=["post","reel","story","comment","message"].includes(r.target_type);
+    const hidden=targetData.moderation_status==="hidden";
+    const media=(target.media_ids||[]).map(id=>'<div class="report-target-media"><img data-media-id="'+esc(id)+'" alt=""></div>').join("");
+    const events=(d.events||[]).map(ev=>
+      '<div class="stage56-event"><i></i><div><b>'+esc(reportEventLabels[ev.event_type]||ev.event_type||"إجراء")+'</b>'+
+      (ev.note?'<p>'+esc(ev.note)+'</p>':"")+
+      '<span>'+new Date(ev.created_at).toLocaleString("ar-IQ")+'</span></div></div>'
+    ).join("")||'<div class="meta">لا توجد إجراءات سابقة على هذا البلاغ.</div>';
+
+    $("#reportDetail").classList.remove("hidden");
+    $("#reportDetail").innerHTML=
+      '<div class="panel-head"><div><span class="eyebrow">تفاصيل البلاغ</span><h3>'+esc(r.reason||"بلاغ")+'</h3></div><button id="closeReportDetail" class="small" type="button">إغلاق</button></div>'+
+      '<div class="stage56-summary">'+
+        '<div><span>الحالة</span><b>'+statusLabel(r.status)+'</b></div>'+
+        '<div><span>الأولوية</span><b>'+esc(priorityLabels[r.priority]||r.priority||"عادية")+'</b></div>'+
+        '<div><span>النوع</span><b>'+esc(reportTypeLabels[r.target_type]||r.target_type)+'</b></div>'+
+        '<div><span>بلاغات نفس الهدف</span><b>'+Number(d.duplicate_count||0)+'</b></div>'+
+      '</div>'+
+      '<div class="stage56-two-col">'+
+        '<div class="stage56-card"><span class="eyebrow">مقدم البلاغ</span><div class="stage56-person">'+
+          (reporter.avatar_media_id?'<div class="list-avatar"><img data-media-id="'+esc(reporter.avatar_media_id)+'" alt=""></div>':'<div class="list-avatar"><span>'+esc((reporter.name||reporter.username||"م").slice(0,1))+'</span></div>')+
+          '<div class="grow"><b>'+esc(reporter.name||"مستخدم")+'</b><div class="meta">@'+esc(reporter.username||"")+'</div></div>'+
+          '<button id="openReporterAccount" class="small" type="button">الحساب</button>'+
+        '</div></div>'+
+        '<div class="stage56-card"><span class="eyebrow">صاحب الهدف</span>'+
+          (targetUser.id?'<div class="stage56-person">'+
+            (targetUser.avatar_media_id?'<div class="list-avatar"><img data-media-id="'+esc(targetUser.avatar_media_id)+'" alt=""></div>':'<div class="list-avatar"><span>'+esc((targetUser.name||targetUser.username||"م").slice(0,1))+'</span></div>')+
+            '<div class="grow"><b>'+esc(targetUser.name||"مستخدم")+'</b><div class="meta">@'+esc(targetUser.username||"")+'</div></div>'+
+            '<button id="openTargetAccount" class="small" type="button">الحساب</button></div>':'<div class="meta">الهدف غير مرتبط بحساب متاح.</div>')+
+        '</div>'+
+      '</div>'+
+      '<div class="stage56-card"><div class="moderation-head"><div><span class="eyebrow">الهدف المبلغ عنه</span><h3>'+esc(target.title||reportTypeLabels[r.target_type]||"الهدف")+'</h3></div>'+
+        (target.missing?'<span class="pill bad">غير موجود</span>':(targetData.moderation_status?'<span class="pill '+pillClass(targetData.moderation_status)+'">'+statusLabel(targetData.moderation_status)+'</span>':""))+
+      '</div>'+
+      (media?'<div class="report-target-gallery">'+media+'</div>':"")+
+      (target.text?'<p class="stage56-target-text">'+esc(target.text)+'</p>':"")+
+      '<div class="meta mono">'+esc(r.target_id||"")+'</div></div>'+
+      (r.details?'<div class="stage56-card"><span class="eyebrow">تفاصيل المبلغ</span><p>'+esc(r.details)+'</p></div>':"")+
+      '<div class="stage56-card"><span class="eyebrow">إدارة البلاغ</span>'+
+        '<div class="stage56-control-grid">'+
+          '<label><span>الأولوية</span><select id="reportDetailPriority">'+
+            ["urgent","high","normal","low"].map(x=>'<option value="'+x+'" '+(r.priority===x?"selected":"")+'>'+priorityLabels[x]+'</option>').join("")+
+          '</select></label>'+
+          '<div><span>المسند إلى</span><b>'+(assignee.id?esc(assignee.name||assignee.username||"مشرف"):"غير مسند")+'</b></div>'+
+        '</div>'+
+        '<label><span>ملاحظة داخلية</span><textarea id="reportDetailNote" maxlength="1500" placeholder="سبب القرار أو ملاحظة للمشرفين">'+esc(r.admin_note||"")+'</textarea></label>'+
+        '<div class="admin-actions">'+
+          '<button id="reportAssignMe" class="small" type="button">إسناد لي</button>'+
+          '<button id="reportUnassign" class="small" type="button">إلغاء الإسناد</button>'+
+          '<button id="reportReview" class="small" type="button">قيد المراجعة</button>'+
+          (canModerate?'<button id="reportToggleHidden" class="small" type="button">'+(hidden?"استعادة الهدف":"إخفاء الهدف")+'</button>':"")+
+          (targetUser.id?'<button id="reportWarnUser" class="small" type="button">تحذير المستخدم</button>':"")+
+          (targetUser.id?'<button class="small danger" data-report-ban-hours="24" type="button">حظر يوم</button><button class="small danger" data-report-ban-hours="168" type="button">حظر أسبوع</button><button class="small danger" data-report-ban-hours="0" type="button">حظر دائم</button>':"")+
+          (canDelete?'<button id="reportDeleteTarget" class="small danger" type="button">حذف الهدف</button>':"")+
+          '<button id="reportResolve" class="small" type="button">حل البلاغ</button>'+
+          '<button id="reportReject" class="small" type="button">رفض البلاغ</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="stage56-card"><div class="panel-head"><div><span class="eyebrow">سجل المراجعة</span><h3>كل الإجراءات</h3></div></div><div class="stage56-timeline">'+events+'</div></div>';
+
+    await hydrateAdminMedia($("#reportDetail"));
+    $("#closeReportDetail").onclick=()=>$("#reportDetail").classList.add("hidden");
+    $("#openReporterAccount")?.addEventListener("click",()=>{navigate("users");loadUserDetail(reporter.id)});
+    $("#openTargetAccount")?.addEventListener("click",()=>{navigate("users");loadUserDetail(targetUser.id)});
+    const note=()=>$("#reportDetailNote").value.trim();
+    $("#reportDetailPriority").onchange=()=>runReportAction(reportId,{action:"update",priority:$("#reportDetailPriority").value,admin_note:note()},{success:"تم تحديث أولوية البلاغ."});
+    $("#reportAssignMe").onclick=()=>runReportAction(reportId,{action:"update",assigned_to:"me",admin_note:note()},{success:"تم إسناد البلاغ لك."});
+    $("#reportUnassign").onclick=()=>runReportAction(reportId,{action:"update",assigned_to:null,admin_note:note()},{success:"تم إلغاء إسناد البلاغ."});
+    $("#reportReview").onclick=()=>runReportAction(reportId,{action:"review",status:"review",assigned_to:"me",admin_note:note()},{success:"البلاغ الآن قيد المراجعة."});
+    $("#reportToggleHidden")?.addEventListener("click",()=>runReportAction(reportId,{
+      action:hidden?"restore_content":"hide_content",
+      status:hidden?"review":"resolved",
+      admin_note:note()
+    },{success:hidden?"تمت استعادة الهدف.":"تم إخفاء الهدف وحل البلاغ."}));
+    $("#reportWarnUser")?.addEventListener("click",async()=>{
+      const warning=await adminPrompt("تحذير صاحب المحتوى",{label:"نص التحذير",defaultValue:note()||"تم تسجيل مخالفة على محتوى في حسابك.",acceptLabel:"إرسال التحذير"});
+      if(!warning?.trim())return;
+      await runReportAction(reportId,{action:"warn_user",status:"resolved",admin_note:warning.trim()},{success:"تم تحذير المستخدم وحل البلاغ."});
+    });
+    $("#reportDetail").querySelectorAll("[data-report-ban-hours]").forEach(btn=>btn.onclick=async()=>{
+      const hours=Number(btn.dataset.reportBanHours||0);
+      const label=hours===0?"حظر دائم":hours===24?"حظر يوم":"حظر أسبوع";
+      if(!await adminConfirm(label+"؟","سيتم إنهاء جلسات المستخدم وتسجيل القرار في سجل البلاغ.",{acceptLabel:"تأكيد الحظر",danger:true}))return;
+      await runReportAction(reportId,{action:"ban_user",status:"resolved",duration_hours:hours,admin_note:note()||"إجراء إداري بسبب بلاغ"},{success:"تم حظر المستخدم وحل البلاغ."});
+    });
+    $("#reportDeleteTarget")?.addEventListener("click",async()=>{
+      if(!await adminConfirm("حذف الهدف نهائيًا؟","سيتم حذف المحتوى وتنظيف وسائطه غير المستخدمة من التخزين. هذا الإجراء غير قابل للتراجع.",{acceptLabel:"حذف نهائي",danger:true}))return;
+      await runReportAction(reportId,{action:"delete_content",status:"resolved",admin_note:note()},{success:"تم حذف الهدف وحل البلاغ."});
+    });
+    $("#reportResolve").onclick=()=>runReportAction(reportId,{action:"resolve",status:"resolved",admin_note:note()},{success:"تم حل البلاغ."});
+    $("#reportReject").onclick=async()=>{
+      const rejectNote=note()||await adminPrompt("سبب رفض البلاغ",{label:"ملاحظة المراجعة",acceptLabel:"رفض البلاغ"});
+      if(rejectNote===null)return;
+      await runReportAction(reportId,{action:"reject",status:"rejected",admin_note:String(rejectNote||"").trim()},{success:"تم رفض البلاغ."});
+    };
+  }catch(e){
+    $("#reportDetail").classList.remove("hidden");
+    $("#reportDetail").innerHTML='<div class="error-text">'+esc(e.message)+'</div>';
+  }
+}
+
 async function loadReports(){
   try{
-    const d=await api("/v1/admin/reports");
-    const wanted=$("#reportStatus")?.value||"";
-    const rows=(d.items||[]).filter(r=>!wanted||r.status===wanted);
-    $("#reportsList").innerHTML=rows.map(r=>{
-      const reporter=r.reporter||{};
-      return '<div class="report-card">'+
-        '<div class="grow"><div class="moderation-head"><div><b>'+esc(r.reason||"بلاغ")+'</b><div class="meta">بواسطة @'+esc(reporter.username||"")+' · '+new Date(r.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(r.status)+'">'+statusLabel(r.status)+'</span></div>'+
-        (r.details?'<p>'+esc(r.details)+'</p>':"")+
-        '<div class="meta">الهدف: '+esc(r.target_type)+' · <span class="mono">'+esc(r.target_id)+'</span></div>'+
-        (r.admin_note?'<div class="admin-note">ملاحظة الإدارة: '+esc(r.admin_note)+'</div>':"")+
-        '<div class="admin-actions">'+
-          (["open","review"].includes(r.status)?'<button class="small" data-report-review="'+esc(r.id)+'" type="button">قيد المراجعة</button>':"")+
-          (["post","reel","story","comment"].includes(r.target_type)?'<button class="small danger" data-report-hide="'+esc(r.id)+'" type="button">إخفاء المحتوى وحل البلاغ</button>':"")+
-          '<button class="small" data-report-resolve="'+esc(r.id)+'" type="button">حل بدون حذف</button>'+
-          '<button class="small" data-report-reject="'+esc(r.id)+'" type="button">رفض البلاغ</button>'+
-        '</div>'+
-      '</div>';
-    }).join("")||'<div class="panel">لا توجد بلاغات مطابقة.</div>';
-
-    const act=async(id,status,action="")=>{
-      const note=(await adminPrompt("ملاحظة المراجعة",{label:"ملاحظة داخلية",defaultValue:"",acceptLabel:"متابعة"}))||"";
-      await api("/v1/admin/reports/"+id+"/action",{method:"POST",body:JSON.stringify({status,action,admin_note:note})});
-      loadReports();
+    const params=new URLSearchParams({page:String(reportPage),limit:"30"});
+    const values={
+      q:$("#reportSearch")?.value.trim(),
+      status:$("#reportStatus")?.value,
+      target_type:$("#reportType")?.value,
+      priority:$("#reportPriority")?.value,
+      assigned:$("#reportAssigned")?.value,
+      from:$("#reportFrom")?.value,
+      to:$("#reportTo")?.value
     };
-    $("#reportsList").querySelectorAll("[data-report-review]").forEach(b=>b.onclick=()=>act(b.dataset.reportReview,"review"));
-    $("#reportsList").querySelectorAll("[data-report-hide]").forEach(b=>b.onclick=()=>act(b.dataset.reportHide,"resolved","hide_content"));
-    $("#reportsList").querySelectorAll("[data-report-resolve]").forEach(b=>b.onclick=()=>act(b.dataset.reportResolve,"resolved","none"));
-    $("#reportsList").querySelectorAll("[data-report-reject]").forEach(b=>b.onclick=()=>act(b.dataset.reportReject,"rejected","rejected"));
+    Object.entries(values).forEach(([k,v])=>{if(v)params.set(k,v)});
+    const d=await api("/v1/admin/reports?"+params.toString());
+    const p=d.pagination||{};
+    reportPages=Math.max(1,Number(p.pages||1));
+    if(reportPage>reportPages){reportPage=reportPages;return loadReports()}
+    $("#reportsList").innerHTML=(d.items||[]).map(r=>{
+      const reporter=r.reporter||{}, target=r.target||{}, targetUser=r.target_user||{};
+      const media=(target.media_ids||[])[0];
+      return '<div class="report-card stage56-list-card">'+
+        (media?'<div class="stage56-thumb"><img data-media-id="'+esc(media)+'" alt=""></div>':"")+
+        '<div class="grow">'+
+          '<div class="moderation-head"><div><b>'+esc(r.reason||"بلاغ")+'</b><div class="meta">بواسطة @'+esc(reporter.username||"")+' · '+new Date(r.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(r.status)+'">'+statusLabel(r.status)+'</span></div>'+
+          '<div class="stage56-chips"><span class="pill '+reportPriorityClass(r.priority)+'">'+esc(priorityLabels[r.priority]||r.priority||"عادية")+'</span><span>'+esc(reportTypeLabels[r.target_type]||r.target_type)+'</span><span>'+Number(r.duplicate_count||0)+' بلاغ على الهدف</span>'+(r.assignee?'<span>مسند: '+esc(r.assignee.name||r.assignee.username||"مشرف")+'</span>':'<span>غير مسند</span>')+'</div>'+
+          (r.details?'<p>'+esc(r.details)+'</p>':(target.text?'<p>'+esc(target.text).slice(0,220)+'</p>':""))+
+          '<div class="meta">صاحب الهدف: '+(targetUser.username?"@"+esc(targetUser.username):"—")+' · <span class="mono">'+esc(r.target_id)+'</span></div>'+
+          '<div class="admin-actions"><button class="small" data-open-report="'+esc(r.id)+'" type="button">فتح المراجعة</button>'+(targetUser.id?'<button class="small" data-report-target-user="'+esc(targetUser.id)+'" type="button">حساب الهدف</button>':"")+'</div>'+
+        '</div></div>';
+    }).join("")||'<div class="panel">لا توجد بلاغات مطابقة.</div>';
+    await hydrateAdminMedia($("#reportsList"));
+    $("#reportsList").querySelectorAll("[data-open-report]").forEach(b=>b.onclick=()=>openReportDetail(b.dataset.openReport));
+    $("#reportsList").querySelectorAll("[data-report-target-user]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.reportTargetUser)});
+    $("#reportsPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||30));
+    $("#reportsPageLabel").textContent=reportPage+" / "+reportPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#reportsPrevPage").disabled=reportPage<=1;
+    $("#reportsNextPage").disabled=reportPage>=reportPages;
   }catch(e){$("#reportsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-async function loadStorage(){
+async function loadStorage(){async function loadStorage(){
   try{
     const d=await api("/v1/admin/channels");
     $("#channelsList").innerHTML=(d.items||[]).map(row=>
@@ -915,36 +1069,149 @@ async function loadErrors(){
   }catch(e){$("#errorsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-$("#supportStatus").onchange=loadSupport;
+const supportCategoryLabels={technical:"تقنية",account:"الحساب",content:"المحتوى",upload:"الرفع",other:"أخرى",general:"عام"};
+const supportEventLabels={ticket_created:"إنشاء التذكرة",user_reply:"رد المستخدم",admin_reply:"رد الإدارة",admin_update:"تحديث الإدارة"};
+let supportPage=1;
+let supportPages=1;
+let supportTimer;
+
+$("#supportSearch").oninput=()=>{
+  clearTimeout(supportTimer);
+  supportTimer=setTimeout(()=>{supportPage=1;loadSupport()},280);
+};
+["supportStatus","supportPriority","supportCategory","supportAssigned","supportUnread"].forEach(id=>{
+  $("#"+id)?.addEventListener("change",()=>{supportPage=1;loadSupport()});
+});
+$("#resetSupportFilters")?.addEventListener("click",()=>{
+  ["supportSearch","supportStatus","supportPriority","supportCategory","supportAssigned","supportUnread"].forEach(id=>{
+    const el=$("#"+id);if(el)el.value="";
+  });
+  supportPage=1;loadSupport();
+});
+$("#supportPrevPage")?.addEventListener("click",()=>{if(supportPage>1){supportPage--;loadSupport()}});
+$("#supportNextPage")?.addEventListener("click",()=>{if(supportPage<supportPages){supportPage++;loadSupport()}});
+
+async function updateSupportTicket(ticketId,payload,{success="تم تحديث التذكرة."}={}){
+  await api("/v1/admin/support/"+ticketId+"/reply",{method:"POST",body:JSON.stringify(payload)});
+  showToast(success,{type:"success"});
+  await loadSupport();
+  if(!$("#supportDetail").classList.contains("hidden"))await openSupportDetail(ticketId);
+}
+
+async function openSupportDetail(ticketId){
+  try{
+    const d=await api("/v1/admin/support/"+encodeURIComponent(ticketId));
+    const t=d.ticket||{}, user=d.user||{}, assignee=d.assignee||{};
+    const messages=(d.messages||[]).map(m=>
+      '<div class="support-thread-message '+(m.sender_kind==="admin"?"from-admin":"from-user")+'">'+
+        '<div class="support-thread-meta"><b>'+(m.sender_kind==="admin"?"الإدارة":"المستخدم")+'</b><span>'+new Date(m.created_at).toLocaleString("ar-IQ")+'</span></div>'+
+        '<p>'+esc(m.body||"")+'</p></div>'
+    ).join("")||'<div class="meta">لا توجد رسائل.</div>';
+    const events=(d.events||[]).map(ev=>
+      '<div class="stage56-event"><i></i><div><b>'+esc(supportEventLabels[ev.event_type]||ev.event_type||"تحديث")+'</b>'+
+        (ev.note?'<p>'+esc(ev.note)+'</p>':"")+'<span>'+new Date(ev.created_at).toLocaleString("ar-IQ")+'</span></div></div>'
+    ).join("")||'<div class="meta">لا يوجد سجل إضافي.</div>';
+
+    $("#supportDetail").classList.remove("hidden");
+    $("#supportDetail").innerHTML=
+      '<div class="panel-head"><div><span class="eyebrow">تذكرة الدعم</span><h3>'+esc(t.subject||"طلب دعم")+'</h3></div><button id="closeSupportDetail" class="small" type="button">إغلاق</button></div>'+
+      '<div class="stage56-summary">'+
+        '<div><span>الحالة</span><b>'+statusLabel(t.status)+'</b></div>'+
+        '<div><span>الأولوية</span><b>'+esc(priorityLabels[t.priority]||t.priority||"عادية")+'</b></div>'+
+        '<div><span>النوع</span><b>'+esc(supportCategoryLabels[t.category]||t.category||"عام")+'</b></div>'+
+        '<div><span>المسند إلى</span><b>'+(assignee.id?esc(assignee.name||assignee.username||"مشرف"):"غير مسند")+'</b></div>'+
+      '</div>'+
+      '<div class="stage56-two-col">'+
+        '<div class="stage56-card"><span class="eyebrow">المستخدم</span><div class="stage56-person">'+
+          (user.avatar_media_id?'<div class="list-avatar"><img data-media-id="'+esc(user.avatar_media_id)+'" alt=""></div>':'<div class="list-avatar"><span>'+esc((user.name||user.username||"م").slice(0,1))+'</span></div>')+
+          '<div class="grow"><b>'+esc(user.name||"مستخدم")+'</b><div class="meta">@'+esc(user.username||"")+'</div><div class="meta">آخر نشاط: '+(user.last_seen_at?new Date(user.last_seen_at).toLocaleString("ar-IQ"):"—")+'</div></div>'+
+          '<button id="supportOpenUser" class="small" type="button">الحساب</button></div></div>'+
+        '<div class="stage56-card"><span class="eyebrow">معلومات الجهاز</span><div class="meta">إصدار التطبيق: '+esc(t.app_version||"—")+'</div><p class="device-info">'+esc(t.device_info||"غير متوفر")+'</p></div>'+
+      '</div>'+
+      '<div class="stage56-card support-thread-card"><div class="panel-head"><div><span class="eyebrow">المحادثة</span><h3>سجل الرسائل</h3></div></div><div id="supportThread" class="support-thread">'+messages+'</div></div>'+
+      '<div class="stage56-card"><span class="eyebrow">إدارة التذكرة</span>'+
+        '<div class="stage56-control-grid">'+
+          '<label><span>الحالة</span><select id="supportDetailStatus">'+
+            ["open","in_progress","answered","closed"].map(x=>'<option value="'+x+'" '+(t.status===x?"selected":"")+'>'+statusLabel(x)+'</option>').join("")+
+          '</select></label>'+
+          '<label><span>الأولوية</span><select id="supportDetailPriority">'+
+            ["urgent","high","normal","low"].map(x=>'<option value="'+x+'" '+(t.priority===x?"selected":"")+'>'+priorityLabels[x]+'</option>').join("")+
+          '</select></label>'+
+        '</div>'+
+        '<label><span>ملاحظة الحل</span><textarea id="supportResolutionNote" maxlength="1500" placeholder="ملاحظة داخلية عن الحل">'+esc(t.resolution_note||"")+'</textarea></label>'+
+        '<div class="admin-actions"><button id="supportAssignMe" class="small" type="button">إسناد لي</button><button id="supportUnassign" class="small" type="button">إلغاء الإسناد</button><button id="supportSaveMeta" class="small" type="button">حفظ الحالة</button></div>'+
+        '<label><span>الرد على المستخدم</span><textarea id="supportReplyBody" maxlength="4000" placeholder="اكتب رد الدعم هنا"></textarea></label>'+
+        '<button id="supportSendReply" class="primary" type="button">إرسال الرد</button>'+
+      '</div>'+
+      '<div class="stage56-card"><div class="panel-head"><div><span class="eyebrow">سجل المعالجة</span><h3>الإجراءات</h3></div></div><div class="stage56-timeline">'+events+'</div></div>';
+
+    await hydrateAdminMedia($("#supportDetail"));
+    const thread=$("#supportThread");if(thread)thread.scrollTop=thread.scrollHeight;
+    $("#closeSupportDetail").onclick=()=>$("#supportDetail").classList.add("hidden");
+    $("#supportOpenUser").onclick=()=>{navigate("users");loadUserDetail(user.id)};
+    const meta=()=>({
+      status:$("#supportDetailStatus").value,
+      priority:$("#supportDetailPriority").value,
+      resolution_note:$("#supportResolutionNote").value.trim()
+    });
+    $("#supportAssignMe").onclick=()=>updateSupportTicket(ticketId,{...meta(),assigned_to:"me"},{success:"تم إسناد التذكرة لك."});
+    $("#supportUnassign").onclick=()=>updateSupportTicket(ticketId,{...meta(),assigned_to:null},{success:"تم إلغاء إسناد التذكرة."});
+    $("#supportSaveMeta").onclick=()=>updateSupportTicket(ticketId,meta(),{success:"تم حفظ حالة التذكرة."});
+    $("#supportSendReply").onclick=async()=>{
+      const reply=$("#supportReplyBody").value.trim();
+      if(!reply){showToast("اكتب الرد أولًا.",{type:"error"});return}
+      $("#supportSendReply").disabled=true;
+      try{
+        await updateSupportTicket(ticketId,{...meta(),reply,status:$("#supportDetailStatus").value==="closed"?"closed":"answered",assigned_to:"me"},{success:"تم إرسال رد الدعم للمستخدم."});
+      }finally{
+        const btn=$("#supportSendReply");if(btn)btn.disabled=false;
+      }
+    };
+  }catch(e){
+    $("#supportDetail").classList.remove("hidden");
+    $("#supportDetail").innerHTML='<div class="error-text">'+esc(e.message)+'</div>';
+  }
+}
+
 async function loadSupport(){
   try{
-    const status=$("#supportStatus")?.value||"";
-    const d=await api("/v1/admin/support"+(status?"?status="+encodeURIComponent(status):""));
-    $("#supportList").innerHTML=(d.items||[]).map(t=>
-      '<div class="report-card"><div class="grow">'+
-        '<div class="moderation-head"><div><b>'+esc(t.subject||"تذكرة دعم")+'</b><div class="meta">'+esc(t.category||"general")+' · '+new Date(t.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(t.status)+'">'+statusLabel(t.status)+'</span></div>'+
-        '<p>'+esc(t.body||"")+'</p>'+
-        '<div class="meta">المستخدم: <span class="mono">'+esc(t.user_id)+'</span> · الإصدار: '+esc(t.app_version||"—")+'</div>'+
-        (t.admin_reply?'<div class="admin-note"><b>رد الإدارة:</b> '+esc(t.admin_reply)+'</div>':"")+
-        '<div class="admin-actions"><button class="small" data-support-user="'+esc(t.user_id)+'" type="button">الحساب</button>'+
-        '<button class="small" data-reply-ticket="'+esc(t.id)+'" type="button">رد / تحديث الحالة</button></div>'+
-      '</div></div>'
-    ).join("")||'<div class="panel">لا توجد تذاكر دعم.</div>';
+    const params=new URLSearchParams({page:String(supportPage),limit:"30"});
+    const values={
+      q:$("#supportSearch")?.value.trim(),
+      status:$("#supportStatus")?.value,
+      priority:$("#supportPriority")?.value,
+      category:$("#supportCategory")?.value,
+      assigned:$("#supportAssigned")?.value,
+      unread:$("#supportUnread")?.value
+    };
+    Object.entries(values).forEach(([k,v])=>{if(v)params.set(k,v)});
+    const d=await api("/v1/admin/support?"+params.toString());
+    const p=d.pagination||{};
+    supportPages=Math.max(1,Number(p.pages||1));
+    if(supportPage>supportPages){supportPage=supportPages;return loadSupport()}
+    $("#supportList").innerHTML=(d.items||[]).map(t=>{
+      const u=t.user||{}, a=t.assignee||{};
+      return '<div class="report-card stage56-list-card '+(t.unread_by_admin?"needs-attention":"")+'">'+
+        '<div class="list-avatar">'+(u.avatar_media_id?'<img data-media-id="'+esc(u.avatar_media_id)+'" alt="">':'<span>'+esc((u.name||u.username||"م").slice(0,1))+'</span>')+'</div>'+
+        '<div class="grow">'+
+          '<div class="moderation-head"><div><b>'+esc(t.subject||"تذكرة دعم")+(t.unread_by_admin?' <span class="unread-dot"></span>':"")+'</b><div class="meta">@'+esc(u.username||"")+' · '+new Date(t.last_message_at||t.created_at).toLocaleString("ar-IQ")+'</div></div><span class="pill '+pillClass(t.status)+'">'+statusLabel(t.status)+'</span></div>'+
+          '<div class="stage56-chips"><span class="pill '+reportPriorityClass(t.priority)+'">'+esc(priorityLabels[t.priority]||t.priority||"عادية")+'</span><span>'+esc(supportCategoryLabels[t.category]||t.category||"عام")+'</span>'+(a.id?'<span>مسند: '+esc(a.name||a.username||"مشرف")+'</span>':'<span>غير مسند</span>')+'</div>'+
+          '<p>'+esc(t.body||"")+'</p>'+
+          '<div class="meta">الإصدار: '+esc(t.app_version||"—")+' · <span class="mono">'+esc(t.id)+'</span></div>'+
+          '<div class="admin-actions"><button class="small" data-open-ticket="'+esc(t.id)+'" type="button">فتح التذكرة</button><button class="small" data-support-user="'+esc(t.user_id)+'" type="button">الحساب</button></div>'+
+        '</div></div>';
+    }).join("")||'<div class="panel">لا توجد تذاكر دعم مطابقة.</div>';
+    await hydrateAdminMedia($("#supportList"));
+    $("#supportList").querySelectorAll("[data-open-ticket]").forEach(b=>b.onclick=()=>openSupportDetail(b.dataset.openTicket));
     $("#supportList").querySelectorAll("[data-support-user]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.supportUser)});
-    $("#supportList").querySelectorAll("[data-reply-ticket]").forEach(b=>b.onclick=async()=>{
-      const reply=await adminPrompt("رد الإدارة",{text:"يمكن ترك الرد فارغًا إذا كنت تريد تغيير الحالة فقط.",label:"الرد",defaultValue:"",acceptLabel:"التالي"});
-      if(reply===null)return;
-      const status=await adminPrompt("حالة التذكرة",{text:"القيم المتاحة: open / in_progress / answered / closed",label:"الحالة",defaultValue:reply.trim()?"answered":"in_progress",acceptLabel:"حفظ"});
-      if(!status)return;
-      try{
-        await api("/v1/admin/support/"+b.dataset.replyTicket+"/reply",{method:"POST",body:JSON.stringify({reply,status})});
-        loadSupport();
-      }catch(error){showToast(error.message,{type:"error"})}
-    });
+    $("#supportPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||30));
+    $("#supportPageLabel").textContent=supportPage+" / "+supportPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#supportPrevPage").disabled=supportPage<=1;
+    $("#supportNextPage").disabled=supportPage>=supportPages;
   }catch(e){$("#supportList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-$("#notificationAudience").onchange=()=>$("#targetUserRow").classList.toggle("hidden",$("#notificationAudience").value!=="user");
+$("#notificationAudience").onchange=$("#notificationAudience").onchange=()=>$("#targetUserRow").classList.toggle("hidden",$("#notificationAudience").value!=="user");
 $("#notificationForm").onsubmit=async e=>{
   e.preventDefault();
   const scheduled=$("#notificationScheduledAt").value;

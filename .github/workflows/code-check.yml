@@ -11,6 +11,7 @@ on:
       - "android/user/app/src/main/java/**/*.java"
       - "android/admin/app/src/main/java/**/*.java"
       - ".github/workflows/code-check.yml"
+      - "docs/migrations/**"
   workflow_dispatch:
 
 jobs:
@@ -215,7 +216,7 @@ jobs:
             missingStage14Style:!adminStyle.includes('.stage14-summary')||!adminStyle.includes('.stage14-audit-card')||!adminStyle.includes('.stage14-details'),
             missingStage1314Migration:!stage1314Migration.includes('prevent_audit_log_delete')||!stage1314Migration.includes('actor_role')||!stage1314Migration.includes("'features'"),
             missingOwnerOnlyLayout:!index.includes('id="ownerManagementPanel"')||!index.includes('data-owner-only')||!index.includes('id="ownerNewUserId"'),
-            missingOwnerOnlyUi:!app.includes('loadOwnerManagement')||!app.includes('adminAccess?.role==="owner"')||!app.includes('phrase:"TRANSFER"'),
+            missingOwnerOnlyUi:!app.includes('loadOwnerManagement')||!app.includes('adminAccess?.role==="owner"')||!app.includes('$("[data-owner-only]")')||!app.includes('phrase:"TRANSFER"'),
             missingOwnerOnlyApi:!server.includes('async function adminOwner')||!server.includes('/v1/admin/owner')||!server.includes('actor.admin.role !== "owner"')||!server.includes('/rest/v1/rpc/admin_transfer_owner'),
             missingOwnerBotGuard:!bot.includes('callback_data: "owner_management"')||!bot.includes('confirm_app_owner')||!bot.includes('String(query.from.id) !== ADMIN_ID')||!bot.includes('owner_transfer_secondary')||!bot.includes('owner_transfer_remove'),
             missingOwnerMigration:!ownerMigration.includes('admins_single_active_owner_idx')||!ownerMigration.includes('admin_transfer_owner')||!ownerMigration.includes('grant execute on function public.admin_transfer_owner(uuid,text) to service_role'),

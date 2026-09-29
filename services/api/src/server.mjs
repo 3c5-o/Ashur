@@ -553,6 +553,29 @@ async function syncPublishedRelease(release, actorUserId) {
 
 
 async function writeAudit(actorUserId, action, targetType = null, targetId = null, details = {}) {
+  let actorRole = null;
+  let actorName = null;
+  let actorUsername = null;
+  if (actorUserId) {
+    const [profiles, admins] = await Promise.all([
+      select("profiles", "select=id,name,username&id=eq." + encodeURIComponent(actorUserId) + "&limit=1").catch(() => []),
+      select("admins", "select=user_id,role&user_id=eq." + encodeURIComponent(actorUserId) + "&limit=1").catch(() => []),
+    ]);
+    actorName = profiles?.[0]?.name || null;
+    actorUsername = profiles?.[0]?.username || null;
+    actorRole = admins?.[0]?.role || null;
+  }
+  return insert("audit_logs", {
+    actor_user_id: actorUserId || null,
+    actor_role: actorRole,
+    actor_name: actorName,
+    actor_username: actorUsername,
+    action,
+    target_type: targetType,
+    target_id: targetId == null ? null : String(targetId),
+    details: details || {},
+  }, { returning: false }).catch(() => {});
+}) {
   return insert("audit_logs", {
     actor_user_id: actorUserId || null,
     action,
@@ -4866,13 +4889,67 @@ async function adminAdmins(req, res) {
   });
 }
 
-async function adminAudit(req, res) {
+async function adminAudit(req, res, url) {
   await requireAdmin(req, "admins");
-  const items = await select(
-    "audit_logs",
-    "select=id,actor_user_id,actor_telegram_id,action,target_type,target_id,details,created_at&order=created_at.desc&limit=200",
-  );
-  json(res, 200, { items: items || [] });
+  const { page, limit, offset } = pageParams(url, 40, 100);
+  const action = String(url.searchParams.get("action") || "").trim().slice(0, 100);
+  const targetType = String(url.searchParams.get("target_type") || "").trim().slice(0, 100);
+  const role = String(url.searchParams.get("role") || "").trim().slice(0, 80);
+  const actor = String(url.searchParams.get("actor") || "").trim().replace(/[,*()]/g, "").slice(0, 120);
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "").slice(0, 120);
+  const from = String(url.searchParams.get("from") || "").trim();
+  const to = String(url.searchParams.get("to") || "").trim();
+
+  const filters = [];
+  if (action) filters.push("action=eq." + encodeURIComponent(action));
+  if (targetType) filters.push("target_type=eq." + encodeURIComponent(targetType));
+  if (role) filters.push("actor_role=eq." + encodeURIComponent(role));
+  if (actor) {
+    const uuid = /^[0-9a-f-]{36}$/i.test(actor);
+    const parts = [
+      "actor_name.ilike.*" + encodeURIComponent(actor) + "*",
+      "actor_username.ilike.*" + encodeURIComponent(actor) + "*",
+    ];
+    if (uuid) parts.push("actor_user_id.eq." + encodeURIComponent(actor));
+    filters.push("or=(" + parts.join(",") + ")");
+  }
+  if (q) {
+    filters.push("or=(action.ilike.*" + encodeURIComponent(q) + "*,target_type.ilike.*" + encodeURIComponent(q) + "*,target_id.ilike.*" + encodeURIComponent(q) + "*,actor_name.ilike.*" + encodeURIComponent(q) + "*,actor_username.ilike.*" + encodeURIComponent(q) + "*)");
+  }
+  if (from) {
+    const start = new Date(from + "T00:00:00");
+    if (!Number.isNaN(start.getTime())) filters.push("created_at=gte." + encodeURIComponent(start.toISOString()));
+  }
+  if (to) {
+    const end = new Date(to + "T23:59:59.999");
+    if (!Number.isNaN(end.getTime())) filters.push("created_at=lte." + encodeURIComponent(end.toISOString()));
+  }
+
+  const filterQuery = filters.join("&");
+  const total = await count("audit_logs", filterQuery);
+  let query = "select=id,actor_user_id,actor_telegram_id,actor_role,actor_name,actor_username,action,target_type,target_id,details,created_at";
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=created_at.desc&offset=" + offset + "&limit=" + limit;
+  const items = await select("audit_logs", query);
+
+  const destructiveActions = [
+    "delete_user_permanently","delete_content","delete_report_target","delete_comment",
+    "remove_admin","force_logout","ban_user","deactivate_user","publish_release",
+    "restore_app_settings","disable_storage_channel"
+  ];
+  const destructiveFilter = "action=in.(" + destructiveActions.map(encodeURIComponent).join(",") + ")";
+  const dayAgo = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const [last24h, destructive, actorEvents] = await Promise.all([
+    count("audit_logs", "created_at=gte." + encodeURIComponent(dayAgo)),
+    count("audit_logs", destructiveFilter),
+    count("audit_logs", "actor_user_id=not.is.null"),
+  ]);
+
+  json(res, 200, {
+    items: items || [],
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    summary: { total, last_24h: last24h, destructive, user_actor_events: actorEvents, append_only: true },
+  });
 }
 
 async function adminChannels(req, res) {
@@ -5026,22 +5103,94 @@ async function restoreAppSettings(req, res, historyId) {
 }
 
 async function siteSettings(req, res) {
-  await requireAdmin(req, "settings");
+  const actor = await requireAdmin(req, "settings");
+  const allowedKeys = ["hero", "download", "features", "update", "support", "legal"];
   if (req.method === "GET") {
-    const rows = await select("site_settings", "select=key,value");
-    return json(res, 200, Object.fromEntries((rows || []).map((x) => [x.key, x.value])));
+    const rows = await select("site_settings", "select=key,value,updated_at&order=key.asc");
+    return json(res, 200, {
+      ...Object.fromEntries((rows || []).map((x) => [x.key, x.value])),
+      _meta: Object.fromEntries((rows || []).map((x) => [x.key, { updated_at: x.updated_at }])),
+    });
   }
+
   const body = await readJson(req);
-  for (const key of ["hero", "download"]) {
-    if (body[key] !== undefined) {
-      await upsert("site_settings", {
-        key,
-        value: body[key],
-        updated_at: new Date().toISOString(),
-      }, "key");
-    }
+  const next = {};
+
+  if (body.hero !== undefined) {
+    const source = body.hero && typeof body.hero === "object" ? body.hero : {};
+    next.hero = {
+      title: String(source.title || "آشور").trim().slice(0, 80),
+      subtitle: String(source.subtitle || "").trim().slice(0, 240),
+    };
   }
-  json(res, 200, { ok: true });
+
+  if (body.download !== undefined) {
+    const source = body.download && typeof body.download === "object" ? body.download : {};
+    const androidUrl = String(source.android_url || "").trim().slice(0, 800);
+    const webUrl = String(source.web_url || "").trim().slice(0, 800);
+    if (!validHttpUrl(androidUrl) || !validHttpUrl(webUrl)) return json(res, 400, { error: "أحد روابط الموقع غير صالح" });
+    const sha256 = String(source.sha256 || "").trim().toLowerCase().slice(0, 64);
+    if (sha256 && !validSha256(sha256)) return json(res, 400, { error: "SHA-256 يجب أن يكون 64 خانة" });
+    next.download = {
+      android_url: androidUrl,
+      download_url: androidUrl,
+      web_url: webUrl,
+      version: String(source.version || "").trim().slice(0, 40),
+      size: String(source.size || "").trim().slice(0, 40),
+      sha256,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  if (body.features !== undefined) {
+    const source = body.features && typeof body.features === "object" ? body.features : {};
+    const items = Array.isArray(source.items) ? source.items.slice(0, 8) : [];
+    next.features = {
+      items: items.map((item) => ({
+        title: String(item?.title || "").trim().slice(0, 80),
+        description: String(item?.description || "").trim().slice(0, 240),
+        enabled: item?.enabled !== false,
+      })).filter((item) => item.title),
+    };
+  }
+
+  if (body.update !== undefined) {
+    const source = body.update && typeof body.update === "object" ? body.update : {};
+    next.update = {
+      label: String(source.label || "آخر تحديث").trim().slice(0, 80),
+      text: String(source.text || "").trim().slice(0, 500),
+    };
+  }
+
+  if (body.support !== undefined) {
+    const source = body.support && typeof body.support === "object" ? body.support : {};
+    const supportUrl = String(source.url || "").trim().slice(0, 800);
+    if (!validHttpUrl(supportUrl)) return json(res, 400, { error: "رابط الدعم غير صالح" });
+    const email = String(source.email || "").trim().slice(0, 160);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(res, 400, { error: "بريد الدعم غير صالح" });
+    next.support = {
+      url: supportUrl,
+      email,
+      label: String(source.label || "الدعم والمساعدة").trim().slice(0, 80),
+    };
+  }
+
+  if (body.legal !== undefined) {
+    const source = body.legal && typeof body.legal === "object" ? body.legal : {};
+    const privacyUrl = String(source.privacy_url || "").trim().slice(0, 800);
+    const termsUrl = String(source.terms_url || "").trim().slice(0, 800);
+    if (!validHttpUrl(privacyUrl) || !validHttpUrl(termsUrl)) return json(res, 400, { error: "أحد روابط السياسة أو الشروط غير صالح" });
+    next.legal = { privacy_url: privacyUrl, terms_url: termsUrl };
+  }
+
+  const changed = [];
+  for (const key of allowedKeys) {
+    if (next[key] === undefined) continue;
+    await upsert("site_settings", { key, value: next[key], updated_at: new Date().toISOString() }, "key");
+    changed.push(key);
+  }
+  await writeAudit(actor.user.id, "update_site_settings", "site_settings", null, { keys: changed });
+  json(res, 200, { ok: true, keys: changed });
 }
 
 async function notificationRecipients(audience, targetUserId = null, targetUserIds = []) {
@@ -5259,7 +5408,7 @@ async function collectHealthDetails(includeInternal = false) {
     const memory = process.memoryUsage();
     result.runtime = {
       api_version: "1.3.0",
-      admin_revision: "A12",
+      admin_revision: "A14",
       commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
       uptime_seconds: Math.floor(process.uptime()),
       memory_mb: {
@@ -5675,7 +5824,7 @@ const server = http.createServer(async (req, res) => {
       return removeAdminRecord(req, res, adminRecordMatch[1]);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/audit") {
-      return adminAudit(req, res);
+      return adminAudit(req, res, url);
     }
     if (url.pathname === "/v1/admin/settings/app" && ["GET", "PUT"].includes(req.method)) {
       return appSettings(req, res);

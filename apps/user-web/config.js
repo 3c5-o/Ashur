@@ -5,5 +5,5 @@ window.ASHUR_CONFIG = {
   shareBaseUrl: "https://ashur-alpha.vercel.app",
   authRedirectUrl: "ashur://reset-password",
   maxUploadMb: 60,
-  appVersion: "1.5.0"
+  appVersion: "1.6.0"
 };

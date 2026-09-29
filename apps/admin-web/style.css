@@ -509,3 +509,153 @@ button:disabled{opacity:.55;cursor:not-allowed}
 @keyframes adminShimmer{to{background-position:-200% 0}}
 
 html.is-offline .refresh-sensitive{opacity:.65}
+
+
+/* Ashur Admin stages 3-4 — users + moderation */
+.users-filter-bar,
+.content-filter-bar{
+  display:grid;
+  grid-template-columns:minmax(220px,1.5fr) repeat(3,minmax(130px,.7fr));
+  gap:8px;
+  align-items:end;
+}
+.content-filter-bar{
+  grid-template-columns:minmax(210px,1.4fr) minmax(150px,.9fr) repeat(5,minmax(125px,.72fr));
+}
+.content-filter-bar .compact-date{
+  display:grid;
+  grid-template-columns:auto minmax(130px,1fr);
+  align-items:center;
+  gap:7px;
+  padding:0 9px;
+  min-height:44px;
+  border:1px solid var(--line);
+  border-radius:13px;
+  background:var(--surface-2);
+}
+.content-filter-bar .compact-date span{font-size:10px;color:var(--muted)}
+.content-filter-bar .compact-date input{border:0;background:transparent;padding:0;min-height:36px}
+.admin-pager{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  margin:14px auto 0;
+  padding:8px;
+  width:max-content;
+  max-width:100%;
+  border:1px solid var(--line);
+  border-radius:15px;
+  background:var(--surface);
+}
+.admin-pager span{min-width:110px;text-align:center;font-size:11px;color:var(--muted)}
+
+.admin-user-row{align-items:center}
+.list-avatar{
+  width:48px;height:48px;flex:none;border-radius:15px;overflow:hidden;
+  display:grid;place-items:center;
+  background:var(--surface-2);border:1px solid var(--line);
+  color:var(--brand);font-weight:900;font-size:18px;
+}
+.list-avatar img{width:100%;height:100%;object-fit:cover}
+.admin-user-hero{overflow:hidden;border-radius:18px;margin-bottom:12px}
+.admin-user-cover{
+  position:relative;height:140px;border-radius:18px 18px 8px 8px;overflow:hidden;
+  background:radial-gradient(circle at 70% 20%,rgba(64,227,120,.18),transparent 40%),var(--surface-2);
+  border:1px solid var(--line);
+}
+.admin-user-cover img{width:100%;height:100%;object-fit:cover}
+.admin-user-identity{
+  position:relative;display:flex;align-items:center;gap:11px;
+  margin-top:-28px;padding:0 12px 8px;
+}
+.admin-user-avatar{
+  width:74px;height:74px;flex:none;border-radius:24px;overflow:hidden;
+  display:grid;place-items:center;background:var(--surface);
+  border:4px solid var(--panel);box-shadow:0 10px 28px rgba(0,0,0,.18);
+  color:var(--brand);font-size:24px;font-weight:900;
+}
+.admin-user-avatar img{width:100%;height:100%;object-fit:cover}
+.admin-user-identity h3{margin:1px 0 2px;font-size:20px}
+.admin-user-info-grid,
+.content-detail-grid{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:10px 0;
+}
+.admin-user-info-grid>div,
+.content-detail-grid>div{
+  min-width:0;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);
+  display:grid;gap:4px;
+}
+.admin-user-info-grid span,
+.content-detail-grid span{font-size:9px;color:var(--muted)}
+.admin-user-info-grid b,
+.content-detail-grid b{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admin-user-bio{
+  padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);
+  color:var(--text-2);font-size:12px;line-height:1.8;margin:10px 0;
+}
+.admin-action-section{
+  margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:16px;background:var(--surface-2);
+}
+.admin-action-section>.eyebrow{margin-bottom:9px}
+.ban-presets{display:flex;gap:7px;flex-wrap:wrap}
+.danger-zone{
+  border-color:color-mix(in srgb,var(--danger) 30%,var(--line));
+  background:color-mix(in srgb,var(--danger) 5%,var(--surface-2));
+}
+.warning-history{display:grid;gap:7px}
+.warning-item{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding:9px 10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);
+}
+.warning-item b{font-size:11px;line-height:1.6}
+.warning-item span{font-size:9px;color:var(--muted);white-space:nowrap}
+
+.stage4-content-card{
+  align-items:stretch;
+  padding:10px;
+}
+.moderation-media-grid{
+  width:170px;min-width:170px;display:grid;grid-template-columns:1fr 1fr;gap:3px;
+  align-content:start;border-radius:14px;overflow:hidden;background:var(--surface-2);
+}
+.moderation-media-cell{position:relative;aspect-ratio:1/1;overflow:hidden;background:var(--surface-3)}
+.moderation-media-cell .moderation-media,
+.moderation-media-cell video{width:100%;height:100%;object-fit:cover;border-radius:0}
+.moderation-media-grid>.placeholder{
+  width:100%;height:170px;grid-column:1/-1;display:grid;place-items:center;
+}
+.media-more{
+  position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.55);
+  color:#fff;font-size:24px;font-weight:900;
+}
+.content-badges{display:flex;gap:5px;flex-wrap:wrap;margin:7px 0}
+.content-badges span{
+  padding:4px 7px;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface-2);color:var(--muted);font-size:9px;font-weight:800;
+}
+.content-preview-dialog{width:min(840px,calc(100vw - 24px))}
+.content-preview-card{
+  display:grid;gap:14px;padding:16px;border:1px solid var(--line);border-radius:22px;
+  background:var(--surface);box-shadow:0 28px 100px rgba(0,0,0,.42);
+}
+.content-preview-meta{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.content-preview-meta>div{display:grid;gap:2px}
+.content-preview-meta span{font-size:10px;color:var(--muted)}
+.content-preview-gallery{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:7px;
+  max-height:62dvh;overflow:auto;border-radius:16px;
+}
+.content-preview-media{
+  min-height:220px;max-height:520px;overflow:hidden;border-radius:15px;
+  background:#000;border:1px solid var(--line);
+}
+.content-preview-media img,
+.content-preview-media video{
+  width:100%;height:100%;min-height:220px;max-height:520px;object-fit:contain;background:#000;
+}
+.content-preview-caption{
+  padding:11px 12px;border-radius:14px;border:1px solid var(--line);
+  background:var(--surface-2);line-height:1.8;font-size:12px;white-space:pre-wrap;
+}
+html[data-theme="light"] .content-preview-media{background:#111}

@@ -192,7 +192,14 @@ const actionLabel={
   create_release:"إنشاء إصدار",
   update_release:"تعديل إصدار",
   send_notification:"إرسال إشعار",
-  schedule_notification:"جدولة إشعار"
+  schedule_notification:"جدولة إشعار",
+  remove_admin:"حذف مشرف",
+  disable_storage_channel:"تعطيل قناة تخزين",
+  enable_storage_channel:"تفعيل قناة تخزين",
+  reconnect_storage_channel:"إعادة اتصال قناة",
+  test_storage_channel:"اختبار قناة تخزين",
+  test_all_storage_channels:"فحص جميع قنوات التخزين",
+  retry_upload:"إعادة محاولة رفع"
 };
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
@@ -259,7 +266,8 @@ function statusLabel(s){
     queued:"بالانتظار",receiving:"جارٍ الاستلام",storing:"جارٍ التخزين",completed:"مكتمل",failed:"فشل",
     cancelled:"ملغي",in_progress:"قيد المتابعة",answered:"تم الرد",closed:"مغلق",new:"جديد",
     draft:"مسودة",testing:"اختبار",published:"منشور",retired:"متقاعد",scheduled:"مجدول",sent:"تم الإرسال",
-    processing:"قيد الإرسال",pending:"قيد الانتظار"
+    processing:"قيد الإرسال",pending:"قيد الانتظار",
+    connected:"متصل",disabled:"معطل",checking:"جارٍ الفحص",error:"خطأ"
   })[s]||s||"—";
 }
 function pillClass(s){
@@ -1096,8 +1104,8 @@ async function loadStorage({quiet=false}={}){
     ].map(([label,value])=>'<div><span>'+label+'</span><b>'+esc(String(value))+'</b></div>').join("");
 
     $("#channelsList").innerHTML=(d.items||[]).map(row=>{
-      const status=row.status==="connected"?"متصلة":row.status==="checking"?"جارٍ الفحص":"تحتاج فحص";
-      const statusCls=row.status==="connected"?"ok":row.status==="checking"?"":"bad";
+      const status=!row.enabled?"معطلة":row.status==="connected"?"متصلة":row.status==="checking"?"جارٍ الفحص":"تحتاج فحص";
+      const statusCls=!row.enabled?"":row.status==="connected"?"ok":row.status==="checking"?"":"bad";
       return '<div class="channel-card stage8-channel-card">'+
         '<div class="stage8-channel-head"><div class="grow"><b>'+esc(row.title||row.channel_key)+'</b><div class="meta mono">'+esc(row.channel_key)+'</div></div>'+
           '<span class="pill '+(row.enabled?"ok":"bad")+'">'+(row.enabled?"مفعلة":"معطلة")+'</span>'+

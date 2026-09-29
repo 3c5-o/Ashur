@@ -325,8 +325,33 @@
     </section>
 
     <section id="audit" class="page">
-      <div class="page-title"><div><span class="eyebrow">التتبع</span><h2>سجل الإدارة</h2><p>كل العمليات الحساسة في سجل واحد.</p></div></div>
-      <div id="auditList" class="timeline"></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 14</span><h2>سجل الإدارة والأمان</h2><p>سجل غير قابل للحذف لكل العمليات الإدارية مع هوية المشرف والدور والهدف والتفاصيل.</p></div></div>
+      <div id="auditSummary" class="stage14-summary"></div>
+      <div class="info-banner stage14-append-only"><span></span><p>هذا السجل Append-only على مستوى قاعدة البيانات. لا توجد وظيفة حذف للسجل من لوحة الإدارة أو الـAPI.</p></div>
+      <div class="toolbar admin-filter-bar stage14-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="auditSearch" class="search" placeholder="عملية، هدف، مشرف أو معرف"></div>
+        <input id="auditActor" placeholder="اسم المشرف، @username أو UUID" aria-label="المشرف">
+        <select id="auditRole">
+          <option value="">كل الأدوار</option>
+          <option value="owner">المالك</option>
+          <option value="secondary_admin">مدير ثانوي</option>
+          <option value="moderator">مشرف</option>
+          <option value="content_moderator">مشرف محتوى</option>
+          <option value="support">الدعم</option>
+          <option value="analyst">محلل</option>
+        </select>
+        <input id="auditAction" placeholder="اسم العملية" aria-label="العملية">
+        <input id="auditTargetType" placeholder="نوع الهدف" aria-label="نوع الهدف">
+        <label class="compact-date"><span>من</span><input id="auditFrom" type="date"></label>
+        <label class="compact-date"><span>إلى</span><input id="auditTo" type="date"></label>
+        <button id="resetAuditFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="auditList" class="stage14-audit-list"></div>
+      <div id="auditPager" class="admin-pager hidden">
+        <button id="auditPrevPage" class="small" type="button">السابق</button>
+        <span id="auditPageLabel">1 / 1</span>
+        <button id="auditNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="releases" class="page">
@@ -429,14 +454,78 @@
     </section>
 
     <section id="siteSettings" class="page">
-      <div class="page-title"><div><span class="eyebrow">الموقع</span><h2>إدارة الموقع الرسمي</h2><p>الصفحة التعريفية وروابط التحميل.</p></div></div>
-      <form id="siteSettingsForm" class="panel form">
-        <label><span>عنوان الصفحة</span><input id="siteTitle"></label>
-        <label><span>الوصف</span><input id="siteSubtitle"></label>
-        <label><span>رابط تحميل أندرويد</span><input id="siteAndroidUrl"></label>
-        <label><span>رابط استخدام نسخة الويب</span><input id="siteWebUrl"></label>
-        <div class="grid2 fields"><label><span>رقم الإصدار</span><input id="siteVersion"></label><label><span>حجم التطبيق</span><input id="siteSize"></label></div>
-        <button class="primary">حفظ إعدادات الموقع</button>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 13</span><h2>إدارة الموقع الرسمي</h2><p>تحكم كامل بالنصوص وروابط التوزيع والمميزات والتحديث والدعم دون تعديل ملفات الموقع يدويًا.</p></div></div>
+      <div id="siteSettingsSummary" class="stage13-summary"></div>
+      <form id="siteSettingsForm" class="settings-grid stage13-settings-grid">
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الهوية</span><h3>واجهة الموقع</h3></div></div>
+          <label><span>اسم المنصة</span><input id="siteTitle" maxlength="80"></label>
+          <label><span>الوصف الرئيسي</span><textarea id="siteSubtitle" maxlength="240"></textarea></label>
+        </article>
+
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">التوزيع</span><h3>Android والويب</h3></div></div>
+          <label><span>رابط تحميل Android</span><input id="siteAndroidUrl" inputmode="url"></label>
+          <label><span>رابط نسخة الويب</span><input id="siteWebUrl" inputmode="url"></label>
+          <div class="grid2 fields">
+            <label><span>رقم الإصدار</span><input id="siteVersion" maxlength="40"></label>
+            <label><span>حجم التطبيق</span><input id="siteSize" maxlength="40" placeholder="مثال: 12.4 MB"></label>
+          </div>
+          <label><span>SHA-256</span><input id="siteSha256" maxlength="64" autocomplete="off"></label>
+        </article>
+
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">التحديث</span><h3>رسالة الموقع</h3></div></div>
+          <label><span>عنوان الرسالة</span><input id="siteUpdateLabel" maxlength="80" placeholder="آخر تحديث"></label>
+          <label><span>نص التحديث</span><textarea id="siteUpdateText" maxlength="500" placeholder="يظهر أسفل معلومات الإصدار في الموقع"></textarea></label>
+        </article>
+
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الدعم</span><h3>التواصل والروابط</h3></div></div>
+          <label><span>اسم زر الدعم</span><input id="siteSupportLabel" maxlength="80"></label>
+          <label><span>رابط الدعم</span><input id="siteSupportUrl" inputmode="url"></label>
+          <label><span>بريد الدعم</span><input id="siteSupportEmail" type="email"></label>
+          <label><span>سياسة الخصوصية</span><input id="sitePrivacyUrl" inputmode="url"></label>
+          <label><span>شروط الاستخدام</span><input id="siteTermsUrl" inputmode="url"></label>
+        </article>
+
+        <article class="panel form stage13-features-panel">
+          <div class="panel-head"><div><span class="eyebrow">المميزات</span><h3>بطاقات الموقع</h3></div><span class="meta">حتى 6 بطاقات</span></div>
+          <div id="siteFeatureEditor" class="stage13-feature-editor">
+            <div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 1</span><input id="siteFeatureTitle0" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription0" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled0" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 2</span><input id="siteFeatureTitle1" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription1" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled1" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 3</span><input id="siteFeatureTitle2" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription2" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled2" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 4</span><input id="siteFeatureTitle3" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription3" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled3" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 5</span><input id="siteFeatureTitle4" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription4" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled4" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 6</span><input id="siteFeatureTitle5" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription5" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled5" type="checkbox"></label>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel form stage13-save-panel">
+          <div class="panel-head"><div><span class="eyebrow">النشر</span><h3>حفظ الموقع</h3></div></div>
+          <p class="meta">بعد الحفظ يقرأ الموقع القيم الجديدة مباشرة من إعداداته العامة.</p>
+          <button class="primary" type="submit">حفظ إعدادات الموقع</button>
+          <p id="siteSettingsMessage" class="message"></p>
+        </article>
       </form>
     </section>
 
@@ -505,7 +594,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage12";
+      app.src="./app.js?v=1.3.0-stage14";
       document.body.appendChild(app);
     };
     s.onerror=next;

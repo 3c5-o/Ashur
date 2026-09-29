@@ -4532,7 +4532,7 @@
       return openChat(id,"المحادثة");
     }
     if(type==="support_ticket"||type==="support"){
-      return openSupportCenter();
+      return openSupportCenter(id||"");
     }
     if(notification.kind==="follow"&&notification.actor_id){
       return openPublicProfile(notification.actor_id);
@@ -6175,74 +6175,140 @@
     if(returnProfile)setTimeout(()=>openPublicProfile(returnProfile).catch(()=>{}),0);
   };
 
-  async function openSupportCenter(){
-    openInfoDialog("الدعم الفني",`
-      <div class="settings-info">
-        <div class="settings-group">
-          <h4>إرسال مشكلة</h4>
-          <label><span>نوع المشكلة</span>
-            <select id="supportCategory">
-              <option value="technical">مشكلة تقنية</option>
-              <option value="account">الحساب</option>
-              <option value="content">المحتوى</option>
-              <option value="upload">رفع الملفات</option>
-              <option value="other">أخرى</option>
-            </select>
-          </label>
-          <label><span>العنوان</span><input id="supportSubject" maxlength="160" placeholder="عنوان مختصر"></label>
-          <label><span>التفاصيل</span><textarea id="supportBody" maxlength="4000" placeholder="اشرح المشكلة بالتفصيل"></textarea></label>
-          <button id="submitSupportTicket" class="primary" type="button">إرسال للدعم</button>
-          <p id="supportMessage" class="message"></p>
-        </div>
-        <div class="settings-group">
-          <h4>طلباتك السابقة</h4>
-          <div id="supportTicketsList" class="list compact"><div class="empty">جارٍ التحميل...</div></div>
-        </div>
-      </div>`);
+  async function openSupportCenter(initialTicketId=""){
+    const statusText={open:"جديد",in_progress:"قيد المتابعة",answered:"تم الرد",closed:"مغلق"};
+    const priorityText={urgent:"عاجل",high:"عالية",normal:"عادية",low:"منخفضة"};
+    const categoryText={technical:"مشكلة تقنية",account:"الحساب",content:"المحتوى",upload:"رفع الملفات",other:"أخرى",general:"عام"};
+
+    const mount=(title,html)=>{
+      $("#infoDialogTitle").textContent=title;
+      $("#infoDialogBody").innerHTML=html;
+      $("#settingsDialog").close();
+      if(!$("#infoDialog").open)openDialog($("#infoDialog"));
+    };
+
+    const openTicket=async(ticketId)=>{
+      mount("الدعم الفني",'<div class="support-thread-loading"><div class="empty">جارٍ تحميل التذكرة...</div></div>');
+      try{
+        const result=await api("/v1/social/support/"+encodeURIComponent(ticketId));
+        const t=result.ticket||{};
+        const messages=(result.messages||[]).map(m=>
+          '<div class="user-support-message '+(m.sender_kind==="admin"?"from-admin":"from-user")+'">'+
+            '<div class="user-support-message-meta"><b>'+(m.sender_kind==="admin"?"دعم آشور":"أنت")+'</b><span>'+new Date(m.created_at).toLocaleString("ar-IQ")+'</span></div>'+
+            '<p>'+escapeHtml(m.body||"")+'</p>'+
+          '</div>'
+        ).join("")||'<div class="empty">لا توجد رسائل.</div>';
+
+        mount("الدعم الفني",
+          '<div class="support-ticket-detail">'+
+            '<div class="support-ticket-detail-head">'+
+              '<button id="supportBackToList" class="small-button" type="button">رجوع</button>'+
+              '<div class="grow"><span class="eyebrow">'+escapeHtml(categoryText[t.category]||t.category||"الدعم")+'</span>'+
+                '<h3>'+escapeHtml(t.subject||"طلب دعم")+'</h3>'+
+                '<div class="support-ticket-tags"><span>'+escapeHtml(statusText[t.status]||t.status||"جديد")+'</span><span>'+escapeHtml(priorityText[t.priority]||t.priority||"عادية")+'</span><span>'+new Date(t.created_at).toLocaleString("ar-IQ")+'</span></div>'+
+              '</div>'+
+            '</div>'+
+            '<div id="userSupportThread" class="user-support-thread">'+messages+'</div>'+
+            (t.status==="closed"
+              ?'<div class="support-closed-note">تم إغلاق هذه التذكرة. إذا عندك مشكلة جديدة أنشئ طلب دعم جديد.</div>'
+              :'<div class="support-reply-composer"><textarea id="supportThreadReply" maxlength="4000" placeholder="اكتب ردك للدعم"></textarea><button id="sendSupportThreadReply" class="primary" type="button">إرسال الرد</button><p id="supportThreadMessage" class="message"></p></div>')+
+          '</div>'
+        );
+
+        const thread=$("#userSupportThread");if(thread)thread.scrollTop=thread.scrollHeight;
+        $("#supportBackToList").onclick=()=>renderHome();
+        $("#sendSupportThreadReply")?.addEventListener("click",async()=>{
+          const body=$("#supportThreadReply").value.trim();
+          if(!body){
+            $("#supportThreadMessage").textContent="اكتب الرد أولًا.";
+            return;
+          }
+          $("#sendSupportThreadReply").disabled=true;
+          $("#supportThreadMessage").textContent="جارٍ الإرسال...";
+          try{
+            await api("/v1/social/support/"+encodeURIComponent(ticketId),{
+              method:"POST",body:JSON.stringify({body})
+            });
+            await openTicket(ticketId);
+          }catch(error){
+            $("#supportThreadMessage").textContent=error.message;
+            $("#sendSupportThreadReply").disabled=false;
+          }
+        });
+      }catch(error){
+        mount("الدعم الفني",
+          '<div class="settings-info"><button id="supportBackAfterError" class="small-button" type="button">رجوع</button><div class="empty error">'+escapeHtml(error.message)+'</div></div>'
+        );
+        $("#supportBackAfterError").onclick=()=>renderHome();
+      }
+    };
+
     const loadTickets=async()=>{
       try{
         const result=await api("/v1/social/support");
-        $("#supportTicketsList").innerHTML=(result.items||[]).map(t=>`
-          <div class="list-card support-ticket-card">
-            <div class="grow">
-              <b>${escapeHtml(t.subject||"طلب دعم")}</b>
-              <div class="meta">${escapeHtml(t.status||"open")} · ${new Date(t.created_at).toLocaleString("ar-IQ")}</div>
-              <p>${escapeHtml(t.body||"")}</p>
-              ${t.admin_reply?`<div class="support-reply"><b>رد الإدارة</b><p>${escapeHtml(t.admin_reply)}</p></div>`:""}
-            </div>
-          </div>`).join("")||'<div class="empty">ما عندك طلبات دعم بعد.</div>';
+        $("#supportTicketsList").innerHTML=(result.items||[]).map(t=>
+          '<button class="list-card support-ticket-card '+(t.unread_by_user?"unread":"")+'" data-support-ticket-open="'+escapeHtml(t.id)+'" type="button">'+
+            '<div class="grow">'+
+              '<div class="support-ticket-title-row"><b>'+escapeHtml(t.subject||"طلب دعم")+(t.unread_by_user?'<span class="support-unread-dot"></span>':"")+'</b><span>'+escapeHtml(statusText[t.status]||t.status||"جديد")+'</span></div>'+
+              '<div class="meta">'+escapeHtml(categoryText[t.category]||t.category||"عام")+' · '+escapeHtml(priorityText[t.priority]||t.priority||"عادية")+' · '+new Date(t.last_message_at||t.created_at).toLocaleString("ar-IQ")+'</div>'+
+              '<p>'+escapeHtml(t.admin_reply||t.body||"")+'</p>'+
+            '</div>'+
+          '</button>'
+        ).join("")||'<div class="empty">ما عندك طلبات دعم بعد.</div>';
+        $("#supportTicketsList").querySelectorAll("[data-support-ticket-open]").forEach(btn=>btn.onclick=()=>openTicket(btn.dataset.supportTicketOpen));
       }catch(error){
         $("#supportTicketsList").innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
       }
     };
-    await loadTickets();
-    $("#submitSupportTicket").onclick=async()=>{
-      const subject=$("#supportSubject").value.trim();
-      const body=$("#supportBody").value.trim();
-      if(!subject||!body){
-        $("#supportMessage").textContent="اكتب العنوان والتفاصيل.";
-        return;
-      }
-      $("#submitSupportTicket").disabled=true;
-      try{
-        await api("/v1/social/support",{
-          method:"POST",
-          body:JSON.stringify({
-            category:$("#supportCategory").value,
-            subject,
-            body,
-            app_version:cfg.appVersion||"",
-            device_info:navigator.userAgent.slice(0,300)
-          })
-        });
-        $("#supportSubject").value="";
-        $("#supportBody").value="";
-        $("#supportMessage").textContent="تم إرسال الطلب.";
-        await loadTickets();
-      }catch(error){
-        $("#supportMessage").textContent=error.message;
-      }finally{$("#submitSupportTicket").disabled=false}
+
+    const renderHome=async()=>{
+      mount("الدعم الفني",
+        '<div class="settings-info">'+
+          '<div class="settings-group">'+
+            '<h4>إرسال مشكلة</h4>'+
+            '<label><span>نوع المشكلة</span><select id="supportCategory"><option value="technical">مشكلة تقنية</option><option value="account">الحساب</option><option value="content">المحتوى</option><option value="upload">رفع الملفات</option><option value="other">أخرى</option></select></label>'+
+            '<label><span>العنوان</span><input id="supportSubject" maxlength="160" placeholder="عنوان مختصر"></label>'+
+            '<label><span>التفاصيل</span><textarea id="supportBody" maxlength="4000" placeholder="اشرح المشكلة بالتفصيل"></textarea></label>'+
+            '<button id="submitSupportTicket" class="primary" type="button">إرسال للدعم</button><p id="supportMessage" class="message"></p>'+
+          '</div>'+
+          '<div class="settings-group"><h4>طلباتك السابقة</h4><div id="supportTicketsList" class="list compact"><div class="empty">جارٍ التحميل...</div></div></div>'+
+        '</div>'
+      );
+      await loadTickets();
+      $("#submitSupportTicket").onclick=async()=>{
+        const subject=$("#supportSubject").value.trim();
+        const body=$("#supportBody").value.trim();
+        if(!subject||!body){
+          $("#supportMessage").textContent="اكتب العنوان والتفاصيل.";
+          return;
+        }
+        $("#submitSupportTicket").disabled=true;
+        $("#supportMessage").textContent="جارٍ إرسال الطلب...";
+        try{
+          const created=await api("/v1/social/support",{
+            method:"POST",
+            body:JSON.stringify({
+              category:$("#supportCategory").value,
+              subject,
+              body,
+              app_version:cfg.appVersion||"",
+              device_info:navigator.userAgent.slice(0,300)
+            })
+          });
+          if(created?.id)return openTicket(created.id);
+          $("#supportSubject").value="";
+          $("#supportBody").value="";
+          $("#supportMessage").textContent="تم إرسال الطلب.";
+          await loadTickets();
+        }catch(error){
+          $("#supportMessage").textContent=error.message;
+          $("#submitSupportTicket").disabled=false;
+        }
+      };
     };
+
+    if(initialTicketId)return openTicket(initialTicketId);
+    return renderHome();
   }
 
   async function openSavedContent(){

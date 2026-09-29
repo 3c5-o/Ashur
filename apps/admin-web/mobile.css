@@ -314,3 +314,36 @@
   .stage56-card .admin-actions{display:grid;grid-template-columns:1fr}
   .support-thread-message{width:94%}
 }
+
+
+/* Ashur Admin stages 7-8 mobile */
+@media(max-width:920px){
+  .stage7-admin-search{grid-template-columns:1fr}
+  .stage7-permissions{grid-template-columns:1fr}
+  .stage7-admin-card{align-items:flex-start!important;flex-wrap:wrap}
+  .stage7-admin-card>.grow{min-width:calc(100% - 58px)}
+  .stage7-admin-controls{width:100%;display:grid;grid-template-columns:1fr 1fr}
+  .stage7-admin-controls .admin-role-select{grid-column:1/-1;width:100%;min-width:0}
+  .stage7-admin-controls .small{min-height:40px}
+  .stage8-channel-grid{grid-template-columns:1fr}
+  .upload-filter-bar{grid-template-columns:1fr 1fr}
+  .upload-filter-bar .search-wrap,
+  .upload-filter-bar #uploadUser{grid-column:1/-1}
+  .upload-filter-bar .live-state{justify-self:end}
+}
+@media(max-width:520px){
+  .stage7-admin-summary{align-items:flex-start;flex-direction:column}
+  .stage7-admin-summary .small{width:100%}
+  .stage7-selected-admin{grid-template-columns:1fr}
+  .stage7-permission-row{grid-template-columns:1fr}
+  .stage7-admin-controls{grid-template-columns:1fr}
+  .stage7-admin-controls .admin-role-select{grid-column:1}
+  .stage8-summary{grid-template-columns:1fr 1fr}
+  .stage8-storage-toolbar{align-items:stretch;flex-direction:column}
+  .stage8-storage-toolbar .small{width:100%}
+  .upload-filter-bar{grid-template-columns:1fr}
+  .upload-filter-bar>*{grid-column:1!important}
+  .upload-filter-bar .live-state{justify-self:start}
+  .stage8-upload-user{align-items:flex-start}
+  .stage8-upload-user .small{margin-inline-start:0}
+}

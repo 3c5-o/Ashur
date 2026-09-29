@@ -94,26 +94,23 @@
         <div id="feed" class="feed"></div>
       </section>
 
-      <section id="searchPage" class="page">
-        <div class="section-head sticky-head">
-          <div>
-            <span class="eyebrow">اكتشف</span>
-            <h2>البحث</h2>
-          </div>
-          <div class="search-box stage4-search-box">
+      <section id="searchPage" class="page search-page-v8">
+        <div class="search-hero sticky-head">
+          <h2>البحث</h2>
+          <div class="search-box stage4-search-box search-box-v8">
             <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
             <input id="searchInput" type="search" placeholder="اسم، @يوزر، منشور أو ريلز" autocomplete="off">
             <button id="clearSearchButton" class="search-clear hidden" type="button" aria-label="مسح البحث"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
           <small id="searchContextHint" class="search-context-hint">اكتشف حسابات ومحتوى جديدًا</small>
+          <div class="chips search-filter-bar" role="tablist" aria-label="نوع البحث">
+            <button class="chip active" data-search-type="all">الكل</button>
+            <button class="chip" data-search-type="accounts">الحسابات</button>
+            <button class="chip" data-search-type="posts">المنشورات</button>
+            <button class="chip" data-search-type="reels">الريلز</button>
+          </div>
         </div>
-        <div class="chips search-filter-bar">
-          <button class="chip active" data-search-type="all">الكل</button>
-          <button class="chip" data-search-type="accounts">الحسابات</button>
-          <button class="chip" data-search-type="posts">المنشورات</button>
-          <button class="chip" data-search-type="reels">الريلز</button>
-        </div>
-        <div id="searchResults" class="results explore-grid"></div>
+        <div id="searchResults" class="results explore-grid search-results-v8"></div>
       </section>
 
       <section id="reelsPage" class="page reels-page">
@@ -321,6 +318,11 @@
         </button>
       </div>
       <p id="cameraHint">اضغط لالتقاط صورة</p>
+      <div class="camera-publish-tabs" role="tablist" aria-label="نوع النشر">
+        <button class="active" data-camera-publish="post" type="button">نشر</button>
+        <button data-camera-publish="story" type="button">قصة</button>
+        <button data-camera-publish="reel" type="button">ريلز</button>
+      </div>
     </div>
   </dialog>
 

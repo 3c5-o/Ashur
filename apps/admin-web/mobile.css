@@ -283,3 +283,34 @@
   }
   .admin-pager span{min-width:0}
 }
+
+
+/* Ashur Admin stages 5-6 mobile */
+@media(max-width:920px){
+  .stage56-filter-bar{
+    grid-template-columns:1fr 1fr;
+    gap:7px;
+  }
+  .stage56-filter-bar .search-wrap{grid-column:1/-1}
+  .stage56-filter-bar #resetReportFilters,
+  .stage56-filter-bar #resetSupportFilters{grid-column:1/-1}
+  .stage56-summary{grid-template-columns:1fr 1fr}
+  .stage56-two-col{grid-template-columns:1fr}
+  .stage56-control-grid{grid-template-columns:1fr 1fr}
+  .stage56-list-card{gap:9px}
+  .stage56-thumb{width:84px;height:84px;min-width:84px}
+  .stage56-list-card .grow{min-width:0}
+  .report-target-gallery{grid-template-columns:1fr 1fr}
+  .support-thread{max-height:48dvh}
+}
+@media(max-width:480px){
+  .stage56-filter-bar{grid-template-columns:1fr}
+  .stage56-filter-bar>*{grid-column:1!important}
+  .stage56-summary{grid-template-columns:1fr 1fr}
+  .stage56-control-grid{grid-template-columns:1fr}
+  .stage56-list-card{display:grid!important;grid-template-columns:1fr}
+  .stage56-thumb{width:100%;height:150px}
+  .report-target-gallery{grid-template-columns:1fr}
+  .stage56-card .admin-actions{display:grid;grid-template-columns:1fr}
+  .support-thread-message{width:94%}
+}

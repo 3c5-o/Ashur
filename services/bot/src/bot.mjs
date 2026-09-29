@@ -227,6 +227,9 @@ function mainKeyboard(actor) {
       ...(hasPermission(actor, "admins") ? [{ text: "مشرفو البوت", callback_data: "admins" }] : []),
     ]);
   }
+  if (actor.role === "owner") {
+    rows.push([{ text: "إدارة مالك التطبيق", callback_data: "owner_management" }]);
+  }
   return { inline_keyboard: rows.filter((row) => row.length) };
 }
 
@@ -427,6 +430,47 @@ async function sendLogs(chatId, actor) {
   });
 }
 
+async function currentAppOwner() {
+  const rows = await db(
+    "/rest/v1/admins?select=user_id,role,active,last_active_at&role=eq.owner&active=eq.true&limit=1",
+  ).catch(() => []);
+  const owner = rows?.[0] || null;
+  if (!owner) return null;
+  const profiles = await db(
+    "/rest/v1/profiles?select=id,name,username&id=eq." + encodeURIComponent(owner.user_id) + "&limit=1",
+  ).catch(() => []);
+  return { ...owner, profile: profiles?.[0] || null };
+}
+
+async function sendOwnerManagement(chatId, actor) {
+  if (actor?.role !== "owner" || String(actor.telegram_user_id) !== ADMIN_ID) {
+    throw new Error("إدارة المالك متاحة للمالك الأساسي فقط");
+  }
+  const owner = await currentAppOwner();
+  const profile = owner?.profile || {};
+  const text = owner
+    ? [
+        "إدارة مالك تطبيق آشور",
+        "",
+        "المالك الحالي: " + (profile.name || profile.username || "حساب"),
+        profile.username ? "اليوزر: @" + profile.username : "",
+        "UUID: " + owner.user_id,
+        "",
+        "نقل الملكية يحتاج UUID لحساب آشور جديد صالح ثم تأكيد نهائي.",
+      ].filter(Boolean).join("\n")
+    : "إدارة مالك تطبيق آشور\n\nلا يوجد مالك نشط حاليًا.";
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "نقل الملكية إلى UUID جديد", callback_data: "set_app_owner" }],
+        [{ text: "رجوع", callback_data: "home" }],
+      ],
+    },
+  });
+}
+
 async function sendAdmins(chatId, actor) {
   await requireActor({ id: actor.telegram_user_id }, "admins");
   const rows = await botAdminRows();
@@ -437,10 +481,7 @@ async function sendAdmins(chatId, actor) {
     ),
   ];
   const keyboard = [
-    [
-      { text: "إضافة مشرف", callback_data: "add_bot_admin" },
-      ...(actor.role === "owner" ? [{ text: "مالك إدارة التطبيق", callback_data: "set_app_owner" }] : []),
-    ],
+    [{ text: "إضافة مشرف", callback_data: "add_bot_admin" }],
     ...(rows || []).slice(0, 8).map((r) => [
       { text: (r.active ? "تعطيل " : "تفعيل ") + r.telegram_user_id, callback_data: "toggle_bot_admin:" + r.telegram_user_id },
       { text: "حذف", callback_data: "delete_bot_admin:" + r.telegram_user_id },
@@ -528,48 +569,63 @@ async function handleText(message) {
   }
 
   if (p.action === "set_app_owner") {
-    if (actor.role !== "owner") {
+    if (actor.role !== "owner" || String(from.id) !== ADMIN_ID) {
       await clearPending(from.id).catch(() => {});
-      return tg("sendMessage", { chat_id: message.chat.id, text: "هذه العملية للمالك الرئيسي فقط." });
+      return tg("sendMessage", { chat_id: message.chat.id, text: "هذه العملية للمالك الأساسي فقط." });
     }
-    const identifier = text.replace(/^@/, "").trim();
-    let profiles = [];
-    if (/^[0-9a-f-]{36}$/i.test(identifier)) {
-      profiles = await db("/rest/v1/profiles?select=id,name,username&id=eq." + encodeURIComponent(identifier) + "&limit=1");
-    } else {
-      profiles = await db("/rest/v1/profiles?select=id,name,username&username=eq." + encodeURIComponent(identifier) + "&limit=1");
-    }
-    const profile = profiles?.[0];
-    if (!profile) {
+    const newOwnerId = text.trim();
+    if (!/^[0-9a-f-]{36}$/i.test(newOwnerId)) {
       return tg("sendMessage", {
         chat_id: message.chat.id,
-        text: "الحساب غير موجود. أرسل اسم المستخدم داخل آشور أو UUID الحساب.",
+        text: "UUID غير صالح. أرسل UUID الكامل للحساب الجديد أو /cancel للإلغاء.",
       });
     }
-    const owners = await db("/rest/v1/admins?select=user_id&role=eq.owner&active=eq.true").catch(() => []);
-    for (const row of owners || []) {
-      if (row.user_id === profile.id) continue;
-      await db("/rest/v1/admins?user_id=eq." + encodeURIComponent(row.user_id), {
-        method: "PATCH",
-        body: { role: "secondary_admin", updated_at: new Date().toISOString() },
-        prefer: "return=minimal",
-      }).catch(() => {});
+
+    const [authRecord, profiles, currentOwner] = await Promise.all([
+      db("/auth/v1/admin/users/" + encodeURIComponent(newOwnerId)).catch(() => null),
+      db("/rest/v1/profiles?select=id,name,username,is_banned,banned_until,deleted_at&id=eq." + encodeURIComponent(newOwnerId) + "&limit=1").catch(() => []),
+      currentAppOwner(),
+    ]);
+    const profile = profiles?.[0];
+    const temporarilyBanned = Boolean(profile?.banned_until && new Date(profile.banned_until) > new Date());
+    if (!authRecord || !profile || profile.deleted_at || profile.is_banned || temporarilyBanned) {
+      return tg("sendMessage", {
+        chat_id: message.chat.id,
+        text: "الحساب الجديد غير موجود أو غير متاح. تأكد من UUID وأن الحساب مكتمل داخل آشور.",
+      });
     }
-    await upsert("admins", {
-      user_id: profile.id,
-      role: "owner",
-      permissions: { all: true },
-      active: true,
-      updated_at: new Date().toISOString(),
-    }, "user_id");
-    await writeBotAudit("set_app_owner", "admin", profile.id, {
+    if (currentOwner?.user_id === newOwnerId) {
+      await clearPending(from.id).catch(() => {});
+      return tg("sendMessage", { chat_id: message.chat.id, text: "هذا الحساب هو المالك الحالي بالفعل." });
+    }
+
+    await setPending(from.id, "confirm_app_owner", {
+      new_owner_id: newOwnerId,
+      old_owner_id: currentOwner?.user_id || null,
+      name: profile.name || "",
       username: profile.username || "",
-      by: String(from.id),
+      email: authRecord.email || "",
     });
-    await clearPending(from.id);
+
     return tg("sendMessage", {
       chat_id: message.chat.id,
-      text: "تم تعيين @" + (profile.username || profile.name || profile.id) + " كمالك رئيسي لتطبيق الإدارة.",
+      text: [
+        "تأكيد نقل ملكية الإدارة",
+        "",
+        "الحساب الجديد: " + (profile.name || profile.username || "حساب"),
+        profile.username ? "@" + profile.username : "",
+        "UUID: " + newOwnerId,
+        authRecord.email ? "البريد: " + authRecord.email : "",
+        "",
+        "اختر ما يحدث للمالك السابق بعد النقل:",
+      ].filter(Boolean).join("\n"),
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "نقل + جعله مدير ثانوي", callback_data: "owner_transfer_secondary" }],
+          [{ text: "نقل + إزالة صلاحياته", callback_data: "owner_transfer_remove" }],
+          [{ text: "إلغاء", callback_data: "owner_transfer_cancel" }],
+        ],
+      },
     });
   }
 
@@ -638,13 +694,86 @@ async function handleCallback(query) {
     if (data === "logs") return sendLogs(chatId, actor);
     if (data === "admins") return sendAdmins(chatId, actor);
 
+    if (data === "owner_management") {
+      if (actor.role !== "owner" || String(query.from.id) !== ADMIN_ID) {
+        throw new Error("إدارة المالك متاحة للمالك الأساسي فقط");
+      }
+      await clearPending(query.from.id).catch(() => {});
+      return sendOwnerManagement(chatId, actor);
+    }
+
     if (data === "set_app_owner") {
-      if (actor.role !== "owner") throw new Error("هذه العملية للمالك الرئيسي فقط");
+      if (actor.role !== "owner" || String(query.from.id) !== ADMIN_ID) {
+        throw new Error("هذه العملية للمالك الأساسي فقط");
+      }
       await setPending(query.from.id, "set_app_owner", {});
       return tg("sendMessage", {
         chat_id: chatId,
-        text: "تعيين مالك تطبيق الإدارة\n\nأرسل اسم المستخدم داخل آشور مثل: hamad\nأو UUID الحساب.\n\nللإلغاء أرسل /cancel",
+        text: "نقل ملكية تطبيق الإدارة\n\nأرسل UUID الحساب الجديد فقط.\nسيتم فحص الحساب أولًا ولن يتم النقل قبل التأكيد النهائي.\n\nللإلغاء أرسل /cancel",
       });
+    }
+
+    if (data === "owner_transfer_cancel") {
+      if (actor.role !== "owner" || String(query.from.id) !== ADMIN_ID) {
+        throw new Error("هذه العملية للمالك الأساسي فقط");
+      }
+      await clearPending(query.from.id).catch(() => {});
+      return sendOwnerManagement(chatId, actor);
+    }
+
+    if (data === "owner_transfer_secondary" || data === "owner_transfer_remove") {
+      if (actor.role !== "owner" || String(query.from.id) !== ADMIN_ID) {
+        throw new Error("هذه العملية للمالك الأساسي فقط");
+      }
+      const state = await pending(query.from.id);
+      if (!state || state.action !== "confirm_app_owner" || new Date(state.expires_at) <= new Date()) {
+        await clearPending(query.from.id).catch(() => {});
+        throw new Error("انتهت جلسة نقل الملكية. ابدأ العملية من جديد");
+      }
+      const newOwnerId = String(state.payload?.new_owner_id || "");
+      if (!/^[0-9a-f-]{36}$/i.test(newOwnerId)) throw new Error("UUID الحساب الجديد غير صالح");
+
+      const previousOwnerAction = data === "owner_transfer_remove" ? "remove" : "secondary_admin";
+      const [authRecord, profiles] = await Promise.all([
+        db("/auth/v1/admin/users/" + encodeURIComponent(newOwnerId)).catch(() => null),
+        db("/rest/v1/profiles?select=id,name,username,is_banned,banned_until,deleted_at&id=eq." + encodeURIComponent(newOwnerId) + "&limit=1").catch(() => []),
+      ]);
+      const profile = profiles?.[0];
+      const temporarilyBanned = Boolean(profile?.banned_until && new Date(profile.banned_until) > new Date());
+      if (!authRecord || !profile || profile.deleted_at || profile.is_banned || temporarilyBanned) {
+        throw new Error("الحساب الجديد لم يعد متاحًا");
+      }
+
+      const result = await db("/rest/v1/rpc/admin_transfer_owner", {
+        method: "POST",
+        body: {
+          p_new_owner: newOwnerId,
+          p_previous_owner_action: previousOwnerAction,
+        },
+        prefer: "return=representation",
+      });
+
+      await writeBotAudit("transfer_owner", "admin", newOwnerId, {
+        old_owner_id: state.payload?.old_owner_id || null,
+        previous_owner_action: previousOwnerAction,
+        username: profile.username || "",
+        by: String(query.from.id),
+        result,
+      });
+      await clearPending(query.from.id).catch(() => {});
+
+      await tg("sendMessage", {
+        chat_id: chatId,
+        text: [
+          "تم نقل ملكية تطبيق الإدارة بنجاح.",
+          "",
+          "المالك الجديد: " + (profile.name || profile.username || newOwnerId),
+          profile.username ? "@" + profile.username : "",
+          "UUID: " + newOwnerId,
+          "المالك السابق: " + (previousOwnerAction === "remove" ? "تمت إزالة صلاحياته" : "أصبح مديرًا ثانويًا"),
+        ].filter(Boolean).join("\n"),
+      });
+      return sendOwnerManagement(chatId, actor);
     }
 
     if (data === "test_all") {

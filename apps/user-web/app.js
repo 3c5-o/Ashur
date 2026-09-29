@@ -1011,6 +1011,39 @@
     return 0;
   }
 
+  const runtimeFeatureLabels={
+    stories:"القصص",reels:"الريلز",messages:"الرسائل",groups:"المجموعات",
+    registration:"إنشاء الحساب",comments:"التعليقات",search:"البحث",explore:"الاكتشاف",
+    saved:"المحفوظات",notifications:"الإشعارات",uploads:"رفع الملفات"
+  };
+  function runtimeFeatureEnabled(key){
+    return state.features?.[key]!==false;
+  }
+  function runtimeFeatureError(key){
+    return (runtimeFeatureLabels[key]||"هذه الميزة")+" متوقفة مؤقتًا من إدارة آشور.";
+  }
+  function maintenanceIsActive(maintenance={}){
+    if(!maintenance.enabled)return false;
+    const now=Date.now();
+    const start=maintenance.start_at?new Date(maintenance.start_at).getTime():null;
+    const end=maintenance.end_at?new Date(maintenance.end_at).getTime():null;
+    if(start&&Number.isFinite(start)&&now<start)return false;
+    if(end&&Number.isFinite(end)&&now>=end)return false;
+    return true;
+  }
+  function runtimeUploadLimitMb(kind,file){
+    const limits=state.limits||{};
+    if(kind==="story")return Number(limits.story_mb||30);
+    if(kind==="reel")return Number(limits.reel_mb||limits.max_upload_mb||cfg.maxUploadMb||60);
+    if(kind==="profile"||kind==="profile_cover"||kind==="post_image"||kind==="reel_cover"||kind==="chat_image"){
+      return Number(limits.image_mb||10);
+    }
+    if(kind==="chat_video"||kind==="chat_file")return Number(limits.chat_video_mb||50);
+    if(kind==="chat_audio")return Number(limits.audio_mb||15);
+    if(file?.type?.startsWith("image/"))return Number(limits.image_mb||10);
+    return Number(limits.max_upload_mb||cfg.maxUploadMb||60);
+  }
+
   async function checkRuntimeSettings(){
     const {data,error}=await client.from("app_settings")
       .select("key,value")
@@ -1037,12 +1070,14 @@
     $("#registerTab").classList.toggle("hidden",state.features.registration===false);
     $(".home-intro").classList.toggle("stories-disabled",state.features.stories===false);
     document.body.classList.toggle("comments-disabled",state.features.comments===false);
+    $('[data-create-mode="group"]').forEach(node=>node.classList.toggle("hidden",state.features.groups===false));
+    $("#createGroupButton")?.classList.toggle("hidden",state.features.groups===false);
 
     const current=cfg.appVersion||"1.0.0";
     const required=Boolean(version.required) ||
       (version.minimum && compareVersions(current,version.minimum)<0);
 
-    if(maintenance.enabled){
+    if(maintenanceIsActive(maintenance)){
       $("#systemTitle").textContent=maintenance.title||"آشور";
       $("#systemMessage").textContent=maintenance.message||"نعمل على تحسين الخدمة، يرجى المحاولة لاحقًا.";
       $("#systemPrimary").classList.add("hidden");
@@ -1224,6 +1259,7 @@
   $("#registerForm").onsubmit=async(e)=>{
     e.preventDefault();
     const form=e.currentTarget;
+    if(!runtimeFeatureEnabled("registration"))return showAuthMessage(runtimeFeatureError("registration"));
     const name=profileUtil.normalizeName($("#registerName").value);
     const username=profileUtil.normalizeUsername($("#registerUsername").value);
     const email=authUtil.normalizeEmail($("#registerEmail").value);
@@ -1380,6 +1416,12 @@
 
   async function navigateTo(page,{fromBack=false,replace=false}={}){
     const previous=state.activePage||$(".page.active")?.id||"homePage";
+    const pageFeature={searchPage:"search",reelsPage:"reels",messagesPage:"messages"}[page];
+    if(pageFeature&&!runtimeFeatureEnabled(pageFeature)){
+      openInfoDialog("الميزة غير متاحة",'<div class="empty">'+escapeHtml(runtimeFeatureError(pageFeature))+'</div>');
+      page="homePage";
+      replace=true;
+    }
     page=router.navigate(page,{current:previous,fromBack,replace});
     closeTransientDialogs();
     state.activePage=page;
@@ -5351,6 +5393,9 @@
   }
 
   async function openComposer(type){
+    if(!runtimeFeatureEnabled("uploads"))throw new Error(runtimeFeatureError("uploads"));
+    if(type==="reel"&&!runtimeFeatureEnabled("reels"))throw new Error(runtimeFeatureError("reels"));
+    if(type==="story"&&!runtimeFeatureEnabled("stories"))throw new Error(runtimeFeatureError("stories"));
     $("#publishDialog").close();
     clearComposerPreview();
     syncComposerTypeUi(type);
@@ -5479,10 +5524,12 @@
 
     for(const file of files){
       const uploadLimit=state.composerType==="story"
-        ?Number(state.limits.story_mb||30)
-        :file.type.startsWith("image/")
-          ?Number(state.limits.image_mb||10)
-          :Number(state.limits.max_upload_mb||cfg.maxUploadMb||60);
+        ?runtimeUploadLimitMb("story",file)
+        :state.composerType==="reel"
+          ?runtimeUploadLimitMb("reel",file)
+          :file.type.startsWith("image/")
+            ?runtimeUploadLimitMb("post_image",file)
+            :runtimeUploadLimitMb("post_video",file);
       if(file.size>uploadLimit*1024*1024){
         $("#composerMessage").textContent="حجم أحد ملفات المحتوى يتجاوز الحد المسموح ("+uploadLimit+" ميغابايت).";
         return;
@@ -5603,6 +5650,13 @@
   };
 
   async function uploadFile(file,kind,{silent=false,onProgress=null}={}){
+    if(!runtimeFeatureEnabled("uploads"))throw new Error(runtimeFeatureError("uploads"));
+    if(kind==="reel"&&!runtimeFeatureEnabled("reels"))throw new Error(runtimeFeatureError("reels"));
+    if(kind==="story"&&!runtimeFeatureEnabled("stories"))throw new Error(runtimeFeatureError("stories"));
+    if(kind.startsWith("chat_")&&!runtimeFeatureEnabled("messages"))throw new Error(runtimeFeatureError("messages"));
+    if(kind==="group_media"&&!runtimeFeatureEnabled("groups"))throw new Error(runtimeFeatureError("groups"));
+    const maxMb=runtimeUploadLimitMb(kind,file);
+    if(file?.size>maxMb*1024*1024)throw new Error("حجم الملف يتجاوز الحد المسموح ("+maxMb+" ميغابايت).");
     const token=await accessToken();
     if(!token)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
     const progress=silent?null:$("#uploadProgress");
@@ -5676,6 +5730,10 @@
   });
 
   function setConversationCreateMode(mode){
+    if(mode==="group"&&!runtimeFeatureEnabled("groups")){
+      openInfoDialog("المجموعات",'<div class="empty">'+escapeHtml(runtimeFeatureError("groups"))+'</div>');
+      mode="direct";
+    }
     state.conversationCreateMode=mode==="group"?"group":"direct";
     state.selectedGroupMembers=new Map();
     $$(".conversation-create-tabs [data-create-mode]").forEach(button=>button.classList.toggle("active",button.dataset.createMode===state.conversationCreateMode));

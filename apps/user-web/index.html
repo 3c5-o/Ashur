@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#050706">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
   <title>آشور</title>
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -218,6 +218,14 @@
       <div id="composerStage" class="creator-stage hidden">
         <div id="composerPreview" class="composer-preview"></div>
         <div id="storyTextOverlay" class="story-editor-overlay hidden"></div>
+        <div id="storyEditorDock" class="story-editor-dock hidden" aria-label="أدوات القصة">
+          <button type="button" data-story-tool="text" aria-label="النص"><span class="story-tool-icon">Aa</span><small>النص</small></button>
+          <button type="button" data-story-tool="style" aria-label="لون النص"><span class="story-tool-icon">◐</span><small>اللون</small></button>
+          <button type="button" data-story-tool="position" aria-label="موضع النص"><span class="story-tool-icon">↕</span><small>الموضع</small></button>
+          <button type="button" data-story-tool="effect" aria-label="التأثيرات"><span class="story-tool-icon">✦</span><small>تأثير</small></button>
+          <button type="button" data-story-tool="mention" aria-label="ذكر حساب"><span class="story-tool-icon">@</span><small>ذكر</small></button>
+          <button type="button" data-story-tool="reset" aria-label="إعادة الضبط"><span class="story-tool-icon">↺</span><small>إعادة</small></button>
+        </div>
         <div id="mediaEditToolbar" class="media-edit-toolbar hidden" aria-label="أدوات تعديل الوسائط">
           <button type="button" data-media-edit="rotate-left" aria-label="تدوير لليسار">↶</button>
           <button type="button" data-media-edit="rotate-right" aria-label="تدوير لليمين">↷</button>
@@ -234,16 +242,21 @@
       </div>
       <div id="composerFileMeta" class="composer-file-meta hidden"></div>
 
-      <div id="storyEditorControls" class="story-editor-controls hidden">
+      <div id="storyEditorControls" class="story-editor-controls story-tool-panel hidden">
+        <div class="story-tool-panel-head">
+          <div><span class="eyebrow">تعديل القصة</span><b id="storyToolPanelTitle">النص</b></div>
+          <button id="closeStoryToolPanel" type="button" aria-label="إغلاق أدوات القصة">×</button>
+        </div>
         <label class="story-text-field">
-          <span>نص فوق القصة</span>
-          <input id="storyOverlayInput" maxlength="120" placeholder="اكتب شيئًا على الصورة أو الفيديو">
+          <span>الكتابة فوق الصورة أو الفيديو</span>
+          <input id="storyOverlayInput" maxlength="120" placeholder="اكتب نصًا قصيرًا">
         </label>
         <div class="story-editor-row">
           <label class="story-color-control"><span>اللون</span><input id="storyOverlayColor" type="color" value="#ffffff"></label>
           <label class="switch-row story-bg-control"><span><b>خلفية للنص</b></span><input id="storyOverlayBg" type="checkbox" checked></label>
         </div>
         <label class="story-position-control"><span>موضع النص</span><input id="storyOverlayY" type="range" min="15" max="82" value="50"></label>
+        <div id="storyEffectLabel" class="story-effect-label">التأثير الحالي: بدون فلتر</div>
       </div>
 
       <label class="creator-caption-wrap">
@@ -515,6 +528,20 @@
   <dialog id="settingsDialog" class="panel-dialog">
     <div class="dialog-head"><div><span class="eyebrow">التحكم</span><h3>الإعدادات</h3></div><button id="closeSettings" class="close-btn" aria-label="إغلاق"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <form id="notificationSettingsForm" class="dialog-body form settings-form">
+      <div class="settings-group settings-appearance-group">
+        <div class="settings-group-title"><div><span class="eyebrow">المظهر</span><h4>ألوان التطبيق</h4></div></div>
+        <div class="theme-choice-grid" role="radiogroup" aria-label="مظهر التطبيق">
+          <button class="theme-choice active" data-theme-choice="dark" type="button" role="radio" aria-checked="true">
+            <span class="theme-preview dark-preview"><i></i><i></i><i></i></span>
+            <span><b>داكن</b><small>الواجهة السوداء</small></span>
+          </button>
+          <button class="theme-choice" data-theme-choice="light" type="button" role="radio" aria-checked="false">
+            <span class="theme-preview light-preview"><i></i><i></i><i></i></span>
+            <span><b>فاتح</b><small>واجهة بيضاء مريحة</small></span>
+          </button>
+        </div>
+      </div>
+
       <div class="settings-group settings-account-group">
         <div class="settings-group-title"><div><span class="eyebrow">حسابك</span><h4>الحساب والخصوصية</h4></div></div>
         <button type="button" class="settings-row" id="settingsEditProfile"><span><b>تعديل الملف الشخصي</b><small>الاسم والصورة والغلاف والنبذة</small></span><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>

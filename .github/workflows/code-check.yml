@@ -166,11 +166,17 @@ jobs:
             missingStage6SupportAdminUi:!app.includes('openSupportDetail')||!app.includes('support-thread-message')||!app.includes('supportSendReply'),
             missingStage6SupportUserUi:!userApp.includes('openSupportCenter(initialTicketId')||!userApp.includes('user-support-thread')||!userApp.includes('/v1/social/support/"+encodeURIComponent(ticketId)'),
             missingStage6SupportStyle:!userStyle.includes('Ashur threaded support stage 6')||!userStyle.includes('.user-support-message'),
-            missingAdminA6Revision:!server.includes('admin_revision: "A6"'),
+            missingStage7AdminSearch:!index.includes('id="adminCandidateSearch"')||!app.includes('/v1/admin/admin-candidates')||!server.includes('async function adminCandidates'),
+            missingStage7Permissions:!app.includes('effective_permissions')||!app.includes('collectPermissionOverrides')||!server.includes('sanitizeAdminPermissions')||!server.includes('effectiveAdminPermissions'),
+            missingStage7SectionGuard:!app.includes('pagePermission')||!app.includes('permission-hidden')||!app.includes('adminCanPage'),
+            missingStage8StorageHealth:!index.includes('id="storageSummary"')||!app.includes('testAllChannels')||!server.includes('async function adminTestAllChannels')||!server.includes('files_count,bytes_total'),
+            missingStage8UploadLive:!index.includes('id="uploadsPager"')||!app.includes('uploadsLiveTimer')||!app.includes('data-retry-upload')||!server.includes('async function adminRetryUpload'),
+            missingStage8RetryCache:!server.includes('retryUploadCachePath')||!server.includes('retry_available')||!server.includes('failure_stage'),
+            missingAdminA8Revision:!server.includes('admin_revision: "A8"'),
             missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };
           if(Object.values(failures).some(Boolean)){
-            console.error('Admin stage 3-6 guard failed',failures);
+            console.error('Admin stage 3-8 guard failed',failures);
             process.exit(1);
           }
           NODE

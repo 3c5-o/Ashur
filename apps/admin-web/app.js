@@ -6,6 +6,97 @@ const nativeApiBase=()=>{try{return window.AshurNative?.getApiBaseUrl?.()||""}ca
 const apiBase=()=> (cfg.apiBaseUrl||nativeApiBase()||location.origin).replace(/\/$/,"");
 const esc=(v="")=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 
+const THEME_KEY="ashur_admin_theme_v1";
+const isNative=()=>{try{return Boolean(window.AshurNative?.getApiBaseUrl)}catch{return false}};
+if(isNative())document.documentElement.classList.add("native-app");
+
+function currentTheme(){
+  try{return localStorage.getItem(THEME_KEY)==="light"?"light":"dark"}catch{return "dark"}
+}
+function applyTheme(theme,{persist=false}={}){
+  const next=theme==="light"?"light":"dark";
+  document.documentElement.dataset.theme=next;
+  document.documentElement.style.colorScheme=next;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content",next==="light"?"#f6f8f7":"#050706");
+  if(persist){try{localStorage.setItem(THEME_KEY,next)}catch(_){}}
+  try{window.AshurNative?.setThemeMode?.(next)}catch(_){}
+  return next;
+}
+function toggleTheme(){applyTheme(currentTheme()==="dark"?"light":"dark",{persist:true})}
+applyTheme(currentTheme());
+
+let toastSerial=0;
+function showToast(message,{type="info",duration=3200}={}){
+  const root=$("#toastStack");
+  if(!root)return;
+  const id="toast-"+(++toastSerial);
+  const node=document.createElement("div");
+  node.id=id;
+  node.className="admin-toast "+type;
+  node.innerHTML='<span class="toast-mark"></span><div class="grow">'+esc(message||"تم")+'</div>';
+  root.appendChild(node);
+  requestAnimationFrame(()=>node.classList.add("show"));
+  setTimeout(()=>{
+    node.classList.remove("show");
+    setTimeout(()=>node.remove(),180);
+  },duration);
+}
+
+let adminDialogResolver=null;
+function closeAdminDialog(value=null){
+  const dialog=$("#adminActionDialog");
+  if(dialog?.open)dialog.close();
+  const resolve=adminDialogResolver;
+  adminDialogResolver=null;
+  if(resolve)resolve(value);
+}
+function openAdminDialog({title="تأكيد الإجراء",text="",acceptLabel="تأكيد",input=false,inputLabel="القيمة",defaultValue="",placeholder="",danger=false}={}){
+  return new Promise(resolve=>{
+    const dialog=$("#adminActionDialog");
+    if(!dialog)return resolve(null);
+    if(adminDialogResolver)adminDialogResolver(null);
+    adminDialogResolver=resolve;
+    $("#adminDialogTitle").textContent=title;
+    $("#adminDialogText").textContent=text||"";
+    $("#adminDialogAccept").textContent=acceptLabel;
+    $("#adminDialogAccept").classList.toggle("danger-primary",danger);
+    const row=$("#adminDialogInputRow");
+    row.classList.toggle("hidden",!input);
+    const field=$("#adminDialogInput");
+    $("#adminDialogInputLabel").textContent=inputLabel||"القيمة";
+    field.value=defaultValue??"";
+    field.placeholder=placeholder||"";
+    dialog.showModal();
+    if(input)setTimeout(()=>field.focus(),60);
+  });
+}
+async function adminConfirm(title,text="",options={}){
+  const result=await openAdminDialog({title,text,acceptLabel:options.acceptLabel||"تأكيد",danger:Boolean(options.danger)});
+  return result===true;
+}
+async function adminPrompt(title,{text="",label="القيمة",defaultValue="",placeholder="",acceptLabel="حفظ"}={}){
+  return openAdminDialog({title,text,acceptLabel,input:true,inputLabel:label,defaultValue,placeholder});
+}
+
+$("#adminActionForm")?.addEventListener("submit",event=>{
+  event.preventDefault();
+  const wantsInput=!$("#adminDialogInputRow").classList.contains("hidden");
+  closeAdminDialog(wantsInput?$("#adminDialogInput").value:true);
+});
+$("#adminDialogCancel")?.addEventListener("click",()=>closeAdminDialog(null));
+$("#adminDialogClose")?.addEventListener("click",()=>closeAdminDialog(null));
+$("#adminActionDialog")?.addEventListener("cancel",event=>{event.preventDefault();closeAdminDialog(null)});
+
+let connectionOnline=navigator.onLine;
+function setConnectionState(online){
+  connectionOnline=Boolean(online);
+  $("#connectionBanner")?.classList.toggle("hidden",connectionOnline);
+  document.documentElement.classList.toggle("is-offline",!connectionOnline);
+}
+window.addEventListener("online",()=>{setConnectionState(true);showToast("عاد الاتصال بالإنترنت",{type:"success"});});
+window.addEventListener("offline",()=>setConnectionState(false));
+setConnectionState(navigator.onLine);
+
 const titles={
   dashboard:"الرئيسية",
   users:"المستخدمون",
@@ -60,9 +151,21 @@ async function api(path,opt={}){
   const t=await token();
   if(t)h.set("Authorization","Bearer "+t);
   if(opt.body&&!h.has("Content-Type"))h.set("Content-Type","application/json");
-  const r=await fetch(apiBase()+path,{...opt,headers:h});
+  let r;
+  try{
+    r=await fetch(apiBase()+path,{...opt,headers:h});
+    setConnectionState(true);
+  }catch(error){
+    setConnectionState(false);
+    const networkError=new Error("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا.");
+    networkError.cause=error;
+    throw networkError;
+  }
   const b=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(b.error||"تعذر تنفيذ الطلب");
+  if(!r.ok){
+    if(r.status===401)showToast("انتهت جلسة الإدارة. سجّل الدخول من جديد.",{type:"error",duration:4500});
+    throw new Error(b.error||"تعذر تنفيذ الطلب");
+  }
   return b
 }
 async function mediaAccess(id){
@@ -112,32 +215,83 @@ function pillClass(s){
     ["failed","cancelled","rejected","hidden","error"].includes(s)?"bad":"";
 }
 
+let currentAdminPage="dashboard";
+const adminPageHistory=[];
+
 function showApp(ok){
   $("#loginView").classList.toggle("hidden",ok);
-  $("#adminApp").classList.toggle("hidden",!ok)
+  $("#adminApp").classList.toggle("hidden",!ok);
+  document.body.classList.toggle("admin-authenticated",ok);
+}
+function showPageLoading(page){
+  const map={
+    users:"#usersList",content:"#contentList",comments:"#commentsList",reports:"#reportsList",
+    support:"#supportList",storage:"#channelsList",uploads:"#uploadsList",errors:"#errorsList",
+    notifications:"#notificationHistory",admins:"#adminsList",audit:"#auditList",releases:"#releasesList",
+    health:"#healthCards"
+  };
+  const root=$(map[page]||"");
+  if(!root)return;
+  root.innerHTML='<div class="admin-skeleton-list">'+Array.from({length:4},()=>'<div class="admin-skeleton-row"><i></i><div><b></b><span></span></div></div>').join("")+'</div>';
 }
 async function verify(){
   try{
     await api("/v1/admin/me");
     showApp(true);
-    await loadDashboard()
+    navigate("dashboard",{history:false,loading:false});
+    await loadDashboard();
   }catch(e){
     showApp(false);
-    if((await sb.auth.getSession()).data.session)$("#loginMessage").textContent="هذا الحساب لا يملك صلاحية الإدارة."
+    if((await sb.auth.getSession()).data.session)$("#loginMessage").textContent=e.message==="تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا."?e.message:"هذا الحساب لا يملك صلاحية الإدارة.";
   }
 }
 
 $("#loginForm").onsubmit=async e=>{
   e.preventDefault();
-  $("#loginMessage").textContent="جارٍ الدخول...";
-  const {error}=await sb.auth.signInWithPassword({email:$("#email").value.trim(),password:$("#password").value});
-  if(error){$("#loginMessage").textContent=error.message;return}
-  verify()
+  const button=$("#loginSubmitButton");
+  button.disabled=true;
+  $("#loginMessage").textContent="جارٍ التحقق من الحساب...";
+  try{
+    const {error}=await sb.auth.signInWithPassword({email:$("#email").value.trim(),password:$("#password").value});
+    if(error)throw error;
+    await verify();
+  }catch(error){
+    $("#loginMessage").textContent=error.message||"تعذر تسجيل الدخول.";
+  }finally{button.disabled=false}
 };
-$("#logoutButton").onclick=async()=>{await sb.auth.signOut();showApp(false)};
+$("#forgotPasswordButton")?.addEventListener("click",async()=>{
+  const email=$("#email").value.trim();
+  if(!email){
+    $("#loginMessage").textContent="اكتب البريد الإلكتروني أولًا.";
+    $("#email").focus();
+    return;
+  }
+  $("#forgotPasswordButton").disabled=true;
+  try{
+    const {error}=await sb.auth.resetPasswordForEmail(email);
+    if(error)throw error;
+    $("#loginMessage").textContent="تم إرسال رابط استعادة كلمة المرور إلى البريد.";
+  }catch(error){
+    $("#loginMessage").textContent=error.message||"تعذر إرسال رابط الاستعادة.";
+  }finally{$("#forgotPasswordButton").disabled=false}
+});
+$("#logoutButton").onclick=async()=>{
+  const ok=await adminConfirm("تسجيل الخروج","سيتم إنهاء جلسة الإدارة على هذا الجهاز.",{acceptLabel:"تسجيل الخروج"});
+  if(!ok)return;
+  await sb.auth.signOut();
+  adminPageHistory.length=0;
+  currentAdminPage="dashboard";
+  showApp(false);
+};
 $("#menuButton").onclick=()=>$("#sidebar").classList.toggle("open");
 $("#moreAdminButton")?.addEventListener("click",()=>$("#sidebar").classList.toggle("open"));
-$("#refreshButton").onclick=()=>navigate(document.querySelector(".page.active")?.id||"dashboard");
+$("#refreshButton").onclick=()=>navigate(currentAdminPage,{history:false});
+$("#themeButton")?.addEventListener("click",toggleTheme);
+$("#loginThemeButton")?.addEventListener("click",toggleTheme);
+$("#retryConnectionButton")?.addEventListener("click",()=>{
+  setConnectionState(navigator.onLine);
+  if(navigator.onLine)navigate(currentAdminPage,{history:false});
+});
 document.addEventListener("click",e=>{
   if(window.innerWidth>920)return;
   const side=$("#sidebar");
@@ -145,14 +299,19 @@ document.addEventListener("click",e=>{
   if(side.contains(e.target)||$("#menuButton").contains(e.target)||$("#moreAdminButton")?.contains(e.target))return;
   side.classList.remove("open");
 });
-[...$$(".nav"),...$$(".mobile-nav")].filter(x=>x.dataset.page).forEach(b=>b.onclick=()=>navigate(b.dataset.page));
+[...$(".nav"),...$(".mobile-nav")].filter(x=>x.dataset.page).forEach(b=>b.onclick=()=>navigate(b.dataset.page));
 
-function navigate(page){
-  $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
-  $$("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+function navigate(page,{history=true,loading=true}={}){
+  if(!titles[page])page="dashboard";
+  if(history&&currentAdminPage&&currentAdminPage!==page)adminPageHistory.push(currentAdminPage);
+  currentAdminPage=page;
+  $(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+  $("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
   $("#headerSectionName").textContent=titles[page]||"إدارة آشور";
   $("#sidebar").classList.remove("open");
   $("#moreAdminButton")?.classList.remove("active");
+  window.scrollTo({top:0,behavior:"auto"});
+  if(loading)showPageLoading(page);
   const loader={
     dashboard:loadDashboard,
     users:loadUsers,
@@ -171,8 +330,35 @@ function navigate(page){
     siteSettings:loadSiteSettings,
     health:loadHealth
   }[page];
-  if(loader)loader()
+  if(loader)Promise.resolve(loader()).catch(error=>showToast(error.message,{type:"error"}));
 }
+function handleAdminBack(){
+  const openDialog=document.querySelector("dialog[open]");
+  if(openDialog){
+    if(openDialog.id==="adminActionDialog")closeAdminDialog(null);
+    else openDialog.close();
+    return true;
+  }
+  if($("#sidebar")?.classList.contains("open")){
+    $("#sidebar").classList.remove("open");
+    return true;
+  }
+  if(!$("#userDetail")?.classList.contains("hidden")){
+    $("#userDetail").classList.add("hidden");
+    return true;
+  }
+  if(adminPageHistory.length){
+    const previous=adminPageHistory.pop();
+    navigate(previous,{history:false});
+    return true;
+  }
+  if(currentAdminPage!=="dashboard"){
+    navigate("dashboard",{history:false});
+    return true;
+  }
+  return false;
+}
+window.ASHUR_ADMIN_HANDLE_BACK=handleAdminBack;
 
 async function loadDashboard(){
   try{
@@ -240,7 +426,7 @@ async function loadUserDetail(id){
       await loadUserDetail(id); await loadUsers();
     };
     $("#warnUserButton").onclick=async()=>{
-      const reason=prompt("اكتب نص التحذير");
+      const reason=await adminPrompt("إرسال تحذير",{label:"نص التحذير",placeholder:"اكتب سبب التحذير للمستخدم",acceptLabel:"إرسال"});
       if(!reason)return;
       await api("/v1/admin/users/"+id+"/action",{method:"POST",body:JSON.stringify({action:"warn",reason})});
       await loadUserDetail(id);
@@ -249,8 +435,8 @@ async function loadUserDetail(id){
       if(u.is_banned||u.banned_until){
         await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
       }else{
-        const reason=prompt("سبب الحظر")||"";
-        const choice=prompt("مدة الحظر بالساعات. اتركها 0 للحظر الدائم","24");
+        const reason=(await adminPrompt("سبب الحظر",{label:"السبب",placeholder:"سبب واضح يظهر في سجل الإدارة",acceptLabel:"التالي"}))||"";
+        const choice=await adminPrompt("مدة الحظر",{text:"اكتب عدد الساعات، أو 0 للحظر الدائم.",label:"الساعات",defaultValue:"24",acceptLabel:"حظر"});
         if(choice===null)return;
         await api("/v1/admin/users/"+id+"/ban",{method:"POST",body:JSON.stringify({banned:true,reason,duration_hours:Number(choice||0)})});
       }
@@ -284,8 +470,8 @@ async function loadUsers(){
       if(b.dataset.state==="true"){
         await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:false})});
       }else{
-        const reason=prompt("سبب الحظر")||"";
-        const hours=prompt("مدة الحظر بالساعات، 0 = دائم","24");
+        const reason=(await adminPrompt("سبب الحظر",{label:"السبب",placeholder:"سبب واضح يظهر في سجل الإدارة",acceptLabel:"التالي"}))||"";
+        const hours=await adminPrompt("مدة الحظر",{text:"اكتب عدد الساعات، أو 0 للحظر الدائم.",label:"الساعات",defaultValue:"24",acceptLabel:"حظر"});
         if(hours===null)return;
         await api("/v1/admin/users/"+b.dataset.ban+"/ban",{method:"POST",body:JSON.stringify({banned:true,reason,duration_hours:Number(hours||0)})});
       }
@@ -337,7 +523,7 @@ async function loadContent(kind=currentContentKind,authorId=""){
     $("#contentList").querySelectorAll("[data-open-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.openAuthor)});
     $("#contentList").querySelectorAll("[data-moderate]").forEach(b=>b.onclick=async()=>{
       const next=b.dataset.status==="hidden"?"active":"hidden";
-      const reason=next==="hidden"?(prompt("سبب إخفاء المحتوى")||""):"";
+      const reason=next==="hidden"?((await adminPrompt("إخفاء المحتوى",{label:"سبب الإخفاء",placeholder:"سبب الإجراء",acceptLabel:"إخفاء"}))||""):"";
       await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.moderate+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason})});
       loadContent(currentContentKind);
     });
@@ -348,7 +534,7 @@ async function loadContent(kind=currentContentKind,authorId=""){
       loadContent(currentContentKind);
     });
     $("#contentList").querySelectorAll("[data-delete-content]").forEach(b=>b.onclick=async()=>{
-      if(!confirm("هذا حذف نهائي للمحتوى. تأكيد؟"))return;
+      if(!await adminConfirm("حذف المحتوى نهائيًا؟","هذا الإجراء لا يمكن التراجع عنه من لوحة الإدارة.",{acceptLabel:"حذف نهائي",danger:true}))return;
       await api("/v1/admin/content/"+b.dataset.kind+"/"+b.dataset.deleteContent,{method:"DELETE"});
       loadContent(currentContentKind);
     });
@@ -379,7 +565,7 @@ async function loadCommentsAdmin(){
     $("#commentsList").querySelectorAll("[data-comment-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.commentAuthor)});
     $("#commentsList").querySelectorAll("[data-moderate-comment]").forEach(b=>b.onclick=async()=>{
       const next=b.dataset.status==="hidden"?"active":"hidden";
-      await api("/v1/admin/content/comments/"+b.dataset.moderateComment+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason:next==="hidden"?(prompt("سبب الإخفاء")||""):""})});
+      await api("/v1/admin/content/comments/"+b.dataset.moderateComment+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason:next==="hidden"?((await adminPrompt("إخفاء التعليق",{label:"سبب الإخفاء",acceptLabel:"إخفاء"}))||""):""})});
       loadCommentsAdmin();
     });
   }catch(e){$("#commentsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
@@ -408,7 +594,7 @@ async function loadReports(){
     }).join("")||'<div class="panel">لا توجد بلاغات مطابقة.</div>';
 
     const act=async(id,status,action="")=>{
-      const note=prompt("ملاحظة داخلية للمشرف (اختياري)","")||"";
+      const note=(await adminPrompt("ملاحظة المراجعة",{label:"ملاحظة داخلية",defaultValue:"",acceptLabel:"متابعة"}))||"";
       await api("/v1/admin/reports/"+id+"/action",{method:"POST",body:JSON.stringify({status,action,admin_note:note})});
       loadReports();
     };
@@ -436,7 +622,7 @@ async function loadStorage(){
       try{
         await api("/v1/admin/channels/"+encodeURIComponent(b.dataset.testChannel)+"/test",{method:"POST"});
         await loadStorage();
-      }catch(error){alert(error.message);b.disabled=false;b.textContent="إعادة الاختبار"}
+      }catch(error){showToast(error.message,{type:"error"});b.disabled=false;b.textContent="إعادة الاختبار"}
     });
   }catch(e){$("#channelsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
@@ -457,7 +643,7 @@ async function loadUploads(){
         '</div></div>';
     }).join("")||'<div class="panel">لا توجد عمليات رفع.</div>';
     $("#uploadsList").querySelectorAll("[data-cancel-upload]").forEach(b=>b.onclick=async()=>{
-      if(!confirm("إلغاء عملية الرفع؟"))return;
+      if(!await adminConfirm("إلغاء عملية الرفع؟","سيُطلب من الخادم إيقاف العملية الجارية.",{acceptLabel:"إلغاء العملية",danger:true}))return;
       await api("/v1/admin/uploads/"+b.dataset.cancelUpload+"/cancel",{method:"POST"});
       loadUploads();
     });
@@ -501,14 +687,14 @@ async function loadSupport(){
     ).join("")||'<div class="panel">لا توجد تذاكر دعم.</div>';
     $("#supportList").querySelectorAll("[data-support-user]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.supportUser)});
     $("#supportList").querySelectorAll("[data-reply-ticket]").forEach(b=>b.onclick=async()=>{
-      const reply=prompt("رد الإدارة. يمكن تركه فارغًا لتغيير الحالة فقط.","");
+      const reply=await adminPrompt("رد الإدارة",{text:"يمكن ترك الرد فارغًا إذا كنت تريد تغيير الحالة فقط.",label:"الرد",defaultValue:"",acceptLabel:"التالي"});
       if(reply===null)return;
-      const status=prompt("الحالة: open أو in_progress أو answered أو closed",reply.trim()?"answered":"in_progress");
+      const status=await adminPrompt("حالة التذكرة",{text:"القيم المتاحة: open / in_progress / answered / closed",label:"الحالة",defaultValue:reply.trim()?"answered":"in_progress",acceptLabel:"حفظ"});
       if(!status)return;
       try{
         await api("/v1/admin/support/"+b.dataset.replyTicket+"/reply",{method:"POST",body:JSON.stringify({reply,status})});
         loadSupport();
-      }catch(error){alert(error.message)}
+      }catch(error){showToast(error.message,{type:"error"})}
     });
   }catch(e){$("#supportList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
@@ -519,7 +705,7 @@ $("#notificationForm").onsubmit=async e=>{
   const scheduled=$("#notificationScheduledAt").value;
   const when=scheduled?new Date(scheduled).toISOString():null;
   const isScheduled=when&&new Date(when)>new Date(Date.now()+15000);
-  if(!confirm(isScheduled?"تأكيد جدولة الإشعار؟":"تأكيد إرسال الإشعار؟"))return;
+  if(!await adminConfirm(isScheduled?"جدولة الإشعار؟":"إرسال الإشعار؟",isScheduled?"سيتم إرسال الإشعار تلقائيًا في الموعد المحدد.":"سيبدأ الإرسال فور التأكيد.",{acceptLabel:isScheduled?"جدولة":"إرسال"}))return;
   $("#notificationMessage").textContent=isScheduled?"جارٍ الجدولة...":"جارٍ الإرسال...";
   try{
     const entityType=$("#notificationEntityType").value;
@@ -573,31 +759,31 @@ async function loadAdmins(){
         await api("/v1/admin/admins/"+sel.dataset.adminRole,{method:"PATCH",body:JSON.stringify({role:sel.value})});
         await loadAdmins();
       }catch(error){
-        alert(error.message);
+        showToast(error.message,{type:"error"});
         if(old)sel.value=old;
         sel.disabled=false;
       }
     });
     $("#adminsList").querySelectorAll("[data-admin-active]").forEach(btn=>btn.onclick=async()=>{
       const active=btn.dataset.active==="true";
-      if(active&&!confirm("تعطيل هذا المشرف؟"))return;
+      if(active&&!await adminConfirm("تعطيل المشرف؟","سيفقد هذا الحساب صلاحية الدخول إلى لوحة الإدارة.",{acceptLabel:"تعطيل",danger:true}))return;
       btn.disabled=true;
       try{
         await api("/v1/admin/admins/"+btn.dataset.adminActive,{method:"PATCH",body:JSON.stringify({active:!active})});
         await loadAdmins();
-      }catch(error){alert(error.message);btn.disabled=false}
+      }catch(error){showToast(error.message,{type:"error"});btn.disabled=false}
     });
   }catch(e){$("#adminsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 $("#addAdminButton").onclick=async()=>{
-  const userId=prompt("أدخل معرف المستخدم داخل آشور");
+  const userId=await adminPrompt("إضافة مشرف",{label:"معرف المستخدم UUID",placeholder:"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",acceptLabel:"التالي"});
   if(!userId)return;
-  const role=prompt("اكتب الدور: secondary_admin أو moderator أو content_moderator أو support أو analyst","moderator");
+  const role=await adminPrompt("دور المشرف",{text:"secondary_admin / moderator / content_moderator / support / analyst",label:"الدور",defaultValue:"moderator",acceptLabel:"إضافة"});
   if(!role)return;
   try{
     await api("/v1/admin/admins",{method:"POST",body:JSON.stringify({user_id:userId.trim(),role:role.trim(),permissions:{}})});
     await loadAdmins();
-  }catch(e){alert(e.message)}
+  }catch(e){showToast(e.message,{type:"error"})}
 };
 
 async function loadReleases(){
@@ -721,7 +907,7 @@ $("#appSettingsForm").onsubmit=async e=>{
       audio_mb:Number($("#limitAudio").value||15)
     }
   })});
-  alert("تم حفظ إعدادات التطبيق")
+  showToast("تم حفظ إعدادات التطبيق",{type:"success"})
 };
 
 async function loadSiteSettings(){
@@ -747,7 +933,7 @@ $("#siteSettingsForm").onsubmit=async e=>{
       updated_at:new Date().toISOString()
     }
   })});
-  alert("تم تحديث الموقع")
+  showToast("تم تحديث الموقع",{type:"success"})
 };
 
 async function loadHealth(){
@@ -761,5 +947,8 @@ async function loadHealth(){
   }catch(e){$("#healthCards").innerHTML=`<div class="panel">${esc(e.message)}</div>`}
 }
 
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible")setConnectionState(navigator.onLine);
+});
 verify();
 })();

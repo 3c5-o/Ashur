@@ -4332,8 +4332,8 @@ async function adminChannels(req, res) {
     summary: {
       channels: rows.length,
       enabled: rows.filter(x => x.enabled).length,
-      connected: rows.filter(x => x.status === "connected").length,
-      errors: rows.filter(x => x.status === "error").length,
+      connected: rows.filter(x => x.enabled && x.status === "connected").length,
+      errors: rows.filter(x => x.enabled && x.status === "error").length,
       files: rows.reduce((n,x) => n + Number(x.files_count || 0), 0),
       bytes: rows.reduce((n,x) => n + Number(x.bytes_total || 0), 0),
     },

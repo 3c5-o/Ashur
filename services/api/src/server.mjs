@@ -5494,7 +5494,7 @@ async function collectHealthDetails(includeInternal = false) {
     const memory = process.memoryUsage();
     result.runtime = {
       api_version: "1.3.1",
-        gateway_revision: "G1",
+        gateway_revision: "G1.1",
       admin_revision: "A14",
       commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
       uptime_seconds: Math.floor(process.uptime()),

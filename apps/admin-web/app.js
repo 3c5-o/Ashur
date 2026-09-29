@@ -523,6 +523,7 @@ async function loadUserDetail(id){
     $("#viewUserContentButton").onclick=()=>{
       navigate("content");
       $("#contentAuthor").value=id;
+      contentTargetId="";
       contentPage=1;
       loadContent("posts");
     };
@@ -595,6 +596,7 @@ async function loadUsers(){
 
 let currentContentKind="posts";
 let contentTimer;
+let contentTargetId="";
 let contentPage=1;
 let contentPages=1;
 let lastContentItems=new Map();
@@ -606,7 +608,7 @@ function updateContentFilterVisibility(){
   $("#contentComments").disabled=story;
   $("#contentExplore").disabled=!reel;
 }
-function resetContentPage(){contentPage=1}
+function resetContentPage(){contentPage=1;contentTargetId=""}
 $$("[data-content-kind]").forEach(b=>b.onclick=()=>{
   $$("[data-content-kind]").forEach(x=>x.classList.remove("active"));
   b.classList.add("active");
@@ -664,6 +666,7 @@ async function loadContent(kind=currentContentKind,authorId=""){
   updateContentFilterVisibility();
   try{
     const params=new URLSearchParams({kind,page:String(contentPage),limit:"24"});
+    if(contentTargetId)params.set("target_id",contentTargetId);
     const values={
       q:$("#contentSearch")?.value.trim(),
       author:$("#contentAuthor")?.value.trim(),
@@ -773,9 +776,10 @@ async function loadCommentsAdmin(){
     $("#commentsList").querySelectorAll("[data-comment-target]").forEach(b=>b.onclick=()=>{
       navigate("content");
       currentContentKind=b.dataset.commentKind;
-      $("[data-content-kind]").forEach(x=>x.classList.toggle("active",x.dataset.contentKind===currentContentKind));
+      $$("[data-content-kind]").forEach(x=>x.classList.toggle("active",x.dataset.contentKind===currentContentKind));
       $("#contentSearch").value="";
       $("#contentAuthor").value="";
+      contentTargetId=b.dataset.commentTarget;
       contentPage=1;
       loadContent(currentContentKind);
     });

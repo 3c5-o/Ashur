@@ -186,11 +186,13 @@ function adminCanPage(page){
 }
 function applyAdminAccess(me){
   adminAccess=me||null;
-  $$("[data-page]").forEach(node=>{
+  $("[data-page]").forEach(node=>{
     const page=node.dataset.page;
     if(!page)return;
     node.classList.toggle("permission-hidden",!adminCanPage(page));
   });
+  const ownerOnly=me?.role==="owner";
+  $("[data-owner-only]").forEach(node=>node.classList.toggle("hidden",!ownerOnly));
   document.body.dataset.adminRole=me?.role||"";
 }
 const actionLabel={
@@ -237,7 +239,8 @@ const actionLabel={
   deactivate_user:"تعطيل حساب",
   reactivate_user:"إعادة تفعيل حساب",
   delete_report_target:"حذف هدف بلاغ",
-  update_support:"تحديث تذكرة دعم"
+  update_support:"تحديث تذكرة دعم",
+  transfer_owner:"نقل ملكية الإدارة"
 };
 
 async function token(){return (await sb.auth.getSession()).data.session?.access_token||""}
@@ -2007,8 +2010,82 @@ function openAdminPermissionEditor(admin){
   });
 }
 
+async function loadOwnerManagement(){
+  const panel=$("#ownerManagementPanel");
+  if(!panel)return;
+  const isOwner=adminAccess?.role==="owner";
+  panel.classList.toggle("hidden",!isOwner);
+  if(!isOwner)return;
+  try{
+    const d=await api("/v1/admin/owner");
+    const o=d.owner||{}, p=o.profile||{}, auth=o.auth||{};
+    $("#ownerCurrentSummary").innerHTML=
+      '<div><span>المالك الحالي</span><b>'+esc(p.name||p.username||o.user_id||"—")+'</b></div>'+
+      '<div><span>اسم المستخدم</span><b>'+(p.username?'@'+esc(p.username):'—')+'</b></div>'+
+      '<div><span>البريد</span><b>'+esc(auth.email||"—")+'</b></div>'+
+      '<div><span>UUID</span><code>'+esc(o.user_id||"—")+'</code></div>'+
+      '<div><span>آخر دخول</span><b>'+(auth.last_sign_in_at?new Date(auth.last_sign_in_at).toLocaleString("ar-IQ"):"—")+'</b></div>';
+    $("#ownerTransferMessage").textContent="";
+  }catch(error){
+    $("#ownerCurrentSummary").innerHTML='<div class="meta">'+esc(error.message)+'</div>';
+  }
+}
+
+$("#ownerTransferButton")?.addEventListener("click",async()=>{
+  if(adminAccess?.role!=="owner"){
+    showToast("هذه العملية للمالك الرئيسي فقط.",{type:"error"});
+    return;
+  }
+  const newOwnerId=$("#ownerNewUserId").value.trim();
+  const previousAction=$("#ownerPreviousAction").value;
+  if(!/^[0-9a-f-]{36}$/i.test(newOwnerId)){
+    $("#ownerTransferMessage").textContent="UUID الحساب الجديد غير صالح.";
+    return;
+  }
+  const keepText=previousAction==="remove"?"إزالة صلاحيات الإدارة من المالك الحالي":"تحويل المالك الحالي إلى مدير ثانوي";
+  const ok=await adminSensitiveConfirm(
+    "نقل ملكية الإدارة؟",
+    "سيصبح UUID الجديد هو المالك الأساسي وسيتم "+keepText+".",
+    {phrase:"TRANSFER",acceptLabel:"نقل الملكية"}
+  );
+  if(!ok)return;
+
+  $("#ownerTransferButton").disabled=true;
+  $("#ownerTransferMessage").textContent="جارٍ فحص الحساب ونقل الملكية...";
+  try{
+    const result=await api("/v1/admin/owner",{
+      method:"POST",
+      body:JSON.stringify({
+        new_owner_id:newOwnerId,
+        previous_owner_action:previousAction,
+        confirm:"TRANSFER"
+      })
+    });
+    showToast("تم نقل ملكية الإدارة إلى الحساب الجديد.",{type:"success",duration:5000});
+    $("#ownerTransferMessage").textContent="تم النقل إلى "+(result.new_owner?.username?"@"+result.new_owner.username:result.new_owner?.user_id||newOwnerId)+".";
+    $("#ownerNewUserId").value="";
+
+    if(previousAction==="remove"){
+      await sb.auth.signOut().catch(()=>{});
+      adminAccess=null;
+      showApp(false);
+      $("#loginMessage").textContent="تم نقل الملكية وإزالة صلاحية هذا الحساب. سجّل الدخول بحساب المالك الجديد.";
+      return;
+    }
+
+    await verify();
+  }catch(error){
+    $("#ownerTransferMessage").textContent=error.message;
+    showToast(error.message,{type:"error"});
+  }finally{
+    $("#ownerTransferButton").disabled=false;
+  }
+});
+
 async function loadAdmins(){
   try{
+    if(adminAccess?.role==="owner")await loadOwnerManagement();
+    else $("#ownerManagementPanel")?.classList.add("hidden");
     const d=await api("/v1/admin/admins");
     adminRoleDefaults=d.role_defaults||{};
     adminsById=new Map((d.items||[]).map(x=>[String(x.user_id),x]));

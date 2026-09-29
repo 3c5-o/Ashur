@@ -2681,13 +2681,20 @@
 
   async function appendRealtimeMessage(message){
     if(!message?.id||message.conversation_id!==state.activeConversation)return;
+    const member=(state.activeConversationMeta?.members||[]).find(item=>item.user_id===message.sender_id)||null;
+    const enriched={
+      ...message,
+      sender_profile:message.sender_profile||member?.profile||null,
+      sender_role:message.sender_role||member?.role||null,
+      sender_nickname:message.sender_nickname||member?.nickname||null
+    };
     const existing=state.chatMessageCache.get(String(message.id));
     if(existing){
-      state.chatMessageCache.set(String(message.id),{...existing,...message});
+      state.chatMessageCache.set(String(message.id),{...existing,...enriched});
       await reconcileChatMessages([...state.chatMessageCache.values()],{quiet:true});
       return;
     }
-    const next={...message,read_by_other:false};
+    const next={...enriched,read_by_other:false};
     state.chatMessageCache.set(String(message.id),next);
     await reconcileChatMessages([...state.chatMessageCache.values()],{quiet:true,fromRealtime:true});
     if(message.sender_id!==state.user.id){
@@ -2801,9 +2808,10 @@
     clearChatAttachment();
     openDialog($("#chatDialog"));
 
-    fetchConversationDetails(id).then(details=>{
+    try{
+      const details=await fetchConversationDetails(id,{refresh:true});
       if(state.activeConversation===id)renderChatHeader(details);
-    }).catch(()=>{});
+    }catch(_){ }
 
     await loadChat();
     if(state.activeConversation===id)subscribeChatRealtime();
@@ -2819,6 +2827,9 @@
     try{
       const details=await fetchConversationDetails(state.activeConversation,{refresh:true});
       const isGroup=details.kind==="group";
+      const myRole=String(details.my_role||"member");
+      const canManage=isGroup&&["owner","admin"].includes(myRole);
+      const isOwner=myRole==="owner";
       const peer=details.peer_profile||{};
       const title=isGroup?(details.title||"مجموعة"):(peer.name||peer.username||details.title||"مستخدم");
       const avatarHtml=isGroup
@@ -2829,32 +2840,78 @@
           ?'<div class="conversation-info-avatar"><img data-media-id="'+escapeHtml(peer.avatar_media_id)+'" alt=""></div>'
           :'<div class="conversation-info-avatar">'+initials(title)+'</div>');
 
-      const membersHtml=isGroup
-        ?'<div class="settings-group"><div class="settings-group-title"><div><span class="eyebrow">الأعضاء</span><h4>'+Number(details.member_count||0)+' أعضاء</h4></div></div>'+
-          '<div class="conversation-info-members">'+(details.members||[]).map(member=>{
-            const profile=member.profile||{};
-            return '<button class="conversation-member-row" data-info-profile="'+escapeHtml(member.user_id)+'" type="button">'+
-              avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||profile.username||"مستخدم")+'</b><small>@'+escapeHtml(profile.username||"")+(member.role==="owner"?" · المالك":member.role==="admin"?" · مشرف":"")+'</small></span>'+
-            '</button>';
-          }).join("")+'</div></div>'
+      const members=isGroup?(details.members||[]):[];
+      const memberCards=members.map(member=>{
+        const profile=member.profile||{};
+        const roleLabel=member.role==="owner"?"المالك":member.role==="admin"?"مشرف":"عضو";
+        const searchText=(profile.name+" "+profile.username+" "+(member.nickname||"")).toLowerCase();
+        const canRole=isOwner&&member.role!=="owner"&&member.user_id!==state.user.id;
+        const canRemove=canManage&&member.role!=="owner"&&member.user_id!==state.user.id&&(isOwner||member.role==="member");
+        const manageTools=canManage
+          ?'<div class="group-member-manage">'+
+            '<label class="group-nickname-field"><span>الكنية</span><input data-member-nickname="'+escapeHtml(member.user_id)+'" maxlength="32" value="'+escapeHtml(member.nickname||"")+'" placeholder="بدون كنية"></label>'+
+            '<button class="member-tool save" data-save-member-nickname="'+escapeHtml(member.user_id)+'" type="button">حفظ الكنية</button>'+
+            (canRole?'<button class="member-tool role" data-toggle-member-role="'+escapeHtml(member.user_id)+'" type="button">'+(member.role==="admin"?"إلغاء الإشراف":"تعيين مشرف")+'</button>':"")+
+            (canRemove?'<button class="member-tool danger" data-remove-member="'+escapeHtml(member.user_id)+'" type="button">إزالة</button>':"")+
+          '</div>'
+          :"";
+        return '<article class="conversation-member-card" data-group-member-card data-member-search="'+escapeHtml(searchText)+'">'+
+          '<button class="conversation-member-row" data-info-profile="'+escapeHtml(member.user_id)+'" type="button">'+
+            avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||profile.username||"مستخدم")+
+            (profile.is_verified?'<span class="verified-inline">✓</span>':"")+'</b>'+
+            '<small>@'+escapeHtml(profile.username||"")+(member.nickname?' · '+escapeHtml(member.nickname):"")+'</small></span>'+
+            '<span class="group-role-badge '+escapeHtml(member.role||"member")+'">'+roleLabel+'</span>'+
+          '</button>'+manageTools+
+        '</article>';
+      }).join("");
+
+      const groupSettings=canManage
+        ?'<section class="group-settings-card">'+
+          '<div class="group-settings-title"><div><span class="eyebrow">إدارة المجموعة</span><h4>الصورة والاسم</h4></div></div>'+
+          '<div class="group-image-actions">'+
+            '<label class="group-image-picker"><input id="groupImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/avif"><span>تغيير صورة المجموعة</span></label>'+
+            (details.image_media_id?'<button id="removeGroupImage" type="button">إزالة الصورة</button>':"")+
+          '</div>'+
+          '<div class="conversation-title-editor"><input id="conversationTitleInput" maxlength="80" value="'+escapeHtml(details.title||"")+'"><button id="saveConversationTitle" class="small-button" type="button">حفظ الاسم</button></div>'+
+        '</section>'
         :"";
 
-      const groupEdit=isGroup&&["owner","admin"].includes(String(details.my_role||""))
-        ?'<div class="settings-group"><div class="settings-group-title"><div><span class="eyebrow">المجموعة</span><h4>اسم المجموعة</h4></div></div>'+
-          '<div class="conversation-title-editor"><input id="conversationTitleInput" maxlength="80" value="'+escapeHtml(details.title||"")+'"><button id="saveConversationTitle" class="small-button" type="button">حفظ</button></div></div>'
+      const addMemberSection=canManage
+        ?'<section class="group-settings-card group-add-members">'+
+          '<div class="group-settings-title"><div><span class="eyebrow">الأعضاء</span><h4>إضافة عضو</h4></div></div>'+
+          '<div class="search-box standalone group-add-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="groupAddMemberSearch" autocomplete="off" placeholder="ابحث بالاسم أو اليوزر"></div>'+
+          '<div id="groupAddMemberResults" class="list compact group-add-results"><div class="empty">اكتب اسمًا للبحث.</div></div>'+
+        '</section>'
+        :"";
+
+      const memberSection=isGroup
+        ?'<section class="group-settings-card group-members-card">'+
+          '<div class="group-members-heading"><div><span class="eyebrow">أعضاء المجموعة</span><h4>'+Number(details.member_count||members.length)+' أعضاء</h4></div>'+
+          '<div class="search-box compact member-filter-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="groupMemberFilter" autocomplete="off" placeholder="بحث بالأعضاء"></div></div>'+
+          '<div class="conversation-info-members">'+memberCards+'</div>'+
+        '</section>'
         :"";
 
       body.innerHTML=
-        '<div class="conversation-info-hero">'+avatarHtml+'<h4>'+escapeHtml(title)+'</h4>'+
-          '<p>'+(isGroup?"مجموعة آشور":("@"+escapeHtml(peer.username||"")))+'</p></div>'+
+        '<div class="conversation-info-hero group-info-v8">'+avatarHtml+'<h4>'+escapeHtml(title)+'</h4>'+
+          '<p>'+(isGroup?(Number(details.member_count||members.length)+' أعضاء'):("@"+escapeHtml(peer.username||"")))+'</p>'+
+          (isGroup?'<span class="my-group-role">صلاحيتك: '+(myRole==="owner"?"المالك":myRole==="admin"?"مشرف":"عضو")+'</span>':"")+
+        '</div>'+
         '<div class="conversation-info-actions">'+
           (!isGroup?'<button id="conversationViewProfile" type="button">عرض الملف الشخصي</button>':"")+
           '<button id="conversationMuteButton" type="button">'+(details.muted?"إلغاء كتم الإشعارات":"كتم الإشعارات")+'</button>'+
         '</div>'+
-        groupEdit+membersHtml+
+        groupSettings+addMemberSection+memberSection+
         '<p id="conversationInfoMessage" class="message" aria-live="polite"></p>';
 
       await hydrateMedia(body);
+
+      const setMessage=(text,good=false)=>{
+        const el=$("#conversationInfoMessage");
+        if(!el)return;
+        el.textContent=text||"";
+        el.className="message "+(text?(good?"success":"error"):"");
+      };
 
       if($("#conversationViewProfile"))$("#conversationViewProfile").onclick=()=>{
         const userId=peer.id;
@@ -2877,16 +2934,15 @@
           });
           details.muted=next;
           button.textContent=next?"إلغاء كتم الإشعارات":"كتم الإشعارات";
-          $("#conversationInfoMessage").textContent=next?"تم كتم إشعارات المحادثة.":"تم تفعيل إشعارات المحادثة.";
-        }catch(error){
-          $("#conversationInfoMessage").textContent=error.message;
-        }finally{button.disabled=false}
+          setMessage(next?"تم كتم إشعارات المحادثة.":"تم تفعيل إشعارات المحادثة.",true);
+        }catch(error){setMessage(error.message)}
+        finally{button.disabled=false}
       };
 
       if($("#saveConversationTitle"))$("#saveConversationTitle").onclick=async()=>{
         const button=$("#saveConversationTitle");
         const next=$("#conversationTitleInput").value.trim();
-        if(next.length<2)return $("#conversationInfoMessage").textContent="اكتب اسمًا أوضح للمجموعة.";
+        if(next.length<2)return setMessage("اكتب اسمًا أوضح للمجموعة.");
         button.disabled=true;
         try{
           await api("/v1/conversations/"+encodeURIComponent(details.id),{
@@ -2896,13 +2952,110 @@
           details.title=next;
           state.activeConversationMeta=details;
           renderChatHeader(details);
-          $("#conversationInfoTitle").textContent=next;
-          $("#conversationInfoMessage").textContent="تم تحديث اسم المجموعة.";
           await loadConversations();
-        }catch(error){
-          $("#conversationInfoMessage").textContent=error.message;
-        }finally{button.disabled=false}
+          setMessage("تم تحديث اسم المجموعة.",true);
+        }catch(error){setMessage(error.message)}
+        finally{button.disabled=false}
       };
+
+      if($("#groupImageFile"))$("#groupImageFile").onchange=async()=>{
+        const input=$("#groupImageFile");
+        const file=input.files?.[0]||null;
+        if(!file)return;
+        const check=profileUtil.validateImageFile(file);
+        if(!check.ok){input.value="";return setMessage(check.error)}
+        input.disabled=true;
+        setMessage("جارٍ رفع صورة المجموعة...",true);
+        try{
+          const media=await uploadFile(file,"group_media",{silent:true});
+          await api("/v1/conversations/"+encodeURIComponent(details.id),{
+            method:"PATCH",
+            body:JSON.stringify({image_media_id:media.id})
+          });
+          details.image_media_id=media.id;
+          state.activeConversationMeta=details;
+          renderChatHeader(details);
+          await loadConversations();
+          await openConversationInfo();
+        }catch(error){setMessage(error.message)}
+        finally{if(input.isConnected)input.disabled=false}
+      };
+
+      if($("#removeGroupImage"))$("#removeGroupImage").onclick=async()=>{
+        const ok=await confirmAction({title:"إزالة صورة المجموعة؟",text:"سيتم الرجوع إلى الحرف الأول من اسم المجموعة.",acceptLabel:"إزالة",danger:true});
+        if(!ok)return;
+        try{
+          await api("/v1/conversations/"+encodeURIComponent(details.id),{method:"PATCH",body:JSON.stringify({image_media_id:null})});
+          details.image_media_id=null;
+          state.activeConversationMeta=details;
+          renderChatHeader(details);
+          await loadConversations();
+          await openConversationInfo();
+        }catch(error){setMessage(error.message)}
+      };
+
+      const memberFilter=$("#groupMemberFilter");
+      if(memberFilter)memberFilter.oninput=()=>{
+        const q=memberFilter.value.trim().toLowerCase();
+        body.querySelectorAll("[data-group-member-card]").forEach(card=>{
+          card.classList.toggle("hidden",Boolean(q)&&!String(card.dataset.memberSearch||"").includes(q));
+        });
+      };
+
+      body.querySelectorAll("[data-save-member-nickname]").forEach(button=>button.onclick=async()=>{
+        const userId=button.dataset.saveMemberNickname;
+        const input=body.querySelector('[data-member-nickname="'+CSS.escape(userId)+'"]');
+        button.disabled=true;
+        try{
+          await api("/v1/conversations/"+encodeURIComponent(details.id)+"/members/"+encodeURIComponent(userId),{
+            method:"PATCH",
+            body:JSON.stringify({nickname:input?.value||""})
+          });
+          const member=details.members.find(item=>item.user_id===userId);
+          if(member)member.nickname=(input?.value||"").trim()||null;
+          setMessage("تم حفظ الكنية.",true);
+          await loadChat({quiet:true,markRead:false});
+        }catch(error){setMessage(error.message)}
+        finally{button.disabled=false}
+      });
+
+      body.querySelectorAll("[data-toggle-member-role]").forEach(button=>button.onclick=async()=>{
+        const userId=button.dataset.toggleMemberRole;
+        const member=details.members.find(item=>item.user_id===userId);
+        if(!member)return;
+        const nextRole=member.role==="admin"?"member":"admin";
+        const ok=await confirmAction({
+          title:nextRole==="admin"?"تعيين مشرف؟":"إلغاء الإشراف؟",
+          text:nextRole==="admin"?"سيتمكن هذا العضو من تعديل المجموعة وإضافة وإزالة الأعضاء العاديين.":"ستعود صلاحية العضو إلى عضو عادي.",
+          acceptLabel:nextRole==="admin"?"تعيين":"إلغاء الإشراف"
+        });
+        if(!ok)return;
+        button.disabled=true;
+        try{
+          await api("/v1/conversations/"+encodeURIComponent(details.id)+"/members/"+encodeURIComponent(userId),{
+            method:"PATCH",
+            body:JSON.stringify({role:nextRole})
+          });
+          member.role=nextRole;
+          await openConversationInfo();
+        }catch(error){setMessage(error.message);button.disabled=false}
+      });
+
+      body.querySelectorAll("[data-remove-member]").forEach(button=>button.onclick=async()=>{
+        const userId=button.dataset.removeMember;
+        const member=details.members.find(item=>item.user_id===userId);
+        const label=member?.profile?.name||member?.profile?.username||"هذا العضو";
+        const ok=await confirmAction({title:"إزالة عضو؟",text:"سيتم إزالة "+label+" من المجموعة.",acceptLabel:"إزالة",danger:true});
+        if(!ok)return;
+        button.disabled=true;
+        try{
+          await api("/v1/conversations/"+encodeURIComponent(details.id)+"/members/"+encodeURIComponent(userId),{method:"DELETE"});
+          details.members=details.members.filter(item=>item.user_id!==userId);
+          details.member_count=details.members.length;
+          await openConversationInfo();
+          await loadConversations();
+        }catch(error){setMessage(error.message);button.disabled=false}
+      });
 
       body.querySelectorAll("[data-info-profile]").forEach(button=>button.onclick=()=>{
         const userId=button.dataset.infoProfile;
@@ -2914,6 +3067,49 @@
         state.activeConversationMeta=null;
         openPublicProfile(userId);
       });
+
+      const addSearch=$("#groupAddMemberSearch");
+      const addRoot=$("#groupAddMemberResults");
+      if(addSearch&&addRoot){
+        let addTimer=null;
+        const existingIds=new Set(details.members.map(item=>item.user_id));
+        const searchCandidates=async()=>{
+          const raw=addSearch.value.trim();
+          if(!raw){
+            addRoot.innerHTML='<div class="empty">اكتب اسمًا للبحث.</div>';
+            return;
+          }
+          const safe=raw.replace(/[,%()]/g,"").slice(0,40);
+          const {data,error}=await client.from("profiles")
+            .select("id,name,username,avatar_media_id,is_verified")
+            .neq("id",state.user.id)
+            .eq("is_banned",false)
+            .or("name.ilike.%"+safe+"%,username.ilike.%"+safe+"%")
+            .limit(20);
+          if(error){addRoot.innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';return}
+          const rows=(data||[]).filter(profile=>!existingIds.has(profile.id));
+          addRoot.innerHTML=rows.map(profile=>
+            '<div class="group-add-result">'+avatar(profile)+'<span class="grow"><b>'+escapeHtml(profile.name||"مستخدم")+(profile.is_verified?'<span class="verified-inline">✓</span>':"")+'</b><small>@'+escapeHtml(profile.username||"")+'</small></span>'+
+            '<button data-add-group-member="'+escapeHtml(profile.id)+'" type="button">إضافة</button></div>'
+          ).join("")||'<div class="empty">لا توجد حسابات متاحة للإضافة.</div>';
+          await hydrateMedia(addRoot);
+          addRoot.querySelectorAll("[data-add-group-member]").forEach(button=>button.onclick=async()=>{
+            button.disabled=true;
+            try{
+              await api("/v1/conversations/"+encodeURIComponent(details.id)+"/members",{
+                method:"POST",
+                body:JSON.stringify({user_id:button.dataset.addGroupMember})
+              });
+              await openConversationInfo();
+              await loadConversations();
+            }catch(error){setMessage(error.message);button.disabled=false}
+          });
+        };
+        addSearch.oninput=()=>{
+          clearTimeout(addTimer);
+          addTimer=setTimeout(()=>searchCandidates().catch(error=>setMessage(error.message)),170);
+        };
+      }
     }catch(error){
       body.innerHTML='<div class="empty error">'+escapeHtml(error.message)+'</div>';
     }
@@ -2932,10 +3128,13 @@
     '</button>';
   }
   function chatMessageSignature(message,parent=null){
+    const sender=message.sender_profile||{};
     return JSON.stringify([
       message.id,message.sender_id,message.body||"",message.media_id||"",message.reply_to||"",
       message.shared_type||"",message.shared_id||"",message.created_at||"",
       Boolean(message.read_by_other),
+      message.sender_nickname||"",message.sender_role||"",
+      sender.name||"",sender.username||"",sender.avatar_media_id||"",
       parent?.id||"",parent?.body||"",parent?.media_id||"",parent?.shared_type||"",parent?.shared_id||""
     ]);
   }
@@ -2951,13 +3150,28 @@
     const parentHtml=parent
       ?'<div class="message-reply-preview"><span>رد على رسالة</span><b>'+escapeHtml(parent.body||"مرفق")+'</b></div>'
       :"";
-    const delivery=message.sender_id===state.user.id
+    const mine=message.sender_id===state.user.id;
+    const delivery=mine
       ?'<span class="message-read">'+(message.read_by_other?"تمت القراءة":"تم الإرسال")+'</span>'
       :"";
     const signature=chatMessageSignature(message,parent);
-    return '<div class="message-row '+(message.sender_id===state.user.id?"mine":"other")+'" data-message-id="'+escapeHtml(message.id)+'" data-message-signature="'+escapeHtml(signature)+'">'+
-      '<div class="bubble">'+parentHtml+sharedMessageMarkup(message)+media+body+'</div>'+
-      '<div class="message-meta-line"><time>'+new Date(message.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+delivery+'</div>'+
+    const bubble='<div class="bubble">'+parentHtml+sharedMessageMarkup(message)+media+body+'</div>';
+    const meta='<div class="message-meta-line"><time>'+new Date(message.created_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"})+'</time>'+delivery+'</div>';
+    const isGroup=state.activeConversationMeta?.kind==="group";
+
+    if(isGroup&&!mine){
+      const sender=message.sender_profile||{};
+      const display=message.sender_nickname||sender.name||sender.username||"عضو";
+      const roleLabel=message.sender_role==="owner"?"المالك":message.sender_role==="admin"?"مشرف":"";
+      const senderHead='<div class="message-sender-label"><b>'+escapeHtml(display)+'</b>'+
+        (roleLabel?'<span>'+roleLabel+'</span>':"")+'</div>';
+      return '<div class="message-row other group-message" data-message-id="'+escapeHtml(message.id)+'" data-message-signature="'+escapeHtml(signature)+'">'+
+        '<div class="group-message-avatar">'+avatar(sender,"message-sender-avatar")+'</div>'+
+        '<div class="message-stack">'+senderHead+bubble+meta+'</div></div>';
+    }
+
+    return '<div class="message-row '+(mine?"mine":"other")+'" data-message-id="'+escapeHtml(message.id)+'" data-message-signature="'+escapeHtml(signature)+'">'+
+      bubble+meta+
     '</div>';
   }
 
@@ -4311,7 +4525,12 @@
   };
   $("#closeNotifications").onclick=()=>$("#notificationsDialog").close();
 
-  $("#publishButton").onclick=()=>openDialog($("#publishDialog"));
+  async function openQuickPublish(type="post"){
+    await openComposer(type);
+    await openCameraStudio();
+  }
+
+  $("#publishButton").onclick=()=>openQuickPublish("post").catch(error=>openInfoDialog("الكاميرا",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
 
@@ -4771,6 +4990,7 @@
 
   async function openCameraStudio(){
     if(state.cameraRecorder?.state==="recording")return;
+    syncComposerTypeUi(state.composerType||"post");
     state.cameraFacing="environment";
     state.cameraTimerSeconds=0;
     state.cameraTorch=false;
@@ -4894,9 +5114,13 @@
     closeCameraStudio({returnToComposer:true});
   });
 
-  $$("#cameraStudioDialog [data-camera-mode]").forEach(button=>button.onclick=()=>{
+  $("#cameraStudioDialog [data-camera-mode]").forEach(button=>button.onclick=()=>{
     if(state.cameraRecorder?.state==="recording")return;
     setCameraMode(button.dataset.cameraMode);
+  });
+
+  $("#cameraStudioDialog [data-camera-publish]").forEach(button=>button.onclick=()=>{
+    switchQuickPublishType(button.dataset.cameraPublish).catch(showCameraError);
   });
 
   async function switchCameraFacing(){
@@ -4968,33 +5192,57 @@
     }
   };
 
-  async function openComposer(type){
-    state.composerType=type;
-    $("#publishDialog").close();
-    clearComposerPreview();
-    $("#composerTitle").textContent=type==="story"?"إنشاء قصة":type==="reel"?"إنشاء ريلز":"إنشاء منشور";
-    $("#composerFile").accept=type==="reel"?"video/*":"image/*,video/*";
-    $("#composerFile").multiple=type==="post";
-    $("#composerCameraFile").accept=type==="reel"?"video/*":"image/*";
-    $("#composerCaption").value="";
-    $("#composerCaptionLabel").textContent=type==="story"?"نص القصة":"الوصف";
-    $("#composerCaption").placeholder=type==="story"?"اكتب نص القصة أو استخدم @ لذكر صديق":"اكتب وصفًا... استخدم @ للإشارة إلى حساب و # للهاشتاغ";
+  function syncComposerTypeUi(type){
+    state.composerType=["story","reel"].includes(type)?type:"post";
+    const current=state.composerType;
+    $("#composerTitle").textContent=current==="story"?"إنشاء قصة":current==="reel"?"إنشاء ريلز":"إنشاء منشور";
+    $("#composerFile").accept=current==="reel"?"video/*":"image/*,video/*";
+    $("#composerFile").multiple=current==="post";
+    $("#composerCameraFile").accept=current==="reel"?"video/*":"image/*";
+    $("#composerCaptionLabel").textContent=current==="story"?"نص القصة":"الوصف";
+    $("#composerCaption").placeholder=current==="story"?"اكتب نص القصة أو استخدم @ لذكر صديق":"اكتب وصفًا... استخدم @ للإشارة إلى حساب و # للهاشتاغ";
     const privateAccount=Boolean(state.profile?.is_private);
     const publicOption=$("#composerVisibility").querySelector('option[value="public"]');
     if(publicOption)publicOption.disabled=privateAccount;
+    if(privateAccount)$("#composerVisibility").value="followers";
+    $("#composerExploreRow").classList.toggle("hidden",current!=="reel");
+    $("#composerOptions").classList.toggle("hidden",current==="story");
+    $("#storyEditorControls").classList.toggle("hidden",current!=="story");
+    $$("#cameraStudioDialog [data-camera-publish]").forEach(button=>{
+      button.classList.toggle("active",button.dataset.cameraPublish===current);
+      button.setAttribute("aria-selected",button.dataset.cameraPublish===current?"true":"false");
+    });
+  }
+
+  async function switchQuickPublishType(type){
+    if(state.cameraRecorder?.state==="recording")return;
+    syncComposerTypeUi(type);
+    if(state.composerType==="reel"){
+      setCameraMode("video");
+    }else if(state.cameraMode==="video"){
+      setCameraMode("photo");
+    }else{
+      setCameraMode(state.cameraMode,{restart:false});
+    }
+    $("#cameraHint").textContent=state.cameraMode==="video"?"اضغط لبدء تسجيل الفيديو":"اضغط لالتقاط صورة";
+  }
+
+  async function openComposer(type){
+    $("#publishDialog").close();
+    clearComposerPreview();
+    syncComposerTypeUi(type);
+    $("#composerCaption").value="";
+    const privateAccount=Boolean(state.profile?.is_private);
     $("#composerVisibility").value=privateAccount?"followers":"public";
     $("#composerCommentsEnabled").checked=true;
     $("#composerExploreEnabled").checked=true;
-    $("#composerExploreRow").classList.toggle("hidden",type!=="reel");
-    $("#composerOptions").classList.toggle("hidden",type==="story");
-    $("#storyEditorControls").classList.toggle("hidden",type!=="story");
     $("#storyOverlayInput").value="";
     $("#storyOverlayColor").value="#ffffff";
     $("#storyOverlayY").value="50";
     $("#storyOverlayBg").checked=true;
     $("#composerMessage").textContent="";
     openDialog($("#composerDialog"));
-    await restoreComposerDraft(type).catch(()=>false);
+    await restoreComposerDraft(state.composerType).catch(()=>false);
   }
 
   ["composerCaption","composerVisibility","composerCommentsEnabled","composerExploreEnabled","storyOverlayInput","storyOverlayColor","storyOverlayY","storyOverlayBg"].forEach(id=>{

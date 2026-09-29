@@ -70,6 +70,6 @@ jobs:
       - name: حفظ Release غير الموقعة
         uses: actions/upload-artifact@v4
         with:
-          name: ashur-user-release-unsigned-1.6.1
+          name: ashur-user-release-unsigned-1.6.2
           path: android/user/app/build/outputs/apk/release/*.apk
           if-no-files-found: error

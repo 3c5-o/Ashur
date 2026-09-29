@@ -1070,7 +1070,7 @@
     $("#registerTab").classList.toggle("hidden",state.features.registration===false);
     $(".home-intro").classList.toggle("stories-disabled",state.features.stories===false);
     document.body.classList.toggle("comments-disabled",state.features.comments===false);
-    $('[data-create-mode="group"]').forEach(node=>node.classList.toggle("hidden",state.features.groups===false));
+    $$('[data-create-mode="group"]').forEach(node=>node.classList.toggle("hidden",state.features.groups===false));
     $("#createGroupButton")?.classList.toggle("hidden",state.features.groups===false);
 
     const current=cfg.appVersion||"1.0.0";

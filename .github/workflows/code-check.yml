@@ -147,6 +147,9 @@ jobs:
           const stage78Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages7-8.sql','utf8');
           const stage910Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages9-10.sql','utf8');
           const stage1112Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages11-12.sql','utf8');
+          const stage1314Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages13-14.sql','utf8');
+          const siteApp=fs.readFileSync('apps/site/app.js','utf8');
+          const siteIndex=fs.readFileSync('apps/site/index.html','utf8');
           const server=fs.readFileSync('services/api/src/server.mjs','utf8');
           const telegram=fs.readFileSync('services/api/src/telegram.mjs','utf8');
           const failures={
@@ -199,11 +202,21 @@ jobs:
             missingStage12UserRuntime:!userApp.includes('maintenanceIsActive')||!userApp.includes('runtimeFeatureEnabled')||!userApp.includes('runtimeUploadLimitMb')||!userApp.includes('reel_mb'),
             missingStage12Style:!adminStyle.includes('.stage12-summary')||!adminStyle.includes('.stage12-feature-grid')||!adminStyle.includes('.stage12-history-card'),
             missingStage1112Migration:!stage1112Migration.includes('app_settings_history')||!stage1112Migration.includes('update_message')||!stage1112Migration.includes('sha256'),
-            missingAdminA12Revision:!server.includes('admin_revision: "A12"'),
+            missingStage13SiteLayout:!index.includes('id="siteSettingsSummary"')||!index.includes('id="siteFeatureEditor"')||!index.includes('id="siteSupportUrl"')||!index.includes('id="siteSha256"'),
+            missingStage13SiteApi:!server.includes('update_site_settings')||!server.includes('["hero", "download", "features", "update", "support", "legal"]'),
+            missingStage13SiteUi:!app.includes('collectSiteFeatures')||!app.includes('siteFeatureTitle')||!app.includes('sitePrivacyUrl'),
+            missingStage13SiteRuntime:!siteIndex.includes('id="siteFeaturesGrid"')||!siteIndex.includes('id="siteUpdateNote"')||!siteApp.includes('site_settings')||!siteApp.includes('privacy_url'),
+            missingStage13Style:!adminStyle.includes('.stage13-summary')||!adminStyle.includes('.stage13-feature-row'),
+            missingStage14AuditLayout:!index.includes('id="auditSummary"')||!index.includes('id="auditRole"')||!index.includes('id="auditPager"'),
+            missingStage14AuditApi:!server.includes('actor_role')||!server.includes('async function adminAudit(req, res, url)')||!server.includes('append_only: true'),
+            missingStage14AuditUi:!app.includes('auditSensitive')||!app.includes('auditDetailsMarkup')||!app.includes('adminSensitiveConfirm'),
+            missingStage14Style:!adminStyle.includes('.stage14-summary')||!adminStyle.includes('.stage14-audit-card')||!adminStyle.includes('.stage14-details'),
+            missingStage1314Migration:!stage1314Migration.includes('prevent_audit_log_delete')||!stage1314Migration.includes('actor_role')||!stage1314Migration.includes("'features'"),
+            missingAdminA14Revision:!server.includes('admin_revision: "A14"'),
             missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };
           if(Object.values(failures).some(Boolean)){
-            console.error('Admin stage 3-12 guard failed',failures);
+            console.error('Admin stage 3-14 guard failed',failures);
             process.exit(1);
           }
           NODE

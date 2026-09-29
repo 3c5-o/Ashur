@@ -2478,6 +2478,13 @@ async function ownedMediaIds(userId) {
 
 async function adminUsers(req, res, url) {
   await requireAdmin(req, "users");
+  const cleanupNow = new Date().toISOString();
+  await update(
+    "profiles",
+    "banned_until=not.is.null&banned_until=lte." + encodeURIComponent(cleanupNow),
+    { is_banned: false, banned_until: null, ban_reason: "" },
+    { returning: false },
+  ).catch(() => {});
   const { page, limit, offset } = pageParams(url, 30, 80);
   const q = (url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
   const status = String(url.searchParams.get("status") || "").trim();
@@ -2717,18 +2724,30 @@ async function adminDeleteUser(req, res, userId) {
 
 async function adminComments(req, res, url) {
   await requireAdmin(req, "content");
+  const { page, limit, offset } = pageParams(url, 40, 100);
   const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
   const status = String(url.searchParams.get("status") || "").trim();
-  let query = "select=id,author_id,post_id,reel_id,parent_id,body,moderation_status,deleted_at,created_at,updated_at&order=created_at.desc&limit=150";
-  if (q) query += "&body=ilike.*" + encodeURIComponent(q) + "*";
-  if (status) query += "&moderation_status=eq." + encodeURIComponent(status);
+  const filters = [];
+  if (q) filters.push("body=ilike.*" + encodeURIComponent(q) + "*");
+  if (status) filters.push("moderation_status=eq." + encodeURIComponent(status));
+  const filterQuery = filters.join("&");
+  const total = await count("comments", filterQuery);
+  let query = "select=id,author_id,post_id,reel_id,parent_id,body,moderation_status,deleted_at,created_at,updated_at,pinned_at";
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=created_at.desc&offset=" + offset + "&limit=" + limit;
   const rows = await select("comments", query);
   const items = [];
   for (const row of rows || []) {
-    const p = await select("profiles", "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1").catch(() => []);
+    const p = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.author_id) + "&limit=1",
+    ).catch(() => []);
     items.push({ ...row, author: p?.[0] || null });
   }
-  json(res, 200, { items });
+  json(res, 200, {
+    items,
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+  });
 }
 
 async function moderateContent(req, res, kind, id) {

@@ -80,17 +80,35 @@
     </section>
 
     <section id="users" class="page">
-      <div class="page-title"><div><span class="eyebrow">الحسابات</span><h2>المستخدمون</h2><p>البحث وإدارة حالة الحسابات.</p></div></div>
-      <div class="toolbar"><div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="userSearch" class="search" placeholder="ابحث بالاسم أو اسم المستخدم أو المعرف"></div></div>
+      <div class="page-title"><div><span class="eyebrow">الحسابات</span><h2>المستخدمون</h2><p>إدارة الحسابات، التوثيق، التحذيرات، الجلسات والحظر.</p></div></div>
+      <div class="toolbar admin-filter-bar users-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="userSearch" class="search" placeholder="اسم، @يوزر أو UUID"></div>
+        <select id="userStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="banned">محظور</option><option value="deleted">معطل</option></select>
+        <select id="userVerified"><option value="">التوثيق: الكل</option><option value="true">موثق</option><option value="false">غير موثق</option></select>
+        <select id="userPrivacy"><option value="">الخصوصية: الكل</option><option value="public">عام</option><option value="private">خاص</option></select>
+      </div>
       <div id="userDetail" class="panel user-detail hidden"></div>
       <div id="usersList" class="table-list"></div>
+      <div id="usersPager" class="admin-pager hidden">
+        <button id="usersPrevPage" class="small" type="button">السابق</button>
+        <span id="usersPageLabel">1 / 1</span>
+        <button id="usersNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="content" class="page">
-      <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>المحتوى</h2><p>إدارة المنشورات والريلز والقصص.</p></div></div>
-      <div class="toolbar admin-filter-bar">
-        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="contentSearch" class="search" placeholder="ابحث في وصف المحتوى"></div>
+      <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>المحتوى</h2><p>فلترة ومعاينة وإدارة المنشورات والريلز والقصص مع تنظيف التخزين.</p></div></div>
+      <div class="toolbar admin-filter-bar content-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="contentSearch" class="search" placeholder="ابحث في الوصف"></div>
+        <input id="contentAuthor" placeholder="@username أو UUID" aria-label="صاحب المحتوى">
         <select id="contentStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="hidden">مخفي</option></select>
+        <select id="contentVisibility"><option value="">كل الخصوصيات</option><option value="public">عام</option><option value="followers">المتابعون</option></select>
+        <select id="contentComments"><option value="">التعليقات: الكل</option><option value="true">مفتوحة</option><option value="false">مغلقة</option></select>
+        <select id="contentExplore"><option value="">الاستكشاف: الكل</option><option value="true">مفعل</option><option value="false">معطل</option></select>
+        <select id="contentReports"><option value="">البلاغات: الكل</option><option value="true">عليه بلاغات</option><option value="false">بدون بلاغات</option></select>
+        <label class="compact-date"><span>من</span><input id="contentFrom" type="date"></label>
+        <label class="compact-date"><span>إلى</span><input id="contentTo" type="date"></label>
+        <button id="resetContentFilters" class="small" type="button">مسح الفلاتر</button>
       </div>
       <div class="tabs">
         <button class="tab active" data-content-kind="posts">المنشورات</button>
@@ -98,6 +116,11 @@
         <button class="tab" data-content-kind="stories">القصص</button>
       </div>
       <div id="contentList" class="table-list"></div>
+      <div id="contentPager" class="admin-pager hidden">
+        <button id="contentPrevPage" class="small" type="button">السابق</button>
+        <span id="contentPageLabel">1 / 1</span>
+        <button id="contentNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="comments" class="page">
@@ -272,6 +295,16 @@
 
 <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
+<dialog id="contentPreviewDialog" class="admin-dialog content-preview-dialog">
+  <div class="content-preview-card">
+    <div class="admin-dialog-head">
+      <div><span class="eyebrow">معاينة المحتوى</span><h3 id="contentPreviewTitle">المحتوى</h3></div>
+      <button id="closeContentPreview" class="dialog-close" type="button" aria-label="إغلاق">×</button>
+    </div>
+    <div id="contentPreviewBody"></div>
+  </div>
+</dialog>
+
 <dialog id="adminActionDialog" class="admin-dialog">
   <form id="adminActionForm" method="dialog" class="admin-dialog-card">
     <div class="admin-dialog-head">
@@ -302,7 +335,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage2";
+      app.src="./app.js?v=1.3.0-stage4";
       document.body.appendChild(app);
     };
     s.onerror=next;

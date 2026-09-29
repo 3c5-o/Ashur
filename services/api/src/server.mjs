@@ -5527,6 +5527,20 @@ async function adminSystemHealth(req, res) {
   json(res, 200, await collectHealthDetails(true));
 }
 
+async function adminClientError(req, res) {
+  const actor = await requireAdmin(req);
+  const body = await readJson(req, 32 * 1024).catch(() => ({}));
+  const error = new Error(String(body.message || "Admin UI error").slice(0, 1000));
+  error.code = "ADMIN_UI";
+  error.statusCode = 500;
+  await logSystemError("admin-web", error, {
+    stage: String(body.stage || "admin-ui").slice(0, 80),
+    page: String(body.page || "").slice(0, 80),
+    admin_version: String(body.admin_version || "").slice(0, 40)
+  }, actor.user.id);
+  json(res, 201, { ok: true });
+}
+
 async function processNotificationOutbox() {
   if (!readiness().database || !notificationsConfigured()) return;
   let items = [];
@@ -5736,6 +5750,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && conversationMessageMatch) {
       return sendConversationMessage(req, res, conversationMessageMatch[1]);
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/admin/client-error") {
+      return adminClientError(req, res);
     }
 
     if (req.method === "GET" && url.pathname === "/v1/admin/me") {

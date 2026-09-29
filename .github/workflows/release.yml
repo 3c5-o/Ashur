@@ -106,7 +106,18 @@ jobs:
           ASHUR_REQUIRE_RELEASE_SIGNING: "true"
         run: gradle -p android/admin :app:assembleRelease --stacktrace
 
-      - name: التحقق من توقيع APK الرسمي
+      - name: قراءة إصدارات التطبيقين
+        id: app_versions
+        shell: bash
+        run: |
+          USER_VERSION="$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" android/user/app/build.gradle | head -n1)"
+          ADMIN_VERSION="$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" android/admin/app/build.gradle | head -n1)"
+          test -n "$USER_VERSION"
+          test -n "$ADMIN_VERSION"
+          echo "user_version=$USER_VERSION" >> "$GITHUB_OUTPUT"
+          echo "admin_version=$ADMIN_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: التحقق الصارم من توقيع APK الرسمي
         shell: bash
         run: |
           set -euo pipefail
@@ -115,23 +126,41 @@ jobs:
           ADMIN_APK="$(find android/admin/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
           test -n "$USER_APK" && test -s "$USER_APK"
           test -n "$ADMIN_APK" && test -s "$ADMIN_APK"
-          "$APKSIGNER" verify --verbose --print-certs "$USER_APK"
-          "$APKSIGNER" verify --verbose --print-certs "$ADMIN_APK"
+
+          USER_VERIFY="$("$APKSIGNER" verify --verbose --print-certs "$USER_APK")"
+          ADMIN_VERIFY="$("$APKSIGNER" verify --verbose --print-certs "$ADMIN_APK")"
+          echo "$USER_VERIFY"
+          echo "$ADMIN_VERIFY"
+
+          echo "$USER_VERIFY" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
+          echo "$USER_VERIFY" | grep -q "Verified using v3 scheme (APK Signature Scheme v3): true"
+          echo "$ADMIN_VERIFY" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
+          echo "$ADMIN_VERIFY" | grep -q "Verified using v3 scheme (APK Signature Scheme v3): true"
+
+          USER_CERT="$(echo "$USER_VERIFY" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)"
+          ADMIN_CERT="$(echo "$ADMIN_VERIFY" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)"
+          test -n "$USER_CERT"
+          test -n "$ADMIN_CERT"
+          test "$USER_CERT" = "$ADMIN_CERT"
+          echo "Signing certificate SHA-256: $USER_CERT"
+
           sha256sum "$USER_APK" "$ADMIN_APK"
 
       - name: تجهيز ملفات الإصدار
         shell: bash
         run: |
           mkdir -p release
-          cp android/user/app/build/outputs/apk/release/*.apk "release/ASHUR-User-v${{ steps.version.outputs.version }}.apk"
-          cp android/admin/app/build/outputs/apk/release/*.apk "release/ASHUR-Admin-v${{ steps.version.outputs.version }}.apk"
+          USER_APK="$(find android/user/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          ADMIN_APK="$(find android/admin/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
+          cp "$USER_APK" "release/ASHUR-User-v${{ steps.app_versions.outputs.user_version }}.apk"
+          cp "$ADMIN_APK" "release/ASHUR-Admin-v${{ steps.app_versions.outputs.admin_version }}.apk"
 
       - name: إنشاء إصدار GitHub
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
-          name: "آشور v${{ steps.version.outputs.version }}"
+          name: "آشور User ${{ steps.app_versions.outputs.user_version }} · Admin ${{ steps.app_versions.outputs.admin_version }}"
           generate_release_notes: true
           files: |
-            release/ASHUR-User-v${{ steps.version.outputs.version }}.apk
-            release/ASHUR-Admin-v${{ steps.version.outputs.version }}.apk
+            release/ASHUR-User-v${{ steps.app_versions.outputs.user_version }}.apk
+            release/ASHUR-Admin-v${{ steps.app_versions.outputs.admin_version }}.apk

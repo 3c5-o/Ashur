@@ -61,6 +61,19 @@ export async function uploadToChannel({
   };
 }
 
+export async function deleteChannelMessage({
+  channelId,
+  messageId,
+}) {
+  const tg = await telegramClient();
+  const id = Number(messageId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error("معرف رسالة التخزين غير صالح");
+  }
+  await tg.deleteMessages(String(channelId), [id], { revoke: true });
+  return { ok: true, messageId: id };
+}
+
 export async function downloadMessageMedia({
   channelId,
   messageId,

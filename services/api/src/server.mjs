@@ -170,7 +170,16 @@ async function readJson(req, max = 1024 * 1024) {
 async function adminFor(userId) {
   if (!userId) return null;
   if (config.ownerUserId && userId === config.ownerUserId) {
-    return { user_id: userId, role: "owner", permissions: { all: true }, active: true };
+    const owner = { user_id: userId, role: "owner", permissions: {}, active: true };
+    await upsert("admins", {
+      user_id: userId,
+      role: "owner",
+      permissions: {},
+      active: true,
+      updated_at: new Date().toISOString(),
+      last_active_at: new Date().toISOString(),
+    }, "user_id").catch(() => {});
+    return owner;
   }
   const rows = await select(
     "admins",

@@ -5493,7 +5493,8 @@ async function collectHealthDetails(includeInternal = false) {
     ]);
     const memory = process.memoryUsage();
     result.runtime = {
-      api_version: "1.3.0",
+      api_version: "1.3.1",
+        gateway_revision: "G1",
       admin_revision: "A14",
       commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
       uptime_seconds: Math.floor(process.uptime()),
@@ -5598,7 +5599,7 @@ async function cleanupCache() {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleHttpRequest(req, res) {
   cors(res);
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -5957,6 +5958,36 @@ const server = http.createServer(async (req, res) => {
       error: error.statusCode ? error.message : "حدث خطأ في الخادم",
     });
   }
+}
+
+const server = http.createServer((req, res) => {
+  void handleHttpRequest(req, res).catch(async (error) => {
+    const status = Number(error?.statusCode) || 500;
+    const message = String(error?.message || error || "حدث خطأ في الخادم");
+    if (status >= 500) {
+      console.error("[ASHUR REQUEST UNCAUGHT]", error);
+      await logSystemError("api-request", error, {
+        method: String(req.method || ""),
+        path: String(req.url || "").slice(0, 500),
+      }).catch(() => {});
+    } else {
+      console.warn("[ASHUR REQUEST]", status, message);
+    }
+
+    if (res.writableEnded) return;
+    if (res.headersSent) {
+      try { res.end(); } catch {}
+      return;
+    }
+
+    try {
+      json(res, status, {
+        error: status < 500 ? message : "حدث خطأ في الخادم",
+      });
+    } catch {
+      try { res.end(); } catch {}
+    }
+  });
 });
 
 server.listen(config.port, "0.0.0.0", () => {

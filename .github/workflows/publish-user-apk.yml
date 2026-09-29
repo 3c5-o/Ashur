@@ -88,7 +88,13 @@ jobs:
           set -euo pipefail
           APK="$(find android/user/app/build/outputs/apk/release -name '*.apk' -type f | head -n1)"
           test -n "$APK" && test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          VERIFY="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK")"
+          echo "$VERIFY"
+          echo "$VERIFY" | grep -q "Verified using v2 scheme (APK Signature Scheme v2): true"
+          echo "$VERIFY" | grep -q "Verified using v3 scheme (APK Signature Scheme v3): true"
+          CERT_SHA256="$(echo "$VERIFY" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n1)"
+          test -n "$CERT_SHA256"
+          echo "Signing certificate SHA-256: $CERT_SHA256"
           sha256sum "$APK"
 
       - name: وضع APK الموقع داخل الموقع

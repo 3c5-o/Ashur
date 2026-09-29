@@ -146,6 +146,7 @@ jobs:
           const userStyle=fs.readFileSync('apps/user-web/style.css','utf8');
           const stage78Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages7-8.sql','utf8');
           const stage910Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages9-10.sql','utf8');
+          const stage1112Migration=fs.readFileSync('docs/migrations/2026-09-29-admin-stages11-12.sql','utf8');
           const server=fs.readFileSync('services/api/src/server.mjs','utf8');
           const telegram=fs.readFileSync('services/api/src/telegram.mjs','utf8');
           const failures={
@@ -188,11 +189,21 @@ jobs:
             missingStage10NotificationApi:!server.includes('async function adminNotificationPreview')||!server.includes('async function adminNotificationTemplates')||!server.includes('async function cancelScheduledAdminNotification')||!server.includes('async function resendAdminNotification'),
             missingStage10NotificationUi:!app.includes('selectedNotificationUsers')||!app.includes('loadNotificationTemplates')||!app.includes('editingScheduledNotificationId'),
             missingStage10Style:!adminStyle.includes('.stage10-layout')||!adminStyle.includes('.stage10-user-picker')||!adminStyle.includes('.stage10-template-card'),
-            missingAdminA10Revision:!server.includes('admin_revision: "A10"'),
+            missingStage11ReleaseLayout:!index.includes('id="releaseSha256"')||!index.includes('id="releaseUpdateMessage"')||!index.includes('id="currentPublishedRelease"'),
+            missingStage11ReleaseApi:!server.includes('async function syncPublishedRelease')||!server.includes('update_message')||!server.includes('sha256')||!server.includes('publish_release'),
+            missingStage11ReleaseUi:!app.includes('editingReleaseId')||!app.includes('data-release-publish')||!app.includes('releaseCancelEdit'),
+            missingStage11Style:!adminStyle.includes('.stage11-summary')||!adminStyle.includes('.stage11-release-card')||!adminStyle.includes('.stage11-current-release'),
+            missingStage12SettingsLayout:!index.includes('id="maintenanceStartAt"')||!index.includes('id="maintenanceEndAt"')||!index.includes('id="limitReel"')||!index.includes('id="settingsHistory"'),
+            missingStage12SettingsApi:!server.includes('async function appSettingsHistory')||!server.includes('async function restoreAppSettings')||!server.includes('saveAppSettingsSnapshot')||!server.includes('requireFeature'),
+            missingStage12SettingsUi:!app.includes('loadSettingsHistory')||!app.includes('maintenanceActiveNow')||!app.includes('appSettingsReason'),
+            missingStage12UserRuntime:!userApp.includes('maintenanceIsActive')||!userApp.includes('runtimeFeatureEnabled')||!userApp.includes('runtimeUploadLimitMb')||!userApp.includes('reel_mb'),
+            missingStage12Style:!adminStyle.includes('.stage12-summary')||!adminStyle.includes('.stage12-feature-grid')||!adminStyle.includes('.stage12-history-card'),
+            missingStage1112Migration:!stage1112Migration.includes('app_settings_history')||!stage1112Migration.includes('update_message')||!stage1112Migration.includes('sha256'),
+            missingAdminA12Revision:!server.includes('admin_revision: "A12"'),
             missingDeletedChatMediaGuard:!server.includes('media_id=eq.\${encodeURIComponent(media.id)}&is_deleted=eq.false')
           };
           if(Object.values(failures).some(Boolean)){
-            console.error('Admin stage 3-10 guard failed',failures);
+            console.error('Admin stage 3-12 guard failed',failures);
             process.exit(1);
           }
           NODE

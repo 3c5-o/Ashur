@@ -123,6 +123,56 @@ const roleLabel={
   support:"الدعم",
   analyst:"محلل"
 };
+const permissionLabel={
+  analytics:"الرئيسية والتحليلات",
+  users:"المستخدمون",
+  content:"المحتوى والتعليقات",
+  reports:"البلاغات",
+  support:"الدعم الفني",
+  storage:"التخزين والرفع والأخطاء",
+  notifications:"الإشعارات",
+  admins:"المشرفون وسجل الإدارة",
+  settings:"الإصدارات والإعدادات"
+};
+const pagePermission={
+  dashboard:"analytics",
+  users:"users",
+  content:"content",
+  comments:"content",
+  reports:"reports",
+  support:"support",
+  storage:"storage",
+  uploads:"storage",
+  errors:"storage",
+  notifications:"notifications",
+  admins:"admins",
+  audit:"admins",
+  releases:"settings",
+  appSettings:"settings",
+  siteSettings:"settings",
+  health:"analytics"
+};
+let adminAccess=null;
+let adminRoleDefaults={};
+let uploadsLiveTimer=null;
+let storageLiveTimer=null;
+
+function adminCan(permission){
+  if(!permission)return true;
+  return adminAccess?.effective_permissions?.[permission]===true;
+}
+function adminCanPage(page){
+  return adminCan(pagePermission[page]);
+}
+function applyAdminAccess(me){
+  adminAccess=me||null;
+  $$("[data-page]").forEach(node=>{
+    const page=node.dataset.page;
+    if(!page)return;
+    node.classList.toggle("permission-hidden",!adminCanPage(page));
+  });
+  document.body.dataset.adminRole=me?.role||"";
+}
 const actionLabel={
   ban_user:"حظر مستخدم",
   unban_user:"رفع حظر مستخدم",
@@ -238,10 +288,11 @@ function showPageLoading(page){
 }
 async function verify(){
   try{
-    await api("/v1/admin/me");
+    const me=await api("/v1/admin/me");
+    applyAdminAccess(me);
     showApp(true);
-    navigate("dashboard",{history:false,loading:false});
-    await loadDashboard();
+    const start=adminCanPage("dashboard")?"dashboard":Object.keys(titles).find(adminCanPage)||"dashboard";
+    navigate(start,{history:false,loading:true});
   }catch(e){
     showApp(false);
     if((await sb.auth.getSession()).data.session)$("#loginMessage").textContent=e.message==="تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا."?e.message:"هذا الحساب لا يملك صلاحية الإدارة.";
@@ -305,6 +356,13 @@ document.addEventListener("click",e=>{
 
 function navigate(page,{history=true,loading=true}={}){
   if(!titles[page])page="dashboard";
+  if(!adminCanPage(page)){
+    const fallback=adminCanPage("dashboard")?"dashboard":Object.keys(titles).find(adminCanPage);
+    if(!fallback){showToast("لا توجد أقسام إدارية متاحة لهذا الحساب.",{type:"error"});return}
+    page=fallback;
+  }
+  if(page!=="uploads"&&uploadsLiveTimer){clearInterval(uploadsLiveTimer);uploadsLiveTimer=null}
+  if(page!=="storage"&&storageLiveTimer){clearInterval(storageLiveTimer);storageLiveTimer=null}
   if(history&&currentAdminPage&&currentAdminPage!==page)adminPageHistory.push(currentAdminPage);
   currentAdminPage=page;
   $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
@@ -1004,49 +1062,182 @@ async function loadReports(){
   }catch(e){$("#reportsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
-async function loadStorage(){
+const uploadKindLabel={
+  profile:"صورة حساب",profile_cover:"غلاف حساب",post_image:"صورة منشور",post_video:"فيديو منشور",
+  reel:"ريلز",reel_cover:"غلاف ريلز",story:"قصة",chat_image:"صورة محادثة",chat_video:"فيديو محادثة",
+  chat_audio:"صوتية",chat_file:"ملف محادثة",group_media:"وسائط مجموعة",file:"ملف عام",backup:"نسخة احتياطية"
+};
+
+async function storageChannelAction(channelKey,action){
+  const labels={test:"اختبار القناة",reconnect:"إعادة الاتصال",enable:"تفعيل القناة",disable:"تعطيل القناة"};
+  if(action==="disable"&&!await adminConfirm("تعطيل قناة التخزين؟","لن يستقبل هذا المسار ملفات جديدة حتى تعيد تفعيله. معرف القناة لن يتغير.",{acceptLabel:"تعطيل",danger:true}))return;
   try{
-    const d=await api("/v1/admin/channels");
-    $("#channelsList").innerHTML=(d.items||[]).map(row=>
-      '<div class="channel-card">'+
-        '<div class="grow"><b>'+esc(row.title||row.channel_key)+'</b>'+
-        '<div class="meta">المعرف: '+esc(row.channel_id)+' · آخر اختبار: '+(row.last_test_at?new Date(row.last_test_at).toLocaleString("ar-IQ"):"لم يُختبر")+'</div>'+
-        '<div class="meta">آخر رفع: '+(row.last_upload_at?new Date(row.last_upload_at).toLocaleString("ar-IQ"):"لا يوجد")+'</div></div>'+
-        '<span class="pill '+(row.status==="connected"?"ok":"bad")+'">'+(row.status==="connected"?"مربوطة":"تحتاج فحص")+'</span>'+
-        '<button class="small" data-test-channel="'+esc(row.channel_key)+'" type="button">اختبار</button>'+
-      '</div>'
-    ).join("")||'<div class="panel">لم يتم ربط قنوات التخزين بعد.</div>';
-    $("#channelsList").querySelectorAll("[data-test-channel]").forEach(b=>b.onclick=async()=>{
-      b.disabled=true;b.textContent="جارٍ الفحص...";
-      try{
-        await api("/v1/admin/channels/"+encodeURIComponent(b.dataset.testChannel)+"/test",{method:"POST"});
-        await loadStorage();
-      }catch(error){showToast(error.message,{type:"error"});b.disabled=false;b.textContent="إعادة الاختبار"}
+    await api("/v1/admin/channels/"+encodeURIComponent(channelKey)+"/action",{
+      method:"POST",body:JSON.stringify({action})
     });
-  }catch(e){$("#channelsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+    showToast((labels[action]||"الإجراء")+" تم بنجاح.",{type:"success"});
+  }catch(error){
+    showToast(error.message,{type:"error"});
+  }
+  await loadStorage();
 }
 
-$("#uploadStatus").onchange=loadUploads;
-async function loadUploads(){
+async function loadStorage({quiet=false}={}){
   try{
-    const status=$("#uploadStatus")?.value||"";
-    const d=await api("/v1/admin/uploads"+(status?"?status="+encodeURIComponent(status):""));
+    const d=await api("/v1/admin/channels");
+    const sum=d.summary||{};
+    $("#storageSummary").innerHTML=[
+      ["القنوات",sum.channels||0],
+      ["المفعلة",sum.enabled||0],
+      ["المتصلة",sum.connected||0],
+      ["تحتاج متابعة",sum.errors||0],
+      ["الملفات",sum.files||0],
+      ["الحجم الكلي",formatBytes(sum.bytes||0)]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+esc(String(value))+'</b></div>').join("");
+
+    $("#channelsList").innerHTML=(d.items||[]).map(row=>{
+      const status=row.status==="connected"?"متصلة":row.status==="checking"?"جارٍ الفحص":"تحتاج فحص";
+      const statusCls=row.status==="connected"?"ok":row.status==="checking"?"":"bad";
+      return '<div class="channel-card stage8-channel-card">'+
+        '<div class="stage8-channel-head"><div class="grow"><b>'+esc(row.title||row.channel_key)+'</b><div class="meta mono">'+esc(row.channel_key)+'</div></div>'+
+          '<span class="pill '+(row.enabled?"ok":"bad")+'">'+(row.enabled?"مفعلة":"معطلة")+'</span>'+
+          '<span class="pill '+statusCls+'">'+status+'</span></div>'+
+        '<div class="stage8-channel-stats"><div><span>الملفات</span><b>'+Number(row.files_count||0).toLocaleString("ar-IQ")+'</b></div><div><span>الحجم</span><b>'+formatBytes(row.bytes_total||0)+'</b></div></div>'+
+        '<div class="meta">Channel ID: <span class="mono">'+esc(row.channel_id)+'</span></div>'+
+        '<div class="meta">آخر اختبار: '+(row.last_test_at?new Date(row.last_test_at).toLocaleString("ar-IQ"):"لم يُختبر")+'</div>'+
+        '<div class="meta">آخر رفع: '+(row.last_upload_at?new Date(row.last_upload_at).toLocaleString("ar-IQ"):"لا يوجد")+'</div>'+
+        (row.last_error?'<div class="error-text">'+esc(row.last_error)+'</div>':"")+
+        '<div class="admin-actions">'+
+          '<button class="small" data-channel-action="test" data-channel-key="'+esc(row.channel_key)+'" type="button">اختبار</button>'+
+          '<button class="small" data-channel-action="reconnect" data-channel-key="'+esc(row.channel_key)+'" type="button">إعادة اتصال</button>'+
+          '<button class="small '+(row.enabled?"danger":"")+'" data-channel-action="'+(row.enabled?"disable":"enable")+'" data-channel-key="'+esc(row.channel_key)+'" type="button">'+(row.enabled?"تعطيل":"تفعيل")+'</button>'+
+        '</div>'+
+      '</div>';
+    }).join("")||'<div class="panel">لم يتم ربط قنوات التخزين بعد.</div>';
+
+    $("#channelsList").querySelectorAll("[data-channel-action]").forEach(btn=>btn.onclick=async()=>{
+      btn.disabled=true;
+      await storageChannelAction(btn.dataset.channelKey,btn.dataset.channelAction);
+    });
+
+    if(currentAdminPage==="storage"&&!storageLiveTimer){
+      storageLiveTimer=setInterval(()=>{
+        if(document.visibilityState==="visible"&&currentAdminPage==="storage")loadStorage({quiet:true}).catch(()=>{});
+      },10000);
+    }
+  }catch(e){
+    if(!quiet)$("#channelsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>';
+  }
+}
+$("#testAllChannels")?.addEventListener("click",async()=>{
+  const btn=$("#testAllChannels");
+  btn.disabled=true;btn.textContent="جارٍ فحص القنوات...";
+  try{
+    const result=await api("/v1/admin/channels/test-all",{method:"POST"});
+    const items=result.items||[];
+    const failed=items.filter(x=>!x.ok).length;
+    showToast(failed?("اكتمل الفحص، "+failed+" قناة تحتاج متابعة."):"جميع القنوات تعمل.",{type:failed?"error":"success"});
+  }catch(error){showToast(error.message,{type:"error"})}
+  finally{btn.disabled=false;btn.textContent="فحص جميع القنوات";await loadStorage()}
+});
+
+let uploadPage=1;
+let uploadPages=1;
+let uploadLoading=false;
+let uploadFilterTimer;
+
+function resetUploadPage(){uploadPage=1}
+["uploadStatus","uploadKind"].forEach(id=>$("#"+id)?.addEventListener("change",()=>{resetUploadPage();loadUploads()}));
+["uploadSearch","uploadUser"].forEach(id=>$("#"+id)?.addEventListener("input",()=>{
+  clearTimeout(uploadFilterTimer);
+  uploadFilterTimer=setTimeout(()=>{resetUploadPage();loadUploads()},280);
+}));
+$("#resetUploadFilters")?.addEventListener("click",()=>{
+  ["uploadSearch","uploadUser","uploadStatus","uploadKind"].forEach(id=>{const el=$("#"+id);if(el)el.value=""});
+  resetUploadPage();loadUploads();
+});
+$("#uploadsPrevPage")?.addEventListener("click",()=>{if(uploadPage>1){uploadPage--;loadUploads()}});
+$("#uploadsNextPage")?.addEventListener("click",()=>{if(uploadPage<uploadPages){uploadPage++;loadUploads()}});
+
+async function loadUploads({quiet=false}={}){
+  if(uploadLoading)return;
+  uploadLoading=true;
+  try{
+    const params=new URLSearchParams({page:String(uploadPage),limit:"30"});
+    const values={
+      q:$("#uploadSearch")?.value.trim(),
+      user:$("#uploadUser")?.value.trim(),
+      status:$("#uploadStatus")?.value,
+      kind:$("#uploadKind")?.value
+    };
+    Object.entries(values).forEach(([k,v])=>{if(v)params.set(k,v)});
+    const d=await api("/v1/admin/uploads?"+params.toString());
+    const p=d.pagination||{},sum=d.summary||{};
+    uploadPages=Math.max(1,Number(p.pages||1));
+    if(uploadPage>uploadPages){uploadPage=uploadPages;uploadLoading=false;return loadUploads({quiet})}
+
+    $("#uploadSummary").innerHTML=[
+      ["بالانتظار",sum.queued||0],["جارية الآن",sum.active||0],["فاشلة",sum.failed||0],["النتائج",p.total||0]
+    ].map(([label,value])=>'<div><span>'+label+'</span><b>'+Number(value||0).toLocaleString("ar-IQ")+'</b></div>').join("");
+
     $("#uploadsList").innerHTML=(d.items||[]).map(row=>{
       const total=Number(row.size_bytes||0),received=Number(row.received_bytes||0);
       const pct=total?Math.min(100,Math.round(received/total*100)):(row.status==="completed"?100:0);
-      return '<div class="upload-admin-card">'+
-        '<div class="grow"><div class="moderation-head"><div><b>'+esc(row.original_name||"ملف")+'</b><div class="meta">'+esc(row.kind)+' · '+formatBytes(total)+'</div></div><span class="pill '+pillClass(row.status)+'">'+statusLabel(row.status)+'</span></div>'+
-        '<div class="admin-progress"><i style="width:'+pct+'%"></i></div><div class="meta">'+pct+'% · '+new Date(row.created_at).toLocaleString("ar-IQ")+'</div>'+
+      const u=row.user||{};
+      const retryExpired=row.status==="failed"&&!row.retry_available;
+      return '<div class="upload-admin-card stage8-upload-card">'+
+        '<div class="stage8-upload-user">'+
+          '<div class="list-avatar">'+(u.avatar_media_id?'<img data-media-id="'+esc(u.avatar_media_id)+'" alt="">':'<span>'+esc((u.name||u.username||"م").slice(0,1))+'</span>')+'</div>'+
+          '<div class="grow"><b>'+esc(u.name||u.username||"مستخدم")+'</b><div class="meta">'+(u.username?"@"+esc(u.username):esc(row.user_id||""))+'</div></div>'+
+          (u.id?'<button class="small" data-upload-user="'+esc(u.id)+'" type="button">الحساب</button>':"")+
+        '</div>'+
+        '<div class="moderation-head"><div class="grow"><b>'+esc(row.original_name||"ملف")+'</b><div class="meta">'+esc(uploadKindLabel[row.kind]||row.kind)+' · '+formatBytes(total)+' · المحاولة '+Number(row.attempt_count||1)+'</div></div><span class="pill '+pillClass(row.status)+'">'+statusLabel(row.status)+'</span></div>'+
+        '<div class="admin-progress"><i style="width:'+pct+'%"></i></div>'+
+        '<div class="stage8-progress-meta"><span>'+pct+'%</span><span>'+formatBytes(received)+' / '+formatBytes(total)+'</span><span>'+new Date(row.updated_at||row.created_at).toLocaleString("ar-IQ")+'</span></div>'+
+        (row.failure_stage?'<div class="meta">مرحلة الخطأ: '+esc(row.failure_stage)+'</div>':"")+
         (row.error?'<div class="error-text">'+esc(row.error)+'</div>':"")+
-        (["queued","receiving","storing"].includes(row.status)?'<button class="small danger" data-cancel-upload="'+esc(row.id)+'" type="button">إلغاء العملية</button>':"")+
-        '</div></div>';
-    }).join("")||'<div class="panel">لا توجد عمليات رفع.</div>';
+        (retryExpired?'<div class="admin-note">الملف المؤقت غير متوفر؛ إعادة المحاولة تحتاج رفع الملف من التطبيق.</div>':"")+
+        '<div class="admin-actions">'+
+          (["queued","receiving","storing"].includes(row.status)?'<button class="small danger" data-cancel-upload="'+esc(row.id)+'" type="button">'+(row.cancel_requested?"تم طلب الإلغاء":"إلغاء العملية")+'</button>':"")+
+          (row.status==="failed"&&row.retry_available?'<button class="small" data-retry-upload="'+esc(row.id)+'" type="button">إعادة محاولة التخزين</button>':"")+
+        '</div>'+
+      '</div>';
+    }).join("")||'<div class="panel">لا توجد عمليات رفع مطابقة.</div>';
+
+    await hydrateAdminMedia($("#uploadsList"));
+    $("#uploadsList").querySelectorAll("[data-upload-user]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.uploadUser)});
     $("#uploadsList").querySelectorAll("[data-cancel-upload]").forEach(b=>b.onclick=async()=>{
-      if(!await adminConfirm("إلغاء عملية الرفع؟","سيُطلب من الخادم إيقاف العملية الجارية.",{acceptLabel:"إلغاء العملية",danger:true}))return;
-      await api("/v1/admin/uploads/"+b.dataset.cancelUpload+"/cancel",{method:"POST"});
-      loadUploads();
+      if(!await adminConfirm("إلغاء عملية الرفع؟","سيتم طلب إيقاف الاستلام أو التخزين الجاري.",{acceptLabel:"إلغاء العملية",danger:true}))return;
+      b.disabled=true;
+      try{
+        await api("/v1/admin/uploads/"+b.dataset.cancelUpload+"/cancel",{method:"POST"});
+        showToast("تم إرسال طلب الإلغاء.",{type:"success"});
+        await loadUploads();
+      }catch(error){showToast(error.message,{type:"error"});b.disabled=false}
     });
-  }catch(e){$("#uploadsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
+    $("#uploadsList").querySelectorAll("[data-retry-upload]").forEach(b=>b.onclick=async()=>{
+      if(!await adminConfirm("إعادة محاولة التخزين؟","سيتم استخدام النسخة المؤقتة الموجودة على الخادم وإرسالها إلى قناة Telegram من جديد.",{acceptLabel:"إعادة المحاولة"}))return;
+      b.disabled=true;b.textContent="جارٍ إعادة المحاولة...";
+      try{
+        await api("/v1/admin/uploads/"+b.dataset.retryUpload+"/retry",{method:"POST"});
+        showToast("اكتملت إعادة محاولة التخزين.",{type:"success"});
+        await loadUploads();
+      }catch(error){showToast(error.message,{type:"error"});b.disabled=false;b.textContent="إعادة محاولة التخزين"}
+    });
+
+    $("#uploadsPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||30));
+    $("#uploadsPageLabel").textContent=uploadPage+" / "+uploadPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#uploadsPrevPage").disabled=uploadPage<=1;
+    $("#uploadsNextPage").disabled=uploadPage>=uploadPages;
+
+    if(currentAdminPage==="uploads"&&!uploadsLiveTimer){
+      uploadsLiveTimer=setInterval(()=>{
+        if(document.visibilityState==="visible"&&currentAdminPage==="uploads")loadUploads({quiet:true}).catch(()=>{});
+      },2500);
+    }
+  }catch(e){
+    if(!quiet)$("#uploadsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>';
+  }finally{uploadLoading=false}
 }
 
 $("#errorStatus").onchange=loadErrors;
@@ -1244,37 +1435,182 @@ async function loadNotificationHistory(){
   }catch(e){$("#notificationHistory").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 
+let adminCandidateTimer;
+let selectedAdminCandidate=null;
+let adminsById=new Map();
+
+function editablePermissionKeys(){
+  return ["users","content","reports","support","storage","notifications","settings"];
+}
+function roleDefaultAllows(role,key){
+  return (adminRoleDefaults?.[role]||[]).includes(key);
+}
+function permissionSelectMarkup(key,explicit,role){
+  const value=explicit?.[key]===true?"allow":explicit?.[key]===false?"deny":"inherit";
+  return '<label class="stage7-permission-row"><span><b>'+esc(permissionLabel[key]||key)+'</b><small>افتراضي الدور: '+(roleDefaultAllows(role,key)?"مسموح":"غير مسموح")+'</small></span>'+
+    '<select data-admin-permission="'+esc(key)+'"><option value="inherit" '+(value==="inherit"?"selected":"")+'>حسب الدور</option><option value="allow" '+(value==="allow"?"selected":"")+'>سماح</option><option value="deny" '+(value==="deny"?"selected":"")+'>منع</option></select></label>';
+}
+function collectPermissionOverrides(root){
+  const result={};
+  root.querySelectorAll("[data-admin-permission]").forEach(sel=>{
+    if(sel.value==="allow")result[sel.dataset.adminPermission]=true;
+    if(sel.value==="deny")result[sel.dataset.adminPermission]=false;
+  });
+  return result;
+}
+function renderNewAdminPermissions(){
+  const root=$("#newAdminPermissions");
+  if(!root)return;
+  const role=$("#newAdminRole").value;
+  if(role==="secondary_admin"){
+    root.innerHTML='<div class="info-banner compact"><span></span><p>المدير الثانوي يحصل على كامل صلاحيات الإدارة تلقائيًا.</p></div>';
+    return;
+  }
+  root.innerHTML='<div class="stage7-permission-title"><b>تخصيص الصلاحيات</b><span>اتركها «حسب الدور» لاستخدام الصلاحيات الافتراضية.</span></div>'+
+    editablePermissionKeys().map(key=>permissionSelectMarkup(key,{},role)).join("");
+}
+$("#newAdminRole")?.addEventListener("change",renderNewAdminPermissions);
+
+$("#addAdminButton")?.addEventListener("click",()=>{
+  selectedAdminCandidate=null;
+  $("#adminAddPanel").classList.remove("hidden");
+  $("#adminPermissionPanel").classList.add("hidden");
+  $("#adminCandidateSearch").value="";
+  $("#adminCandidateResults").innerHTML='<div class="meta">اكتب حرفين على الأقل للبحث.</div>';
+  $("#newAdminSelected").classList.add("hidden");
+  $("#confirmAddAdmin").classList.add("hidden");
+  $("#addAdminMessage").textContent="";
+  renderNewAdminPermissions();
+  $("#adminCandidateSearch").focus();
+});
+$("#closeAdminAddPanel")?.addEventListener("click",()=>$("#adminAddPanel").classList.add("hidden"));
+
+$("#adminCandidateSearch")?.addEventListener("input",()=>{
+  clearTimeout(adminCandidateTimer);
+  const q=$("#adminCandidateSearch").value.trim();
+  if(q.length<2){
+    $("#adminCandidateResults").innerHTML='<div class="meta">اكتب حرفين على الأقل للبحث.</div>';
+    return;
+  }
+  adminCandidateTimer=setTimeout(async()=>{
+    $("#adminCandidateResults").innerHTML='<div class="meta">جارٍ البحث...</div>';
+    try{
+      const d=await api("/v1/admin/admin-candidates?q="+encodeURIComponent(q));
+      $("#adminCandidateResults").innerHTML=(d.items||[]).map(p=>
+        '<button class="stage7-candidate" data-admin-candidate="'+esc(p.id)+'" type="button">'+
+          '<div class="list-avatar">'+(p.avatar_media_id?'<img data-media-id="'+esc(p.avatar_media_id)+'" alt="">':'<span>'+esc((p.name||p.username||"م").slice(0,1))+'</span>')+'</div>'+
+          '<div class="grow"><b>'+esc(p.name||p.username||"مستخدم")+'</b><div class="meta">@'+esc(p.username||"")+'</div></div>'+
+          (p.is_verified?'<span class="pill ok">موثق</span>':"")+
+        '</button>'
+      ).join("")||'<div class="meta">لم يتم العثور على حساب متاح للإضافة.</div>';
+      await hydrateAdminMedia($("#adminCandidateResults"));
+      const map=new Map((d.items||[]).map(x=>[String(x.id),x]));
+      $("#adminCandidateResults").querySelectorAll("[data-admin-candidate]").forEach(btn=>btn.onclick=()=>{
+        selectedAdminCandidate=map.get(btn.dataset.adminCandidate)||null;
+        if(!selectedAdminCandidate)return;
+        $("#newAdminSelected").classList.remove("hidden");
+        $("#newAdminSelected").innerHTML='<span>الحساب المحدد</span><b>'+esc(selectedAdminCandidate.name||selectedAdminCandidate.username||"مستخدم")+'</b><small>@'+esc(selectedAdminCandidate.username||"")+'</small>';
+        $("#confirmAddAdmin").classList.remove("hidden");
+      });
+    }catch(error){$("#adminCandidateResults").innerHTML='<div class="error-text">'+esc(error.message)+'</div>'}
+  },280);
+});
+
+$("#confirmAddAdmin")?.addEventListener("click",async()=>{
+  if(!selectedAdminCandidate){showToast("اختر الحساب أولًا.",{type:"error"});return}
+  const role=$("#newAdminRole").value;
+  const permissions=role==="secondary_admin"?{}:collectPermissionOverrides($("#newAdminPermissions"));
+  $("#confirmAddAdmin").disabled=true;
+  $("#addAdminMessage").textContent="جارٍ إضافة المشرف...";
+  try{
+    await api("/v1/admin/admins",{method:"POST",body:JSON.stringify({
+      user_id:selectedAdminCandidate.id,role,permissions
+    })});
+    showToast("تمت إضافة المشرف.",{type:"success"});
+    $("#adminAddPanel").classList.add("hidden");
+    selectedAdminCandidate=null;
+    await loadAdmins();
+  }catch(error){$("#addAdminMessage").textContent=error.message}
+  finally{$("#confirmAddAdmin").disabled=false}
+});
+
+function openAdminPermissionEditor(admin){
+  const p=admin.profiles||{};
+  const root=$("#adminPermissionPanel");
+  $("#adminAddPanel").classList.add("hidden");
+  root.classList.remove("hidden");
+  const full=admin.role==="owner"||admin.role==="secondary_admin";
+  const effective=admin.effective_permissions||{};
+  root.innerHTML=
+    '<div class="panel-head"><div><span class="eyebrow">صلاحيات المشرف</span><h3>'+esc(p.name||p.username||admin.user_id)+'</h3><div class="meta">@'+esc(p.username||"")+' · '+esc(roleLabel[admin.role]||admin.role)+'</div></div><button id="closeAdminPermissionPanel" class="small" type="button">إغلاق</button></div>'+
+    (full
+      ?'<div class="info-banner"><span></span><p>هذا الدور يملك كامل الصلاحيات تلقائيًا ولا يحتاج تخصيصًا.</p></div>'
+      :'<div class="stage7-effective-permissions">'+Object.entries(effective).filter(([,v])=>v).map(([k])=>'<span>'+esc(permissionLabel[k]||k)+'</span>').join("")+'</div>'+
+       '<div id="adminPermissionControls" class="stage7-permissions">'+editablePermissionKeys().map(key=>permissionSelectMarkup(key,admin.permissions||{},admin.role)).join("")+'</div>'+
+       '<div class="admin-actions"><button id="saveAdminPermissions" class="primary" type="button">حفظ الصلاحيات</button><button id="resetAdminPermissions" class="small" type="button">العودة لافتراضي الدور</button></div>');
+
+  $("#closeAdminPermissionPanel").onclick=()=>root.classList.add("hidden");
+  $("#saveAdminPermissions")?.addEventListener("click",async()=>{
+    const permissions=collectPermissionOverrides($("#adminPermissionControls"));
+    $("#saveAdminPermissions").disabled=true;
+    try{
+      await api("/v1/admin/admins/"+admin.user_id,{method:"PATCH",body:JSON.stringify({permissions})});
+      showToast("تم حفظ صلاحيات المشرف.",{type:"success"});
+      root.classList.add("hidden");
+      await loadAdmins();
+    }catch(error){showToast(error.message,{type:"error"});$("#saveAdminPermissions").disabled=false}
+  });
+  $("#resetAdminPermissions")?.addEventListener("click",async()=>{
+    if(!await adminConfirm("إعادة الصلاحيات لافتراضي الدور؟","سيتم حذف كل السماحات والمنع المخصص لهذا المشرف.",{acceptLabel:"إعادة الافتراضي"}))return;
+    try{
+      await api("/v1/admin/admins/"+admin.user_id,{method:"PATCH",body:JSON.stringify({permissions:{}})});
+      showToast("تمت إعادة صلاحيات الدور الافتراضية.",{type:"success"});
+      root.classList.add("hidden");
+      await loadAdmins();
+    }catch(error){showToast(error.message,{type:"error"})}
+  });
+}
+
 async function loadAdmins(){
   try{
     const d=await api("/v1/admin/admins");
+    adminRoleDefaults=d.role_defaults||{};
+    adminsById=new Map((d.items||[]).map(x=>[String(x.user_id),x]));
     $("#adminsList").innerHTML=(d.items||[]).map(a=>{
-      const p=Array.isArray(a.profiles)?a.profiles[0]:a.profiles||{};
+      const p=a.profiles||{};
       const isOwner=a.role==="owner";
-      return '<div class="admin-card">'+
-        '<div class="grow"><b>'+esc(p.name||p.username||a.user_id)+'</b><div class="meta">@'+esc(p.username||"")+' · '+esc(a.user_id)+'</div>'+
-        '<div class="meta">آخر نشاط: '+(a.last_active_at?new Date(a.last_active_at).toLocaleString("ar-IQ"):"غير متوفر")+'</div></div>'+
-        '<span class="pill '+(a.active?"ok":"bad")+'">'+(a.active?"نشط":"متوقف")+'</span>'+
-        (isOwner?'<span class="pill">المالك</span>':
-          '<select class="admin-role-select" data-admin-role="'+esc(a.user_id)+'">'+
-            ["secondary_admin","moderator","content_moderator","support","analyst"].map(role=>
-              '<option value="'+role+'" '+(a.role===role?"selected":"")+'>'+esc(roleLabel[role]||role)+'</option>'
-            ).join("")+
-          '</select>'+
-          '<button class="small '+(a.active?"danger":"")+'" data-admin-active="'+esc(a.user_id)+'" data-active="'+String(a.active)+'" type="button">'+(a.active?"تعطيل":"تفعيل")+'</button>'
+      const full=isOwner||a.role==="secondary_admin";
+      const allowedCount=Object.values(a.effective_permissions||{}).filter(Boolean).length;
+      return '<div class="admin-card stage7-admin-card">'+
+        '<div class="list-avatar">'+(p.avatar_media_id?'<img data-media-id="'+esc(p.avatar_media_id)+'" alt="">':'<span>'+esc((p.name||p.username||"م").slice(0,1))+'</span>')+'</div>'+
+        '<div class="grow"><div class="moderation-head"><div><b>'+esc(p.name||p.username||a.user_id)+'</b><div class="meta">@'+esc(p.username||"")+'</div></div><span class="pill '+(a.active?"ok":"bad")+'">'+(a.active?"نشط":"متوقف")+'</span></div>'+
+          '<div class="stage7-admin-meta"><span>'+esc(roleLabel[a.role]||a.role)+'</span><span>'+(full?"كامل الصلاحيات":allowedCount+" صلاحيات فعالة")+'</span><span>آخر نشاط: '+(a.last_active_at?new Date(a.last_active_at).toLocaleString("ar-IQ"):"غير متوفر")+'</span></div></div>'+
+        (isOwner?'<span class="pill ok">المالك</span>':
+          '<div class="stage7-admin-controls">'+
+            '<select class="admin-role-select" data-admin-role="'+esc(a.user_id)+'" data-current="'+esc(a.role)+'">'+
+              ["secondary_admin","moderator","content_moderator","support","analyst"].map(role=>'<option value="'+role+'" '+(a.role===role?"selected":"")+'>'+esc(roleLabel[role]||role)+'</option>').join("")+
+            '</select>'+
+            '<button class="small" data-admin-perms="'+esc(a.user_id)+'" type="button">الصلاحيات</button>'+
+            '<button class="small '+(a.active?"danger":"")+'" data-admin-active="'+esc(a.user_id)+'" data-active="'+String(a.active)+'" type="button">'+(a.active?"تعطيل":"تفعيل")+'</button>'+
+            '<button class="small danger" data-admin-remove="'+esc(a.user_id)+'" type="button">حذف</button>'+
+          '</div>'
         )+
       '</div>';
     }).join("")||'<div class="panel">لا يوجد مشرفون إضافيون.</div>';
+
+    await hydrateAdminMedia($("#adminsList"));
+    $("#adminsList").querySelectorAll("[data-admin-perms]").forEach(btn=>btn.onclick=()=>{
+      const admin=adminsById.get(btn.dataset.adminPerms);if(admin)openAdminPermissionEditor(admin);
+    });
     $("#adminsList").querySelectorAll("[data-admin-role]").forEach(sel=>sel.onchange=async()=>{
       const old=sel.dataset.current||"";
+      if(!await adminConfirm("تغيير دور المشرف؟","سيتم تطبيق صلاحيات الدور الجديد فورًا.",{acceptLabel:"تغيير الدور"})){sel.value=old;return}
       sel.disabled=true;
       try{
         await api("/v1/admin/admins/"+sel.dataset.adminRole,{method:"PATCH",body:JSON.stringify({role:sel.value})});
+        showToast("تم تغيير دور المشرف.",{type:"success"});
         await loadAdmins();
-      }catch(error){
-        showToast(error.message,{type:"error"});
-        if(old)sel.value=old;
-        sel.disabled=false;
-      }
+      }catch(error){showToast(error.message,{type:"error"});sel.value=old;sel.disabled=false}
     });
     $("#adminsList").querySelectorAll("[data-admin-active]").forEach(btn=>btn.onclick=async()=>{
       const active=btn.dataset.active==="true";
@@ -1282,21 +1618,21 @@ async function loadAdmins(){
       btn.disabled=true;
       try{
         await api("/v1/admin/admins/"+btn.dataset.adminActive,{method:"PATCH",body:JSON.stringify({active:!active})});
+        showToast(active?"تم تعطيل المشرف.":"تم تفعيل المشرف.",{type:"success"});
+        await loadAdmins();
+      }catch(error){showToast(error.message,{type:"error"});btn.disabled=false}
+    });
+    $("#adminsList").querySelectorAll("[data-admin-remove]").forEach(btn=>btn.onclick=async()=>{
+      if(!await adminConfirm("حذف المشرف؟","سيتم إزالة صلاحية الإدارة بالكامل من هذا الحساب. حساب المستخدم نفسه لن يُحذف.",{acceptLabel:"حذف المشرف",danger:true}))return;
+      btn.disabled=true;
+      try{
+        await api("/v1/admin/admins/"+btn.dataset.adminRemove,{method:"DELETE"});
+        showToast("تم حذف المشرف من الإدارة.",{type:"success"});
         await loadAdmins();
       }catch(error){showToast(error.message,{type:"error"});btn.disabled=false}
     });
   }catch(e){$("#adminsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
-$("#addAdminButton").onclick=async()=>{
-  const userId=await adminPrompt("إضافة مشرف",{label:"معرف المستخدم UUID",placeholder:"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",acceptLabel:"التالي"});
-  if(!userId)return;
-  const role=await adminPrompt("دور المشرف",{text:"secondary_admin / moderator / content_moderator / support / analyst",label:"الدور",defaultValue:"moderator",acceptLabel:"إضافة"});
-  if(!role)return;
-  try{
-    await api("/v1/admin/admins",{method:"POST",body:JSON.stringify({user_id:userId.trim(),role:role.trim(),permissions:{}})});
-    await loadAdmins();
-  }catch(e){showToast(e.message,{type:"error"})}
-};
 
 async function loadReleases(){
   try{

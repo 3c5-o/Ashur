@@ -65,3 +65,14 @@ grant select, insert, update, delete on table public.system_errors to service_ro
 
 revoke all on table public.admin_notification_history from anon, authenticated;
 grant select, insert, update, delete on table public.admin_notification_history to service_role;
+
+
+-- Foreign-key indexes found by the Supabase performance advisor.
+create index if not exists admin_notification_history_template_idx
+  on public.admin_notification_history(template_id);
+create index if not exists admin_notification_templates_created_by_idx
+  on public.admin_notification_templates(created_by);
+create index if not exists admin_notification_templates_updated_by_idx
+  on public.admin_notification_templates(updated_by);
+create index if not exists system_errors_resolved_by_idx
+  on public.system_errors(resolved_by);

@@ -372,7 +372,7 @@ async function canReadMedia(user, media) {
     if (!user) return false;
     const messages = await select(
       "messages",
-      `select=conversation_id&media_id=eq.${encodeURIComponent(media.id)}&limit=1`,
+      `select=conversation_id&media_id=eq.${encodeURIComponent(media.id)}&is_deleted=eq.false&limit=1`,
     );
     if (!messages?.[0]) return false;
     const membership = await select(
@@ -2965,12 +2965,27 @@ async function deleteReportedTarget(actorUserId, targetType, targetId) {
     return { ok: true, media_count: 0, cleanup: [] };
   }
   if (targetType === "message") {
+    const rows = await select(
+      "messages",
+      "select=id,media_id&is_deleted=eq.false&id=eq." + encodeURIComponent(targetId) + "&limit=1",
+    ).catch(() => []);
+    const message = rows?.[0];
+    if (!message) return { ok: true, missing: true, soft_deleted: true, media_count: 0, cleanup: [] };
     await update("messages", "id=eq." + encodeURIComponent(targetId), {
       is_deleted: true,
       body: "",
+      media_id: null,
       edited_at: new Date().toISOString(),
     }, { returning: false });
-    return { ok: true, soft_deleted: true, media_count: 0, cleanup: [] };
+    const cleanup = [];
+    if (message.media_id) {
+      cleanup.push(await purgeMediaObject(message.media_id, actorUserId).catch(error => ({
+        media_id: message.media_id,
+        status: "cleanup_pending",
+        error: String(error.message || error),
+      })));
+    }
+    return { ok: true, soft_deleted: true, media_count: message.media_id ? 1 : 0, cleanup };
   }
   const table = ({ post: "posts", reel: "reels", story: "stories" })[targetType];
   if (!table) throw Object.assign(new Error("هذا النوع لا يدعم الحذف من مركز البلاغات"), { statusCode: 400 });
@@ -3032,6 +3047,11 @@ async function warnReportedUser(actor, userId, reason) {
 
 async function banReportedUser(actor, userId, reason, hours) {
   if (!userId) return false;
+  if (userId === actor.user.id || (config.ownerUserId && userId === config.ownerUserId)) {
+    const error = new Error("لا يمكن حظر حساب الإدارة الحالي أو حساب المالك من مركز البلاغات");
+    error.statusCode = 400;
+    throw error;
+  }
   const duration = Math.max(0, Math.min(Number(hours || 0), 24 * 365));
   const temporary = duration > 0;
   const bannedUntil = temporary ? new Date(Date.now() + duration * 3600_000).toISOString() : null;

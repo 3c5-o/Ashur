@@ -333,7 +333,21 @@ async function canReadMedia(user, media) {
     return false;
   }
 
-  if (["chat_image", "chat_video", "chat_audio", "chat_file", "group_media"].includes(media.kind)) {
+  if (media.kind === "group_media") {
+    if (!user) return false;
+    const conversations = await select(
+      "conversations",
+      `select=id&image_media_id=eq.${encodeURIComponent(media.id)}&is_deleted=eq.false&limit=1`,
+    );
+    if (!conversations?.[0]) return false;
+    const membership = await select(
+      "conversation_members",
+      `select=user_id&conversation_id=eq.${encodeURIComponent(conversations[0].id)}&user_id=eq.${encodeURIComponent(user.id)}&limit=1`,
+    );
+    return Boolean(membership?.length);
+  }
+
+  if (["chat_image", "chat_video", "chat_audio", "chat_file"].includes(media.kind)) {
     if (!user) return false;
     const messages = await select(
       "messages",
@@ -900,7 +914,7 @@ async function conversationDetails(req, res, conversationId) {
   const user = await currentUser(req);
   const memberships = await select(
     "conversation_members",
-    "select=user_id,role,muted,joined_at&conversation_id=eq." + encodeURIComponent(conversationId) +
+    "select=user_id,role,nickname,muted,joined_at&conversation_id=eq." + encodeURIComponent(conversationId) +
       "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
   );
   const ownMembership = memberships?.[0];
@@ -916,7 +930,7 @@ async function conversationDetails(req, res, conversationId) {
 
   const members = await select(
     "conversation_members",
-    "select=user_id,role,muted,joined_at&conversation_id=eq." + encodeURIComponent(conversationId) +
+    "select=user_id,role,nickname,muted,joined_at&conversation_id=eq." + encodeURIComponent(conversationId) +
       "&order=joined_at.asc&limit=250",
   );
   const ids = [...new Set((members || []).map((member) => member.user_id).filter(Boolean))];
@@ -958,7 +972,7 @@ async function updateConversationSettings(req, res, conversationId) {
 
   const conversations = await select(
     "conversations",
-    "select=id,kind,title,created_by,is_deleted&id=eq." + encodeURIComponent(conversationId) +
+    "select=id,kind,title,image_media_id,created_by,is_deleted&id=eq." + encodeURIComponent(conversationId) +
       "&is_deleted=eq.false&limit=1",
   );
   const conversation = conversations?.[0];
@@ -994,7 +1008,206 @@ async function updateConversationSettings(req, res, conversationId) {
     response.title = title;
   }
 
+  if (body.image_media_id !== undefined) {
+    if (conversation.kind !== "group") return json(res, 400, { error: "صورة المجموعة متاحة للمجموعات فقط" });
+    if (!["owner","admin"].includes(String(ownMembership.role || ""))) {
+      return json(res, 403, { error: "لا تملك صلاحية تعديل صورة المجموعة" });
+    }
+    let imageMediaId = null;
+    if (body.image_media_id) {
+      const candidate = String(body.image_media_id);
+      if (!/^[0-9a-f-]{36}$/i.test(candidate)) {
+        return json(res, 400, { error: "معرّف صورة المجموعة غير صالح" });
+      }
+      const mediaRows = await select(
+        "media_objects",
+        "select=id,owner_id,kind,status&id=eq." + encodeURIComponent(candidate) +
+          "&owner_id=eq." + encodeURIComponent(user.id) +
+          "&kind=eq.group_media&status=eq.ready&limit=1",
+      );
+      if (!mediaRows?.[0]) return json(res, 400, { error: "صورة المجموعة غير متاحة" });
+      imageMediaId = candidate;
+    }
+    await update(
+      "conversations",
+      "id=eq." + encodeURIComponent(conversationId),
+      { image_media_id: imageMediaId, updated_at: new Date().toISOString() },
+      { returning: false },
+    );
+    response.image_media_id = imageMediaId;
+  }
+
   json(res, 200, response);
+}
+
+
+async function conversationManagementContext(user, conversationId) {
+  const memberships = await select(
+    "conversation_members",
+    "select=user_id,role,nickname&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(user.id) + "&limit=1",
+  );
+  const membership = memberships?.[0];
+  if (!membership) {
+    const error = new Error("لست عضوًا في هذه المحادثة");
+    error.statusCode = 403;
+    throw error;
+  }
+  const conversations = await select(
+    "conversations",
+    "select=id,kind,title,image_media_id,created_by,is_deleted&id=eq." + encodeURIComponent(conversationId) +
+      "&is_deleted=eq.false&limit=1",
+  );
+  const conversation = conversations?.[0];
+  if (!conversation) {
+    const error = new Error("المحادثة غير موجودة");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (conversation.kind !== "group") {
+    const error = new Error("إدارة الأعضاء متاحة للمجموعات فقط");
+    error.statusCode = 400;
+    throw error;
+  }
+  return { membership, conversation };
+}
+
+async function addConversationMember(req, res, conversationId) {
+  const user = await currentUser(req);
+  const { membership } = await conversationManagementContext(user, conversationId);
+  if (!["owner","admin"].includes(String(membership.role || ""))) {
+    return json(res, 403, { error: "لا تملك صلاحية إضافة أعضاء" });
+  }
+
+  const body = await readJson(req);
+  const userId = String(body.user_id || "");
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) return json(res, 400, { error: "المستخدم غير صالح" });
+
+  const existing = await select(
+    "conversation_members",
+    "select=user_id&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(userId) + "&limit=1",
+  );
+  if (existing?.[0]) return json(res, 200, { ok: true, already_member: true });
+
+  const profiles = await select(
+    "profiles",
+    "select=id,is_banned&id=eq." + encodeURIComponent(userId) + "&limit=1",
+  );
+  if (!profiles?.[0] || profiles[0].is_banned) return json(res, 404, { error: "الحساب غير متاح" });
+  if (await isBlockedBetween(user.id, userId)) {
+    return json(res, 403, { error: "لا يمكن إضافة هذا الحساب إلى المجموعة" });
+  }
+
+  await insert("conversation_members", {
+    conversation_id: conversationId,
+    user_id: userId,
+    role: "member",
+    nickname: null,
+  }, { returning: false });
+  await update(
+    "conversations",
+    "id=eq." + encodeURIComponent(conversationId),
+    { updated_at: new Date().toISOString() },
+    { returning: false },
+  );
+  await writeAudit(user.id, "group_member_add", "conversation", conversationId, { user_id: userId });
+  return json(res, 201, { ok: true, user_id: userId, role: "member" });
+}
+
+async function updateConversationMember(req, res, conversationId, targetUserId) {
+  const user = await currentUser(req);
+  const { membership } = await conversationManagementContext(user, conversationId);
+  if (!["owner","admin"].includes(String(membership.role || ""))) {
+    return json(res, 403, { error: "لا تملك صلاحية إدارة الأعضاء" });
+  }
+
+  const targetRows = await select(
+    "conversation_members",
+    "select=user_id,role,nickname&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(targetUserId) + "&limit=1",
+  );
+  const target = targetRows?.[0];
+  if (!target) return json(res, 404, { error: "العضو غير موجود في المجموعة" });
+
+  const body = await readJson(req);
+  const patch = {};
+
+  if (body.role !== undefined) {
+    if (String(membership.role) !== "owner") {
+      return json(res, 403, { error: "المالك فقط يستطيع تعيين المشرفين" });
+    }
+    if (String(target.role) === "owner" || targetUserId === user.id) {
+      return json(res, 400, { error: "لا يمكن تغيير صلاحية مالك المجموعة" });
+    }
+    const nextRole = body.role === "admin" ? "admin" : body.role === "member" ? "member" : "";
+    if (!nextRole) return json(res, 400, { error: "الصلاحية غير صالحة" });
+    patch.role = nextRole;
+  }
+
+  if (body.nickname !== undefined) {
+    const nickname = String(body.nickname || "").trim().slice(0, 32);
+    patch.nickname = nickname || null;
+  }
+
+  if (!Object.keys(patch).length) return json(res, 400, { error: "لا توجد تعديلات" });
+
+  await update(
+    "conversation_members",
+    "conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(targetUserId),
+    patch,
+    { returning: false },
+  );
+  await writeAudit(user.id, "group_member_update", "conversation", conversationId, {
+    user_id: targetUserId,
+    role: patch.role,
+    nickname: patch.nickname,
+  });
+  return json(res, 200, { ok: true, user_id: targetUserId, ...patch });
+}
+
+async function removeConversationMember(req, res, conversationId, targetUserId) {
+  const user = await currentUser(req);
+  const { membership } = await conversationManagementContext(user, conversationId);
+
+  const targetRows = await select(
+    "conversation_members",
+    "select=user_id,role&conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(targetUserId) + "&limit=1",
+  );
+  const target = targetRows?.[0];
+  if (!target) return json(res, 404, { error: "العضو غير موجود في المجموعة" });
+
+  const selfLeave = targetUserId === user.id;
+  if (selfLeave) {
+    if (String(target.role) === "owner") return json(res, 400, { error: "يجب نقل ملكية المجموعة قبل المغادرة" });
+  } else {
+    if (!["owner","admin"].includes(String(membership.role || ""))) {
+      return json(res, 403, { error: "لا تملك صلاحية إزالة أعضاء" });
+    }
+    if (String(target.role) === "owner") return json(res, 400, { error: "لا يمكن إزالة مالك المجموعة" });
+    if (String(membership.role) === "admin" && String(target.role) === "admin") {
+      return json(res, 403, { error: "المشرف لا يستطيع إزالة مشرف آخر" });
+    }
+  }
+
+  await remove(
+    "conversation_members",
+    "conversation_id=eq." + encodeURIComponent(conversationId) +
+      "&user_id=eq." + encodeURIComponent(targetUserId),
+    { returning: false },
+  );
+  await update(
+    "conversations",
+    "id=eq." + encodeURIComponent(conversationId),
+    { updated_at: new Date().toISOString() },
+    { returning: false },
+  );
+  await writeAudit(user.id, selfLeave ? "group_leave" : "group_member_remove", "conversation", conversationId, {
+    user_id: targetUserId,
+  });
+  return json(res, 200, { ok: true, user_id: targetUserId });
 }
 
 
@@ -1078,9 +1291,10 @@ async function listConversationMessages(req, res, conversationId) {
 
   const conversations = await select(
     "conversations",
-    "select=id&is_deleted=eq.false&id=eq." + encodeURIComponent(conversationId) + "&limit=1",
+    "select=id,kind&is_deleted=eq.false&id=eq." + encodeURIComponent(conversationId) + "&limit=1",
   );
-  if (!conversations?.[0]) return json(res, 404, { error: "المحادثة غير موجودة" });
+  const conversation = conversations?.[0];
+  if (!conversation) return json(res, 404, { error: "المحادثة غير موجودة" });
 
   const items = await select(
     "messages",
@@ -1099,11 +1313,36 @@ async function listConversationMessages(req, res, conversationId) {
     readIds = new Set((reads || []).map((row) => row.message_id));
   }
 
+  const senderIds = [...new Set((items || []).map((message) => message.sender_id).filter(Boolean))];
+  const senderProfiles = senderIds.length
+    ? await select(
+        "profiles",
+        "select=id,name,username,avatar_media_id,is_verified&id=in.(" + senderIds.map(encodeURIComponent).join(",") + ")",
+      )
+    : [];
+  const senderProfileMap = new Map((senderProfiles || []).map((profile) => [profile.id, profile]));
+
+  let memberMetaMap = new Map();
+  if (conversation.kind === "group" && senderIds.length) {
+    const memberRows = await select(
+      "conversation_members",
+      "select=user_id,role,nickname&conversation_id=eq." + encodeURIComponent(conversationId) +
+        "&user_id=in.(" + senderIds.map(encodeURIComponent).join(",") + ")",
+    ).catch(() => []);
+    memberMetaMap = new Map((memberRows || []).map((member) => [member.user_id, member]));
+  }
+
   json(res, 200, {
-    items: (items || []).map((message) => ({
-      ...message,
-      read_by_other: readIds.has(message.id),
-    })),
+    items: (items || []).map((message) => {
+      const memberMeta = memberMetaMap.get(message.sender_id) || {};
+      return {
+        ...message,
+        read_by_other: readIds.has(message.id),
+        sender_profile: senderProfileMap.get(message.sender_id) || null,
+        sender_role: memberMeta.role || null,
+        sender_nickname: memberMeta.nickname || null,
+      };
+    }),
   });
 }
 
@@ -2932,6 +3171,17 @@ const server = http.createServer(async (req, res) => {
     }
     if (conversationDetailsMatch && req.method === "PATCH") {
       return updateConversationSettings(req, res, conversationDetailsMatch[1]);
+    }
+    const conversationMembersMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/members$/.exec(url.pathname);
+    if (conversationMembersMatch && req.method === "POST") {
+      return addConversationMember(req, res, conversationMembersMatch[1]);
+    }
+    const conversationMemberMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/members\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (conversationMemberMatch && req.method === "PATCH") {
+      return updateConversationMember(req, res, conversationMemberMatch[1], conversationMemberMatch[2]);
+    }
+    if (conversationMemberMatch && req.method === "DELETE") {
+      return removeConversationMember(req, res, conversationMemberMatch[1], conversationMemberMatch[2]);
     }
     const conversationMessageMatch = /^\/v1\/conversations\/([0-9a-f-]{36})\/messages$/.exec(url.pathname);
     if (req.method === "GET" && conversationMessageMatch) {

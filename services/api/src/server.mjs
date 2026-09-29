@@ -169,23 +169,33 @@ async function readJson(req, max = 1024 * 1024) {
 
 async function adminFor(userId) {
   if (!userId) return null;
-  if (config.ownerUserId && userId === config.ownerUserId) {
-    const owner = { user_id: userId, role: "owner", permissions: {}, active: true };
-    await upsert("admins", {
-      user_id: userId,
-      role: "owner",
-      permissions: {},
-      active: true,
-      updated_at: new Date().toISOString(),
-      last_active_at: new Date().toISOString(),
-    }, "user_id").catch(() => {});
-    return owner;
-  }
+
   const rows = await select(
     "admins",
     `select=user_id,role,permissions,active&user_id=eq.${encodeURIComponent(userId)}&active=eq.true&limit=1`,
-  );
-  return rows?.[0] || null;
+  ).catch(() => []);
+  if (rows?.[0]) return rows[0];
+
+  if (config.ownerUserId && userId === config.ownerUserId) {
+    const activeOwners = await select(
+      "admins",
+      "select=user_id&role=eq.owner&active=eq.true&limit=1",
+    ).catch(() => []);
+    if (!activeOwners?.length) {
+      const owner = { user_id: userId, role: "owner", permissions: {}, active: true };
+      await upsert("admins", {
+        user_id: userId,
+        role: "owner",
+        permissions: {},
+        active: true,
+        updated_at: new Date().toISOString(),
+        last_active_at: new Date().toISOString(),
+      }, "user_id").catch(() => {});
+      return owner;
+    }
+  }
+
+  return null;
 }
 
 const ADMIN_PERMISSION_KEYS = [
@@ -3499,9 +3509,6 @@ async function updateAdminRecord(req, res, adminUserId) {
   if (!["owner","secondary_admin"].includes(actor.admin.role)) {
     return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
   }
-  if (config.ownerUserId && adminUserId === config.ownerUserId) {
-    return json(res, 400, { error: "صلاحيات المالك الأساسية لا يمكن تعديلها من هنا" });
-  }
 
   const currentRows = await select(
     "admins",
@@ -3509,6 +3516,9 @@ async function updateAdminRecord(req, res, adminUserId) {
   );
   const current = currentRows?.[0];
   if (!current) return json(res, 404, { error: "المشرف غير موجود" });
+  if (current.role === "owner") {
+    return json(res, 400, { error: "صلاحيات المالك لا يمكن تعديلها من إدارة المشرفين" });
+  }
 
   const body = await readJson(req);
   const allowed = ["secondary_admin", "moderator", "content_moderator", "support", "analyst"];
@@ -3543,11 +3553,11 @@ async function removeAdminRecord(req, res, adminUserId) {
     return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
   }
   if (adminUserId === actor.user.id) return json(res, 400, { error: "لا يمكنك حذف حسابك الإداري الحالي" });
-  if (config.ownerUserId && adminUserId === config.ownerUserId) {
-    return json(res, 400, { error: "لا يمكن حذف حساب المالك" });
-  }
+
   const rows = await select("admins", "select=user_id,role&user_id=eq." + encodeURIComponent(adminUserId) + "&limit=1");
   if (!rows?.[0]) return json(res, 404, { error: "المشرف غير موجود" });
+  if (rows[0].role === "owner") return json(res, 400, { error: "لا يمكن حذف حساب المالك من إدارة المشرفين" });
+
   await remove("admins", "user_id=eq." + encodeURIComponent(adminUserId));
   await writeAudit(actor.user.id, "remove_admin", "admin", adminUserId, { role: rows[0].role });
   json(res, 200, { ok: true });
@@ -4812,9 +4822,6 @@ async function addAdmin(req, res) {
   const allowed = ["secondary_admin","moderator","content_moderator","support","analyst"];
   if (!/^[0-9a-f-]{36}$/i.test(userId)) return json(res, 400, { error: "معرف المستخدم غير صالح" });
   if (!allowed.includes(role)) return json(res, 400, { error: "الدور غير صالح" });
-  if (config.ownerUserId && userId === config.ownerUserId) {
-    return json(res, 409, { error: "هذا الحساب هو مالك المنصة بالفعل" });
-  }
 
   const profiles = await select(
     "profiles",
@@ -4826,8 +4833,10 @@ async function addAdmin(req, res) {
     return json(res, 404, { error: "الحساب غير متاح" });
   }
 
-  const existing = await select("admins", "select=user_id&user_id=eq." + encodeURIComponent(userId) + "&limit=1");
-  if (existing?.[0]) return json(res, 409, { error: "هذا الحساب مضاف ضمن المشرفين بالفعل" });
+  const existing = await select("admins", "select=user_id,role&user_id=eq." + encodeURIComponent(userId) + "&limit=1");
+  if (existing?.[0]) {
+    return json(res, 409, { error: existing[0].role === "owner" ? "هذا الحساب هو مالك المنصة بالفعل" : "هذا الحساب مضاف ضمن المشرفين بالفعل" });
+  }
 
   const permissions = role === "secondary_admin" ? {} : sanitizeAdminPermissions(body.permissions);
   const rows = await insert("admins", {
@@ -4847,32 +4856,14 @@ async function adminAdmins(req, res) {
     return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
   }
 
+  if (config.ownerUserId) await adminFor(config.ownerUserId).catch(() => {});
   const rows = await select(
     "admins",
     "select=user_id,role,permissions,active,last_active_at,created_at,updated_at&order=created_at.asc",
   );
   const items = [];
 
-  if (config.ownerUserId) {
-    const ownerProfiles = await select(
-      "profiles",
-      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(config.ownerUserId) + "&limit=1",
-    ).catch(() => []);
-    items.push({
-      user_id: config.ownerUserId,
-      role: "owner",
-      permissions: { all: true },
-      effective_permissions: Object.fromEntries(ADMIN_PERMISSION_KEYS.map(key => [key, true])),
-      active: true,
-      last_active_at: null,
-      created_at: null,
-      updated_at: null,
-      profiles: ownerProfiles?.[0] || null,
-    });
-  }
-
   for (const row of rows || []) {
-    if (config.ownerUserId && row.user_id === config.ownerUserId) continue;
     const profiles = await select(
       "profiles",
       "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.user_id) + "&limit=1",
@@ -4887,6 +4878,97 @@ async function adminAdmins(req, res) {
     items,
     permission_keys: ADMIN_PERMISSION_KEYS,
     role_defaults: Object.fromEntries(Object.entries(ADMIN_ROLE_PERMISSIONS).map(([role,set]) => [role,[...set]])),
+  });
+}
+
+async function adminOwner(req, res) {
+  const actor = await requireAdmin(req);
+  if (actor.admin.role !== "owner") {
+    return json(res, 403, { error: "إدارة المالك متاحة للمالك الرئيسي فقط" });
+  }
+
+  const ownerRows = await select(
+    "admins",
+    "select=user_id,role,active,created_at,updated_at,last_active_at&role=eq.owner&active=eq.true&limit=1",
+  ).catch(() => []);
+  const owner = ownerRows?.[0] || null;
+
+  if (req.method === "GET") {
+    if (!owner) return json(res, 404, { error: "لا يوجد مالك نشط" });
+    const [profiles, authRecord] = await Promise.all([
+      select(
+        "profiles",
+        "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(owner.user_id) + "&limit=1",
+      ).catch(() => []),
+      serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(owner.user_id)).catch(() => null),
+    ]);
+    return json(res, 200, {
+      owner: {
+        ...owner,
+        profile: profiles?.[0] || null,
+        auth: authRecord ? {
+          email: authRecord.email || "",
+          email_confirmed_at: authRecord.email_confirmed_at || null,
+          last_sign_in_at: authRecord.last_sign_in_at || null,
+        } : null,
+      },
+      owner_only: true,
+    });
+  }
+
+  const body = await readJson(req);
+  const newOwnerId = String(body.new_owner_id || "").trim();
+  const previousOwnerAction = String(body.previous_owner_action || "secondary_admin").trim();
+  if (String(body.confirm || "") !== "TRANSFER") {
+    return json(res, 400, { error: "تأكيد نقل الملكية غير صحيح" });
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(newOwnerId)) {
+    return json(res, 400, { error: "UUID الحساب الجديد غير صالح" });
+  }
+  if (!["secondary_admin","remove"].includes(previousOwnerAction)) {
+    return json(res, 400, { error: "إجراء المالك السابق غير صالح" });
+  }
+  if (newOwnerId === actor.user.id) {
+    return json(res, 409, { error: "هذا الحساب هو المالك الحالي بالفعل" });
+  }
+
+  const [profiles, authRecord] = await Promise.all([
+    select(
+      "profiles",
+      "select=id,name,username,is_banned,banned_until,deleted_at&id=eq." + encodeURIComponent(newOwnerId) + "&limit=1",
+    ).catch(() => []),
+    serviceRequest("/auth/v1/admin/users/" + encodeURIComponent(newOwnerId)).catch(() => null),
+  ]);
+  const profile = profiles?.[0];
+  const temporarilyBanned = Boolean(profile?.banned_until && new Date(profile.banned_until) > new Date());
+  if (!authRecord || !profile || profile.deleted_at || profile.is_banned || temporarilyBanned) {
+    return json(res, 404, { error: "الحساب الجديد غير موجود أو غير متاح" });
+  }
+
+  const result = await serviceRequest("/rest/v1/rpc/admin_transfer_owner", {
+    method: "POST",
+    body: {
+      p_new_owner: newOwnerId,
+      p_previous_owner_action: previousOwnerAction,
+    },
+  });
+
+  await writeAudit(actor.user.id, "transfer_owner", "admin", newOwnerId, {
+    old_owner_id: actor.user.id,
+    previous_owner_action: previousOwnerAction,
+    username: profile.username || "",
+  });
+
+  json(res, 200, {
+    ok: true,
+    result,
+    new_owner: {
+      user_id: newOwnerId,
+      name: profile.name || "",
+      username: profile.username || "",
+      email: authRecord.email || "",
+    },
+    previous_owner_action: previousOwnerAction,
   });
 }
 
@@ -5810,6 +5892,9 @@ const server = http.createServer(async (req, res) => {
     }
 
 
+    if (url.pathname === "/v1/admin/owner" && ["GET","POST"].includes(req.method)) {
+      return adminOwner(req, res);
+    }
     if (url.pathname === "/v1/admin/admins") {
       if (req.method === "GET") return adminAdmins(req, res);
       if (req.method === "POST") return addAdmin(req, res);

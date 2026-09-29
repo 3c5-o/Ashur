@@ -186,3 +186,100 @@
   .hero-panel img{width:60px;height:60px}
   .admin-dialog-actions{grid-template-columns:1fr}
 }
+
+
+/* Ashur Admin stages 3-4 mobile */
+@media(max-width:920px){
+  .users-filter-bar,
+  .content-filter-bar{
+    grid-template-columns:1fr 1fr;
+    gap:7px;
+  }
+  .users-filter-bar .search-wrap,
+  .content-filter-bar .search-wrap{
+    grid-column:1/-1;
+  }
+  .content-filter-bar #contentAuthor{
+    grid-column:1/-1;
+  }
+  .content-filter-bar .compact-date{
+    min-width:0;
+  }
+  .content-filter-bar #resetContentFilters{
+    grid-column:1/-1;
+    min-height:40px;
+  }
+  .admin-user-hero{margin-inline:-2px}
+  .admin-user-cover{height:112px}
+  .admin-user-identity{
+    margin-top:-22px;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    padding-inline:8px;
+  }
+  .admin-user-avatar{width:66px;height:66px;border-radius:21px}
+  .admin-user-identity .grow{min-width:calc(100% - 100px)}
+  .admin-user-identity .pill{margin-inline-start:auto}
+  .admin-user-info-grid,
+  .content-detail-grid{
+    grid-template-columns:1fr 1fr;
+  }
+  .user-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .admin-action-section{padding:10px}
+  .admin-action-section .admin-actions{display:grid;grid-template-columns:1fr 1fr}
+  .ban-presets{display:grid;grid-template-columns:repeat(3,1fr)}
+  .warning-item{display:grid}
+  .warning-item span{white-space:normal}
+  .stage4-content-card{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+  .moderation-media-grid{
+    width:100%;
+    min-width:0;
+    grid-template-columns:repeat(4,1fr);
+  }
+  .moderation-media-cell{aspect-ratio:1/1}
+  .moderation-media-grid>.placeholder{height:150px}
+  .stage4-content-card .moderation-head{align-items:flex-start}
+  .stage4-content-card .admin-actions{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .stage4-content-card .admin-actions .small{min-width:0}
+  .content-preview-gallery{
+    grid-template-columns:1fr;
+    max-height:58dvh;
+  }
+  .content-preview-media,
+  .content-preview-media img,
+  .content-preview-media video{
+    min-height:210px;
+    max-height:440px;
+  }
+}
+@media(max-width:480px){
+  .users-filter-bar,
+  .content-filter-bar{
+    grid-template-columns:1fr;
+  }
+  .users-filter-bar>*,
+  .content-filter-bar>*{
+    grid-column:1!important;
+  }
+  .admin-user-info-grid,
+  .content-detail-grid{
+    grid-template-columns:1fr;
+  }
+  .user-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .admin-action-section .admin-actions{grid-template-columns:1fr}
+  .ban-presets{grid-template-columns:1fr 1fr}
+  .moderation-media-grid{grid-template-columns:repeat(2,1fr)}
+  .stage4-content-card .admin-actions{grid-template-columns:1fr}
+  .admin-pager{
+    width:100%;
+    justify-content:space-between;
+  }
+  .admin-pager span{min-width:0}
+}

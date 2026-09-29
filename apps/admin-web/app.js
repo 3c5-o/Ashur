@@ -753,20 +753,32 @@ async function loadContent(kind=currentContentKind,authorId=""){
 }
 
 let commentTimer;
-$("#commentSearch").oninput=()=>{clearTimeout(commentTimer);commentTimer=setTimeout(loadCommentsAdmin,250)};
-$("#commentStatus").onchange=loadCommentsAdmin;
+let commentsPage=1;
+let commentsPages=1;
+$("#commentSearch").oninput=()=>{
+  clearTimeout(commentTimer);
+  commentTimer=setTimeout(()=>{commentsPage=1;loadCommentsAdmin()},250);
+};
+$("#commentStatus").onchange=()=>{commentsPage=1;loadCommentsAdmin()};
+$("#commentsPrevPage")?.addEventListener("click",()=>{if(commentsPage>1){commentsPage--;loadCommentsAdmin()}});
+$("#commentsNextPage")?.addEventListener("click",()=>{if(commentsPage<commentsPages){commentsPage++;loadCommentsAdmin()}});
+
 async function loadCommentsAdmin(){
   try{
-    const params=new URLSearchParams();
+    const params=new URLSearchParams({page:String(commentsPage),limit:"40"});
     const q=$("#commentSearch").value.trim();
     const status=$("#commentStatus").value;
     if(q)params.set("q",q);
     if(status)params.set("status",status);
     const d=await api("/v1/admin/comments?"+params.toString());
+    const p=d.pagination||{};
+    commentsPages=Math.max(1,Number(p.pages||1));
+    if(commentsPage>commentsPages){commentsPage=commentsPages;return loadCommentsAdmin()}
     $("#commentsList").innerHTML=(d.items||[]).map(row=>{
       const a=row.author||{};
       const status=row.moderation_status||"active";
       return '<div class="row-card">'+
+        '<div class="list-avatar">'+(a.avatar_media_id?'<img data-media-id="'+esc(a.avatar_media_id)+'" alt="">':'<span>'+esc((a.name||a.username||"م").slice(0,1))+'</span>')+'</div>'+
         '<div class="grow"><b>'+esc(row.body||"")+'</b><div class="meta">@'+esc(a.username||"")+' · '+new Date(row.created_at).toLocaleString("ar-IQ")+'</div><div class="meta mono">'+esc(row.id)+'</div></div>'+
         '<span class="pill '+pillClass(status)+'">'+statusLabel(status)+'</span>'+
         '<button class="small" data-comment-author="'+esc(row.author_id)+'" type="button">الحساب</button>'+
@@ -774,6 +786,7 @@ async function loadCommentsAdmin(){
         '<button class="small" data-moderate-comment="'+esc(row.id)+'" data-status="'+esc(status)+'" type="button">'+(status==="hidden"?"استعادة":"إخفاء")+'</button>'+
       '</div>';
     }).join("")||'<div class="panel">لا توجد تعليقات.</div>';
+    await hydrateAdminMedia($("#commentsList"));
     $("#commentsList").querySelectorAll("[data-comment-author]").forEach(b=>b.onclick=()=>{navigate("users");loadUserDetail(b.dataset.commentAuthor)});
     $("#commentsList").querySelectorAll("[data-comment-target]").forEach(b=>b.onclick=()=>{
       currentContentKind=b.dataset.commentKind;
@@ -786,9 +799,20 @@ async function loadCommentsAdmin(){
     });
     $("#commentsList").querySelectorAll("[data-moderate-comment]").forEach(b=>b.onclick=async()=>{
       const next=b.dataset.status==="hidden"?"active":"hidden";
-      await api("/v1/admin/content/comments/"+b.dataset.moderateComment+"/moderate",{method:"POST",body:JSON.stringify({status:next,reason:next==="hidden"?((await adminPrompt("إخفاء التعليق",{label:"سبب الإخفاء",acceptLabel:"إخفاء"}))||""):""})});
+      await api("/v1/admin/content/comments/"+b.dataset.moderateComment+"/moderate",{
+        method:"POST",
+        body:JSON.stringify({
+          status:next,
+          reason:next==="hidden"?((await adminPrompt("إخفاء التعليق",{label:"سبب الإخفاء",acceptLabel:"إخفاء"}))||""):""
+        })
+      });
+      showToast(next==="hidden"?"تم إخفاء التعليق.":"تمت استعادة التعليق.",{type:"success"});
       loadCommentsAdmin();
     });
+    $("#commentsPager").classList.toggle("hidden",Number(p.total||0)<=Number(p.limit||40));
+    $("#commentsPageLabel").textContent=commentsPage+" / "+commentsPages+" · "+Number(p.total||0).toLocaleString("ar-IQ");
+    $("#commentsPrevPage").disabled=commentsPage<=1;
+    $("#commentsNextPage").disabled=commentsPage>=commentsPages;
   }catch(e){$("#commentsList").innerHTML='<div class="panel">'+esc(e.message)+'</div>'}
 }
 

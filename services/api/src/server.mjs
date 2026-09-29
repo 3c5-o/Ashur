@@ -5388,7 +5388,7 @@ async function collectHealthDetails(includeInternal = false) {
       scheduledNotifications, failedNotifications, openErrors, connectedChannels] = await Promise.all([
       count("upload_jobs", "status=eq.queued"),
       count("upload_jobs", "status=in.(receiving,storing)"),
-      count("upload_jobs", "status=eq.failed"),
+      count("upload_jobs", "status=eq.failed&retry_available=eq.true"),
       count("media_cleanup_jobs", "status=in.(pending,processing)"),
       count("media_cleanup_jobs", "status=eq.failed"),
       count("notification_outbox", "processed_at=is.null&attempts=lt.5"),

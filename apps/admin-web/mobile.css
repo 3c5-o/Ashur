@@ -377,3 +377,23 @@
   .stage10-template-card{display:grid}
   .stage10-template-card .admin-actions{grid-template-columns:repeat(3,1fr)}
 }
+
+
+/* Ashur Admin stages 11-12 mobile */
+@media(max-width:920px){
+  .stage12-feature-grid{grid-template-columns:1fr 1fr}
+  .stage12-limits-grid{grid-template-columns:1fr 1fr}
+  .stage11-current-meta,.stage11-release-meta{align-items:flex-start}
+}
+@media(max-width:520px){
+  .stage11-summary,.stage12-summary{grid-template-columns:1fr 1fr}
+  .stage11-current-head{display:grid}
+  .stage11-current-meta,.stage11-release-meta{display:grid}
+  .stage11-current-meta span,.stage11-release-meta span{border-radius:12px}
+  .stage11-sha code{max-width:210px}
+  .stage11-release-actions{display:grid}
+  .stage12-feature-grid{grid-template-columns:1fr}
+  .stage12-limits-grid{grid-template-columns:1fr}
+  .stage12-history-card{display:grid}
+  .stage12-history-card>.small{width:100%;margin-inline-start:0}
+}

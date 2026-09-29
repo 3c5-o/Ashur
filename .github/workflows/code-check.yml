@@ -9,6 +9,7 @@ on:
       - "apps/**/*.css"
       - "services/**/*.mjs"
       - "android/user/app/src/main/java/**/*.java"
+      - "android/admin/app/src/main/java/**/*.java"
       - ".github/workflows/code-check.yml"
   workflow_dispatch:
 
@@ -134,7 +135,31 @@ jobs:
           NODE
 
       - name: فحص نسخة الإدارة
-        run: node --check apps/admin-web/app.js
+        run: |
+          node --check apps/admin-web/app.js
+          node <<'NODE'
+          const fs=require('fs');
+          const app=fs.readFileSync('apps/admin-web/app.js','utf8');
+          const index=fs.readFileSync('apps/admin-web/index.html','utf8');
+          const server=fs.readFileSync('services/api/src/server.mjs','utf8');
+          const telegram=fs.readFileSync('services/api/src/telegram.mjs','utf8');
+          const failures={
+            directSingleForEach:/(^|[^$])\$\((?:"[^"]*"|'[^']*')\)\.forEach/g.test(app),
+            missingUserPagination:!index.includes('id="usersPager"')||!app.includes('userPage=1'),
+            missingUserActions:!app.includes('force_logout')||!app.includes('deleteUserPermanently')||!app.includes('data-ban-hours'),
+            missingWarningHistory:!server.includes('admin_user_warnings')||!app.includes('warning-history'),
+            missingContentFilters:!index.includes('id="contentVisibility"')||!index.includes('id="contentReports"')||!index.includes('id="contentFrom"'),
+            missingContentPreview:!index.includes('id="contentPreviewDialog"')||!app.includes('openContentPreview'),
+            missingCommentPagination:!index.includes('id="commentsPager"')||!app.includes('commentsPage=1'),
+            missingCleanupQueue:!server.includes('media_cleanup_jobs')||!server.includes('processMediaCleanupJobs'),
+            missingTelegramDelete:!telegram.includes('deleteChannelMessage')||!server.includes('purgeMediaObject'),
+            missingSessionRevoke:!server.includes('admin_revoke_user_sessions')
+          };
+          if(Object.values(failures).some(Boolean)){
+            console.error('Admin stage 3/4 guard failed',failures);
+            process.exit(1);
+          }
+          NODE
 
       - name: فحص الموقع
         run: node --check apps/site/app.js

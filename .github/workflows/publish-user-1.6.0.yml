@@ -1,0 +1,84 @@
+name: نشر Ashur User 1.6.0 الموقعة
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-user-1.6.0.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المستودع
+        uses: actions/checkout@v4
+
+      - name: تنزيل Release 1.6.0 غير الموقعة
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 36526281859
+          name: ashur-user-release-unsigned-1.6.0
+          path: /tmp/ashur-user
+
+      - name: تثبيت apksigner الرسمي
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "build-tools;36.0.0"
+
+      - name: إعادة تكوين النسخة الموقعة والتحقق
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/final
+          BASE="$(find /tmp/ashur-user -type f -name '*.apk' | head -n1)"
+          test -n "$BASE" && test -s "$BASE"
+          cp "$BASE" /tmp/final/app.apk
+
+          base64 -d "$GITHUB_WORKSPACE/.github/signing-fixes/user-1.6.0.patch.b64" > /tmp/user-1.6.0.patch
+          echo "662779fbaf1547df15f7abcaca67f3bb24e4fd6d2da5fab94e16df3d7ea658de  /tmp/user-1.6.0.patch" | sha256sum -c -
+
+          (
+            cd /tmp/final
+            git init -q
+            git add app.apk
+            git apply --binary /tmp/user-1.6.0.patch
+          )
+
+          echo "0b01b518864b13cf495e862f63b2836ccc4764cd40703dece1c84c6c51ecf497  /tmp/final/app.apk" | sha256sum -c -
+
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          if [ ! -x "$APKSIGNER" ]; then APKSIGNER="/usr/local/lib/android/sdk/build-tools/36.0.0/apksigner"; fi
+          "$APKSIGNER" verify --verbose --print-certs /tmp/final/app.apk | tee /tmp/verify.txt
+          grep -F "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/verify.txt
+          grep -F "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/verify.txt
+          grep -Fi "3b9cdd06f534cb8a0fd91afe0a4576e275a9ad7135395e0f22bfe7cd7989029b" /tmp/verify.txt
+
+      - name: نشر APK داخل الموقع
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apps/site/download
+          cp /tmp/final/app.apk apps/site/download/ASHUR-User-latest.apk
+          sha256sum apps/site/download/ASHUR-User-latest.apk
+
+      - name: رفع النسخة الرسمية
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ashur Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f apps/site/download/ASHUR-User-latest.apk
+          git commit -m "Publish signed Ashur user 1.6.0 [skip ci]"
+          git push

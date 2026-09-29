@@ -778,7 +778,7 @@ async function handleUpload(req, res, url) {
     let retryExpiresAt = null;
 
     if (telegramUpload && !mediaCreated) {
-      await deleteChannelMessage(channel.channel_id, telegramUpload.messageId).catch(() => {});
+      await deleteChannelMessage({ channelId: channel.channel_id, messageId: telegramUpload.messageId }).catch(() => {});
     }
 
     if (
@@ -3267,7 +3267,7 @@ async function adminCandidates(req, res, url) {
   const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "").slice(0, 80);
   if (q.length < 2) return json(res, 200, { items: [] });
 
-  let query = "select=id,name,username,avatar_media_id,is_verified,is_banned,deleted_at&limit=20";
+  let query = "select=id,name,username,avatar_media_id,is_verified,is_banned,banned_until,deleted_at&limit=20";
   if (/^[0-9a-f-]{36}$/i.test(q)) query += "&id=eq." + encodeURIComponent(q);
   else query += "&or=(username.ilike.*" + encodeURIComponent(q.replace(/^@/,"")) + "*,name.ilike.*" + encodeURIComponent(q) + "*)";
 
@@ -3282,7 +3282,8 @@ async function adminCandidates(req, res, url) {
     profile &&
     !excluded.has(profile.id) &&
     !profile.deleted_at &&
-    !profile.is_banned
+    !profile.is_banned &&
+    !(profile.banned_until && new Date(profile.banned_until) > new Date())
   );
   json(res, 200, { items });
 }
@@ -3546,7 +3547,7 @@ async function adminRetryUpload(req, res, jobId) {
     json(res, 200, { ok: true, media_id: media.id || null });
   } catch (error) {
     if (uploaded && !mediaCreated) {
-      await deleteChannelMessage(channel.channel_id, uploaded.messageId).catch(() => {});
+      await deleteChannelMessage({ channelId: channel.channel_id, messageId: uploaded.messageId }).catch(() => {});
     }
     const retryStillAvailable = Boolean(await fsp.stat(filePath).catch(() => null));
     await update("upload_jobs", "id=eq." + encodeURIComponent(jobId), {
@@ -3834,12 +3835,22 @@ async function updateRelease(req, res, releaseId) {
   json(res, 200, { ok: true });
 }
 
-async function testStorageChannel(channel) {
+async function testStorageChannel(channel, force = false) {
+  const now = new Date().toISOString();
+  if (!channel.enabled && !force) {
+    await update("storage_channels", "channel_key=eq." + encodeURIComponent(channel.channel_key), {
+      status: "disabled",
+      last_error: "",
+      last_health_at: now,
+      updated_at: now,
+    }, { returning: false });
+    return { ok: true, skipped: true, detail: "القناة معطلة" };
+  }
+
   const result = await testTelegramChannel(channel.channel_id).catch((error) => ({
     ok: false,
     detail: String(error.message || error).slice(0,1000),
   }));
-  const now = new Date().toISOString();
   await update("storage_channels", "channel_key=eq." + encodeURIComponent(channel.channel_key), {
     status: result.ok ? "connected" : "error",
     last_error: result.ok ? "" : String(result.detail || "فشل اختبار القناة").slice(0,1000),
@@ -3858,7 +3869,7 @@ async function testAdminChannel(req, res, channelKey) {
   );
   const channel = rows?.[0];
   if (!channel) return json(res, 404, { error: "القناة غير موجودة" });
-  const result = await testStorageChannel(channel);
+  const result = await testStorageChannel(channel, true);
   await writeAudit(actor.user.id, "test_storage_channel", "storage_channel", channelKey, result);
   json(res, result.ok ? 200 : 503, result);
 }
@@ -3881,6 +3892,9 @@ async function adminChannelAction(req, res, channelKey) {
   if (action === "disable") {
     await update("storage_channels", "channel_key=eq." + encodeURIComponent(channelKey), {
       enabled: false,
+      status: "disabled",
+      last_error: "",
+      last_health_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }, { returning: false });
     await writeAudit(actor.user.id, "disable_storage_channel", "storage_channel", channelKey, {});
@@ -3892,7 +3906,7 @@ async function adminChannelAction(req, res, channelKey) {
       enabled: true,
       updated_at: new Date().toISOString(),
     }, { returning: false });
-    const result = await testStorageChannel({ ...channel, enabled: true });
+    const result = await testStorageChannel({ ...channel, enabled: true }, true);
     await writeAudit(actor.user.id, "enable_storage_channel", "storage_channel", channelKey, result);
     return json(res, result.ok ? 200 : 503, { ...result, enabled: true });
   }
@@ -3904,12 +3918,12 @@ async function adminChannelAction(req, res, channelKey) {
       last_error: "",
       updated_at: new Date().toISOString(),
     }, { returning: false });
-    const result = await testStorageChannel({ ...channel, enabled: true });
+    const result = await testStorageChannel({ ...channel, enabled: true }, true);
     await writeAudit(actor.user.id, "reconnect_storage_channel", "storage_channel", channelKey, result);
     return json(res, result.ok ? 200 : 503, { ...result, enabled: true });
   }
 
-  const result = await testStorageChannel(channel);
+  const result = await testStorageChannel(channel, true);
   await writeAudit(actor.user.id, "test_storage_channel", "storage_channel", channelKey, result);
   json(res, result.ok ? 200 : 503, result);
 }
@@ -4225,10 +4239,13 @@ async function addAdmin(req, res) {
 
   const profiles = await select(
     "profiles",
-    "select=id,name,username,is_banned,deleted_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
+    "select=id,name,username,is_banned,banned_until,deleted_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
   );
   const profile = profiles?.[0];
-  if (!profile || profile.deleted_at || profile.is_banned) return json(res, 404, { error: "الحساب غير متاح" });
+  const temporarilyBanned = Boolean(profile?.banned_until && new Date(profile.banned_until) > new Date());
+  if (!profile || profile.deleted_at || profile.is_banned || temporarilyBanned) {
+    return json(res, 404, { error: "الحساب غير متاح" });
+  }
 
   const existing = await select("admins", "select=user_id&user_id=eq." + encodeURIComponent(userId) + "&limit=1");
   if (existing?.[0]) return json(res, 409, { error: "هذا الحساب مضاف ضمن المشرفين بالفعل" });

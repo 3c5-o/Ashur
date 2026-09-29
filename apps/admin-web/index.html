@@ -209,35 +209,97 @@
     </section>
 
     <section id="errors" class="page">
-      <div class="page-title"><div><span class="eyebrow">المراقبة</span><h2>أخطاء النظام</h2><p>أخطاء API والرفع والإشعارات والتخزين.</p></div></div>
-      <div class="toolbar"><select id="errorStatus"><option value="">كل الأخطاء</option><option value="new">جديد</option><option value="resolved">تم الحل</option></select></div>
-      <div id="errorsList" class="table-list"></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 9</span><h2>الأخطاء وحالة النظام</h2><p>تجميع الأخطاء المتكررة، تحديد الخطورة والسياق، ومتابعة مصدر المشكلة قبل إغلاقها.</p></div></div>
+      <div id="errorSummary" class="stage9-summary"></div>
+      <div class="toolbar admin-filter-bar stage9-error-filter">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="errorSearch" class="search" placeholder="رسالة الخطأ، الكود أو الخدمة"></div>
+        <select id="errorStatus"><option value="">كل الحالات</option><option value="new">جديد</option><option value="resolved">تم الحل</option></select>
+        <select id="errorSeverity"><option value="">كل الخطورة</option><option value="critical">حرج</option><option value="error">خطأ</option><option value="warning">تحذير</option><option value="info">معلومة</option></select>
+        <select id="errorService"><option value="">كل الخدمات</option></select>
+        <button id="resetErrorFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="errorServiceBreakdown" class="stage9-services"></div>
+      <div id="errorsList" class="table-list stage9-errors-list"></div>
+      <div id="errorsPager" class="admin-pager hidden">
+        <button id="errorsPrevPage" class="small" type="button">السابق</button>
+        <span id="errorsPageLabel">1 / 1</span>
+        <button id="errorsNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="notifications" class="page">
-      <div class="page-title"><div><span class="eyebrow">التواصل</span><h2>الإشعارات</h2><p>إرسال تنبيهات رسمية لمستخدمي آشور.</p></div></div>
-      <form id="notificationForm" class="panel form">
-        <label><span>العنوان</span><input id="notificationTitle" maxlength="80" required></label>
-        <label><span>النص</span><textarea id="notificationBody" maxlength="500" required></textarea></label>
-        <label><span>المستلم</span>
-          <select id="notificationAudience">
-            <option value="all">جميع المستخدمين</option>
-            <option value="user">مستخدم محدد</option>
-            <option value="verified">الحسابات الموثقة</option>
-            <option value="active">النشطون آخر 30 يوم</option>
-            <option value="inactive">غير النشطين أكثر من 30 يوم</option>
-          </select>
-        </label>
-        <label id="targetUserRow" class="hidden"><span>معرف المستخدم</span><input id="notificationUser"></label>
-        <div class="grid2 fields">
-          <label><span>نوع الوجهة عند الضغط</span><select id="notificationEntityType"><option value="">بدون وجهة</option><option value="profile">حساب</option><option value="post">منشور</option><option value="reel">ريلز</option><option value="support_ticket">تذكرة دعم</option></select></label>
-          <label><span>معرف الوجهة</span><input id="notificationEntityId" placeholder="UUID اختياري"></label>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 10</span><h2>مركز الإشعارات</h2><p>استهداف ومعاينة وجدولة وقوالب وسجل كامل لرسائل آشور الرسمية.</p></div></div>
+      <div id="notificationSummary" class="stage10-summary"></div>
+
+      <div class="stage10-layout">
+        <form id="notificationForm" class="panel form stage10-composer">
+          <div class="panel-head">
+            <div><span class="eyebrow">إنشاء إشعار</span><h3>الرسالة والاستهداف</h3></div>
+            <select id="notificationTemplate"><option value="">بدون قالب</option></select>
+          </div>
+          <label><span>العنوان</span><input id="notificationTitle" maxlength="80" required></label>
+          <label><span>النص</span><textarea id="notificationBody" maxlength="500" required></textarea></label>
+          <label><span>المستلم</span>
+            <select id="notificationAudience">
+              <option value="all">جميع المستخدمين</option>
+              <option value="user">مستخدم واحد</option>
+              <option value="users">مستخدمون محددون</option>
+              <option value="verified">الحسابات الموثقة</option>
+              <option value="active">النشطون آخر 30 يوم</option>
+              <option value="inactive">غير النشطين أكثر من 30 يوم</option>
+            </select>
+          </label>
+          <div id="targetUserRow" class="stage10-user-picker hidden">
+            <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="notificationUserSearch" class="search" placeholder="ابحث بالاسم أو @username"></div>
+            <div id="notificationUserResults" class="stage10-user-results"></div>
+            <div id="notificationSelectedUsers" class="stage10-selected-users"></div>
+          </div>
+          <div id="notificationRecipientPreview" class="stage10-recipient-preview">سيتم حساب المستلمين قبل الإرسال.</div>
+          <div class="grid2 fields">
+            <label><span>نوع الوجهة عند الضغط</span><select id="notificationEntityType"><option value="">بدون وجهة</option><option value="profile">حساب</option><option value="post">منشور</option><option value="reel">ريلز</option><option value="support_ticket">تذكرة دعم</option></select></label>
+            <label><span>معرف الوجهة</span><input id="notificationEntityId" placeholder="UUID اختياري"></label>
+          </div>
+          <label><span>موعد الإرسال (اختياري)</span><input id="notificationScheduledAt" type="datetime-local"></label>
+          <div class="stage10-actions">
+            <button class="primary" id="notificationSubmitButton">إرسال / جدولة الإشعار</button>
+            <button class="small" id="saveNotificationTemplate" type="button">حفظ كقالب</button>
+          </div>
+          <p id="notificationMessage" class="message"></p>
+        </form>
+
+        <aside class="panel stage10-preview-panel">
+          <div class="panel-head"><div><span class="eyebrow">المعاينة</span><h3>شكل الإشعار</h3></div></div>
+          <div id="notificationPreviewCard" class="stage10-notification-preview">
+            <span>آشور</span><b>عنوان الإشعار</b><p>سيظهر نص الإشعار هنا.</p>
+          </div>
+          <div class="stage10-preview-meta">
+            <div><span>المستلمون</span><b id="notificationPreviewCount">—</b></div>
+            <div><span>الإرسال</span><b id="notificationPreviewTime">فوري</b></div>
+            <div><span>الوجهة</span><b id="notificationPreviewLink">بدون وجهة</b></div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="panel stage10-template-panel">
+        <div class="panel-head"><div><span class="eyebrow">القوالب</span><h3>قوالب الإشعارات</h3></div></div>
+        <div id="notificationTemplates" class="stage10-template-list"></div>
+      </div>
+
+      <div class="panel stage10-history-panel">
+        <div class="panel-head"><div><span class="eyebrow">السجل</span><h3>سجل الإشعارات</h3></div></div>
+        <div class="toolbar admin-filter-bar stage10-history-filter">
+          <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="notificationHistorySearch" class="search" placeholder="العنوان أو النص"></div>
+          <select id="notificationHistoryStatus"><option value="">كل الحالات</option><option value="sent">مرسل</option><option value="scheduled">مجدول</option><option value="processing">قيد الإرسال</option><option value="failed">فشل</option><option value="cancelled">ملغي</option></select>
+          <select id="notificationHistoryAudience"><option value="">كل الاستهدافات</option><option value="all">الجميع</option><option value="user">مستخدم</option><option value="users">مستخدمون</option><option value="verified">موثقون</option><option value="active">نشطون</option><option value="inactive">غير نشطين</option></select>
+          <button id="resetNotificationHistoryFilters" class="small" type="button">مسح الفلاتر</button>
         </div>
-        <label><span>موعد الإرسال (اختياري)</span><input id="notificationScheduledAt" type="datetime-local"></label>
-        <button class="primary">إرسال / جدولة الإشعار</button>
-        <p id="notificationMessage" class="message"></p>
-      </form>
-      <div class="panel"><div class="panel-head"><div><span class="eyebrow">السجل</span><h3>سجل الإشعارات</h3></div></div><div id="notificationHistory" class="table-list"></div></div>
+        <div id="notificationHistory" class="table-list"></div>
+        <div id="notificationHistoryPager" class="admin-pager hidden">
+          <button id="notificationHistoryPrev" class="small" type="button">السابق</button>
+          <span id="notificationHistoryPageLabel">1 / 1</span>
+          <button id="notificationHistoryNext" class="small" type="button">التالي</button>
+        </div>
+      </div>
     </section>
 
     <section id="admins" class="page">
@@ -341,8 +403,10 @@
     </section>
 
     <section id="health" class="page">
-      <div class="page-title"><div><span class="eyebrow">المراقبة</span><h2>حالة النظام</h2><p>فحص الخدمات والربط في الوقت الحالي.</p></div></div>
-      <div id="healthCards" class="cards"></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 9</span><h2>حالة النظام</h2><p>فحص الخدمات والطوابير والإصدار واستهلاك الخادم من شاشة واحدة.</p></div></div>
+      <div id="healthRuntime" class="stage9-runtime"></div>
+      <div id="healthCards" class="cards stage9-health-grid"></div>
+      <div class="panel stage9-queue-panel"><div class="panel-head"><div><span class="eyebrow">الطوابير</span><h3>العمليات الحالية</h3></div><button id="refreshSystemHealth" class="small" type="button">تحديث</button></div><div id="healthQueues" class="stage9-queues"></div></div>
     </section>
   </main>
 
@@ -403,7 +467,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage8";
+      app.src="./app.js?v=1.3.0-stage10";
       document.body.appendChild(app);
     };
     s.onerror=next;

@@ -3367,3 +3367,57 @@ html[data-theme="light"] .story-ring .avatar,html[data-theme="light"] .story-rin
 .settings-row,.list-card,.conversation-item,.search-account-card{border-radius:16px}.settings-row b,.list-card b,.conversation-title-row b{color:var(--text)}.settings-row small,.meta,.field-hint{color:var(--muted)}
 @media (max-width:520px){.story-editor-dock{left:9px;top:12px;gap:7px}.story-editor-dock button{width:48px;min-height:48px}.story-tool-panel{right:8px;left:8px;width:calc(100vw - 16px)}.theme-choice-grid{grid-template-columns:1fr 1fr}}
 
+
+
+/* Ashur threaded support stage 6 */
+.support-ticket-card{
+  width:100%;text-align:right;color:var(--text);background:var(--surface-2);
+  border:1px solid var(--line);border-radius:14px;padding:11px;
+}
+.support-ticket-card.unread{border-color:rgba(64,227,120,.28);background:rgba(64,227,120,.035)}
+.support-ticket-card p{margin:5px 0 0;line-height:1.6;font-size:12px;color:var(--text-2)}
+.support-ticket-title-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.support-ticket-title-row>b{min-width:0;display:flex;align-items:center;gap:6px}
+.support-ticket-title-row>span{
+  flex:none;padding:4px 7px;border-radius:999px;background:var(--surface-3);
+  border:1px solid var(--line);font-size:9px;color:var(--muted)
+}
+.support-unread-dot{width:7px;height:7px;border-radius:50%;background:var(--brand);display:inline-block;flex:none}
+.support-ticket-detail{display:grid;gap:10px}
+.support-ticket-detail-head{display:flex;align-items:flex-start;gap:10px}
+.support-ticket-detail-head h3{margin:2px 0 4px;font-size:17px}
+.support-ticket-tags{display:flex;gap:5px;flex-wrap:wrap}
+.support-ticket-tags span{
+  padding:4px 7px;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface-2);font-size:9px;color:var(--muted)
+}
+.user-support-thread{
+  display:flex;flex-direction:column;gap:8px;max-height:52dvh;overflow-y:auto;
+  padding:10px;border:1px solid var(--line);border-radius:16px;background:var(--surface)
+}
+.user-support-message{
+  align-self:flex-start;width:min(88%,520px);padding:9px 11px;border-radius:15px;
+  border:1px solid var(--line);background:var(--surface-2)
+}
+.user-support-message.from-user{
+  align-self:flex-end;border-color:rgba(64,227,120,.22);background:rgba(64,227,120,.055)
+}
+.user-support-message-meta{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}
+.user-support-message-meta b{font-size:9px}
+.user-support-message-meta span{font-size:8px;color:var(--muted)}
+.user-support-message p{margin:0;white-space:pre-wrap;word-break:break-word;line-height:1.7;font-size:12px}
+.support-reply-composer{
+  display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:15px;background:var(--surface-2)
+}
+.support-reply-composer textarea{min-height:92px}
+.support-reply-composer .primary{width:100%}
+.support-closed-note{
+  padding:11px;border:1px solid var(--line);border-radius:13px;background:var(--surface-2);
+  color:var(--muted);font-size:11px;line-height:1.7;text-align:center
+}
+@media(max-width:520px){
+  .support-ticket-detail-head{display:grid;grid-template-columns:auto minmax(0,1fr)}
+  .support-ticket-detail-head .small-button{min-width:70px}
+  .user-support-thread{max-height:48dvh;padding:8px}
+  .user-support-message{width:93%}
+}

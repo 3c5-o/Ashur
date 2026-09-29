@@ -256,13 +256,19 @@ async function api(path,opt={}){
   }catch(error){
     setConnectionState(false);
     const networkError=new Error("تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا.");
+    networkError.code="NETWORK_ERROR";
+    networkError.path=path;
     networkError.cause=error;
     throw networkError;
   }
   const b=await r.json().catch(()=>({}));
   if(!r.ok){
     if(r.status===401)showToast("انتهت جلسة الإدارة. سجّل الدخول من جديد.",{type:"error",duration:4500});
-    throw new Error(b.error||"تعذر تنفيذ الطلب");
+    const requestError=new Error(b.error||"تعذر تنفيذ الطلب");
+    requestError.status=r.status;
+    requestError.code=b.code||("HTTP_"+r.status);
+    requestError.path=path;
+    throw requestError;
   }
   return b
 }
@@ -335,28 +341,82 @@ function showPageLoading(page){
   if(!root)return;
   root.innerHTML='<div class="admin-skeleton-list">'+Array.from({length:4},()=>'<div class="admin-skeleton-row"><i></i><div><b></b><span></span></div></div>').join("")+'</div>';
 }
-async function verify(){
+let lastClientErrorReportAt=0;
+async function reportAdminClientError(stage,error){
   try{
-    const me=await api("/v1/admin/me");
-    applyAdminAccess(me);
-    $("#loginMessage").textContent="";
-    showApp(true);
-    const start=adminCanPage("dashboard")?"dashboard":Object.keys(titles).find(adminCanPage)||"dashboard";
-    navigate(start,{history:false,loading:true});
-    return true;
+    const now=Date.now();
+    if(now-lastClientErrorReportAt<2500)return;
+    lastClientErrorReportAt=now;
+    await api("/v1/admin/client-error",{
+      method:"POST",
+      body:JSON.stringify({
+        stage:String(stage||"unknown").slice(0,80),
+        message:String(error?.message||error||"Unknown UI error").slice(0,1000),
+        stack:String(error?.stack||"").slice(0,5000),
+        page:String(currentAdminPage||"").slice(0,80),
+        admin_version:"1.3.3"
+      })
+    });
+  }catch(_){}
+}
+
+async function verify(){
+  let me=null;
+  try{
+    me=await api("/v1/admin/me");
   }catch(e){
     showApp(false);
     const session=(await sb.auth.getSession()).data.session;
     if(session){
-      if(e.message==="تعذر الاتصال بالخادم. تحقق من الإنترنت وحاول مجددًا."){
+      if(e.code==="NETWORK_ERROR"){
         $("#loginMessage").textContent=e.message;
+      }else if(e.status===401){
+        $("#loginMessage").textContent="انتهت جلسة الدخول. سجّل الدخول من جديد.";
+      }else if(e.status===403){
+        $("#loginMessage").textContent=e.message||"هذا الحساب لا يملك صلاحية الإدارة.";
       }else{
-        $("#loginMessage").textContent="تم تسجيل الحساب، لكن لا يملك صلاحية الإدارة أو أن ربط المالك غير صحيح.";
+        $("#loginMessage").textContent=e.message||"تعذر التحقق من صلاحية الإدارة.";
       }
     }
     return false;
   }
+
+  // وصول /v1/admin/me بنجاح يعني أن الخادم أثبت صلاحية الإدارة.
+  // أي خطأ واجهة بعد هذه النقطة لا يجب أن يلغي الجلسة أو يعيد المستخدم لشاشة الدخول.
+  adminAccess=me;
+  $("#loginMessage").textContent="";
+  showApp(true);
+
+  try{
+    applyAdminAccess(me);
+    const start=adminCanPage("dashboard")?"dashboard":Object.keys(titles).find(adminCanPage)||"dashboard";
+    navigate(start,{history:false,loading:true});
+  }catch(uiError){
+    console.error("[ASHUR ADMIN UI]",uiError);
+    reportAdminClientError("post-auth-shell",uiError);
+    document.body.dataset.adminRole=me?.role||"";
+    $(".page").forEach(x=>x.classList.toggle("active",x.id==="dashboard"));
+    $("[data-page]").forEach(x=>x.classList.toggle("active",x.dataset.page==="dashboard"));
+    if($("#headerSectionName"))$("#headerSectionName").textContent="الرئيسية";
+    showToast("تم تسجيل الدخول. جارٍ استعادة واجهة الإدارة.",{type:"info",duration:4500});
+    Promise.resolve(loadDashboard?.()).catch(error=>{
+      console.error("[ASHUR ADMIN DASHBOARD]",error);
+      reportAdminClientError("dashboard-recovery",error);
+      showToast(error.message||"تعذر تحميل الرئيسية.",{type:"error"});
+    });
+  }
+  return true;
 }
+
+window.addEventListener("error",event=>{
+  if(!adminAccess)return;
+  reportAdminClientError("window-error",event.error||new Error(event.message||"Window error"));
+});
+window.addEventListener("unhandledrejection",event=>{
+  if(!adminAccess)return;
+  const reason=event.reason instanceof Error?event.reason:new Error(String(event.reason||"Unhandled rejection"));
+  reportAdminClientError("unhandled-rejection",reason);
+});
 
 $("#loginForm").onsubmit=async e=>{
   e.preventDefault();

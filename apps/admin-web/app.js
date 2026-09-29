@@ -186,13 +186,13 @@ function adminCanPage(page){
 }
 function applyAdminAccess(me){
   adminAccess=me||null;
-  $("[data-page]").forEach(node=>{
+  $$("[data-page]").forEach(node=>{
     const page=node.dataset.page;
     if(!page)return;
     node.classList.toggle("permission-hidden",!adminCanPage(page));
   });
   const ownerOnly=me?.role==="owner";
-  $("[data-owner-only]").forEach(node=>node.classList.toggle("hidden",!ownerOnly));
+  $$("[data-owner-only]").forEach(node=>node.classList.toggle("hidden",!ownerOnly));
   document.body.dataset.adminRole=me?.role||"";
 }
 const actionLabel={

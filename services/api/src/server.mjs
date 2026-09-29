@@ -431,6 +431,54 @@ async function writeAudit(actorUserId, action, targetType = null, targetId = nul
 }
 
 async function logSystemError(service, error, context = {}, userId = null) {
+  const serviceName = String(service || "api").slice(0, 80);
+  const code = String(error?.code || error?.statusCode || "").slice(0, 80);
+  const message = String(error?.message || error || "Unknown error").slice(0, 1500);
+  const statusCode = Number(error?.statusCode || error?.status || 0);
+  const severity =
+    statusCode >= 500 && /database|telegram|storage|upload|auth/i.test(serviceName) ? "critical" :
+    statusCode >= 500 ? "error" :
+    statusCode >= 400 ? "warning" : "error";
+  const fingerprint = crypto
+    .createHash("sha256")
+    .update([serviceName, code, message].join("|"))
+    .digest("hex");
+  const now = new Date().toISOString();
+
+  const existing = await select(
+    "system_errors",
+    "select=id,occurrence_count&fingerprint=eq." + encodeURIComponent(fingerprint) +
+      "&status=neq.resolved&order=last_seen_at.desc.nullslast,created_at.desc&limit=1",
+  ).catch(() => []);
+
+  if (existing?.[0]) {
+    return update("system_errors", "id=eq." + encodeURIComponent(existing[0].id), {
+      service: serviceName,
+      code,
+      message,
+      severity,
+      context: context || {},
+      user_id: userId || null,
+      occurrence_count: Math.max(1, Number(existing[0].occurrence_count || 1)) + 1,
+      last_seen_at: now,
+      updated_at: now,
+    }, { returning: false }).catch(() => {});
+  }
+
+  return insert("system_errors", {
+    service: serviceName,
+    code,
+    message,
+    severity,
+    fingerprint,
+    context: context || {},
+    user_id: userId || null,
+    occurrence_count: 1,
+    first_seen_at: now,
+    last_seen_at: now,
+    updated_at: now,
+  }, { returning: false }).catch(() => {});
+}, userId = null) {
   return insert("system_errors", {
     service: String(service || "api").slice(0, 80),
     code: String(error?.code || error?.statusCode || "").slice(0, 80),
@@ -3565,20 +3613,80 @@ async function adminRetryUpload(req, res, jobId) {
 
 async function adminErrors(req, res, url) {
   await requireAdmin(req, "storage");
+  const { page, limit, offset } = pageParams(url, 30, 80);
   const status = String(url.searchParams.get("status") || "").trim();
-  let query = "select=id,service,code,message,context,user_id,status,created_at,resolved_at&order=created_at.desc&limit=200";
-  if (status) query += "&status=eq." + encodeURIComponent(status);
-  const rows = await select("system_errors", query);
-  json(res, 200, { items: rows || [] });
+  const service = String(url.searchParams.get("service") || "").trim();
+  const severity = String(url.searchParams.get("severity") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  const filters = [];
+  if (status) filters.push("status=eq." + encodeURIComponent(status));
+  if (service) filters.push("service=eq." + encodeURIComponent(service));
+  if (severity) filters.push("severity=eq." + encodeURIComponent(severity));
+  if (q) {
+    filters.push("or=(message.ilike.*" + encodeURIComponent(q) + "*,code.ilike.*" + encodeURIComponent(q) +
+      "*,service.ilike.*" + encodeURIComponent(q) + "*)");
+  }
+  const filterQuery = filters.join("&");
+  const total = await count("system_errors", filterQuery);
+  let query = "select=id,service,code,message,severity,fingerprint,context,user_id,status,occurrence_count,first_seen_at,last_seen_at,created_at,resolved_at,resolved_by,resolution_note,updated_at";
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=last_seen_at.desc.nullslast,created_at.desc&offset=" + offset + "&limit=" + limit;
+  const [rows, openCount, criticalCount, recentCount, resolvedCount, openRows] = await Promise.all([
+    select("system_errors", query),
+    count("system_errors", "status=neq.resolved"),
+    count("system_errors", "status=neq.resolved&severity=eq.critical"),
+    count("system_errors", "last_seen_at=gte." + encodeURIComponent(new Date(Date.now() - 24 * 3600_000).toISOString())),
+    count("system_errors", "status=eq.resolved"),
+    select("system_errors", "select=service,severity,occurrence_count&status=neq.resolved&order=last_seen_at.desc&limit=1000").catch(() => []),
+  ]);
+  const serviceMap = new Map();
+  for (const row of openRows || []) {
+    const key = String(row.service || "system");
+    const current = serviceMap.get(key) || { service: key, groups: 0, occurrences: 0, critical: 0 };
+    current.groups += 1;
+    current.occurrences += Math.max(1, Number(row.occurrence_count || 1));
+    if (row.severity === "critical") current.critical += 1;
+    serviceMap.set(key, current);
+  }
+  json(res, 200, {
+    items: rows || [],
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    summary: {
+      open: openCount,
+      critical: criticalCount,
+      last_24h: recentCount,
+      resolved: resolvedCount,
+      services: [...serviceMap.values()].sort((a, b) => b.occurrences - a.occurrences),
+    },
+  });
 }
 
 async function resolveSystemError(req, res, errorId) {
   const actor = await requireAdmin(req, "storage");
+  const body = await readJson(req).catch(() => ({}));
+  const note = String(body.note || "").trim().slice(0, 1500);
   await update("system_errors", "id=eq." + encodeURIComponent(errorId), {
     status: "resolved",
     resolved_at: new Date().toISOString(),
+    resolved_by: actor.user.id,
+    resolution_note: note,
+    updated_at: new Date().toISOString(),
   }, { returning: false });
-  await writeAudit(actor.user.id, "resolve_system_error", "system_error", errorId, {});
+  await writeAudit(actor.user.id, "resolve_system_error", "system_error", errorId, { note });
+  json(res, 200, { ok: true });
+}
+
+async function reopenSystemError(req, res, errorId) {
+  const actor = await requireAdmin(req, "storage");
+  await update("system_errors", "id=eq." + encodeURIComponent(errorId), {
+    status: "new",
+    resolved_at: null,
+    resolved_by: null,
+    resolution_note: "",
+    last_seen_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "reopen_system_error", "system_error", errorId, {});
   json(res, 200, { ok: true });
 }
 
@@ -3947,13 +4055,226 @@ async function adminTestAllChannels(req, res) {
   json(res, results.every(x => x.ok) ? 200 : 207, { items: results });
 }
 
-async function adminNotificationHistory(req, res) {
+async function adminNotificationHistory(req, res, url) {
   await requireAdmin(req, "notifications");
+  const { page, limit, offset } = pageParams(url, 30, 80);
+  const status = String(url.searchParams.get("status") || "").trim();
+  const audience = String(url.searchParams.get("audience") || "").trim();
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  const filters = [];
+  if (status) filters.push("status=eq." + encodeURIComponent(status));
+  if (audience) filters.push("audience=eq." + encodeURIComponent(audience));
+  if (q) filters.push("or=(title.ilike.*" + encodeURIComponent(q) + "*,body.ilike.*" + encodeURIComponent(q) + "*)");
+  const filterQuery = filters.join("&");
+  const total = await count("admin_notification_history", filterQuery);
+  let query = "select=id,actor_user_id,title,body,audience,target_user_id,target_user_ids,deep_link,scheduled_at,sent_at,status,push_result,recipient_count,failure_count,template_id,cancelled_at,created_at,updated_at";
+  if (filterQuery) query += "&" + filterQuery;
+  query += "&order=created_at.desc&offset=" + offset + "&limit=" + limit;
+  const [rows, sent, failed, scheduled, cancelled] = await Promise.all([
+    select("admin_notification_history", query),
+    count("admin_notification_history", "status=eq.sent"),
+    count("admin_notification_history", "status=eq.failed"),
+    count("admin_notification_history", "status=eq.scheduled"),
+    count("admin_notification_history", "status=eq.cancelled"),
+  ]);
+  json(res, 200, {
+    items: rows || [],
+    pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    summary: { total, sent, failed, scheduled, cancelled },
+  });
+}
+
+async function adminNotificationPreview(req, res, url) {
+  await requireAdmin(req, "notifications");
+  const audience = ["all", "user", "users", "verified", "active", "inactive"].includes(url.searchParams.get("audience"))
+    ? url.searchParams.get("audience")
+    : "all";
+  const userId = String(url.searchParams.get("user_id") || "").trim();
+  const userIds = String(url.searchParams.get("user_ids") || "")
+    .split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 500);
+  const recipients = await notificationRecipients(audience, userId, userIds);
+  let sample = [];
+  if (recipients.ids.length) {
+    const sampleIds = recipients.ids.slice(0, 8);
+    sample = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified,last_seen_at&id=in.(" +
+        sampleIds.map((id) => encodeURIComponent(id)).join(",") + ")&limit=8",
+    ).catch(() => []);
+  }
+  json(res, 200, { count: recipients.count, sample: sample || [] });
+}
+
+async function adminNotificationUsers(req, res, url) {
+  await requireAdmin(req, "notifications");
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
+  if (q.length < 2) return json(res, 200, { items: [] });
+  const parts = [
+    "name.ilike.*" + encodeURIComponent(q) + "*",
+    "username.ilike.*" + encodeURIComponent(q.replace(/^@/, "")) + "*",
+  ];
+  if (/^[0-9a-f-]{36}$/i.test(q)) parts.push("id.eq." + encodeURIComponent(q));
   const rows = await select(
-    "admin_notification_history",
-    "select=id,actor_user_id,title,body,audience,target_user_id,deep_link,scheduled_at,sent_at,status,push_result,created_at&order=created_at.desc&limit=200",
+    "profiles",
+    "select=id,name,username,avatar_media_id,is_verified,last_seen_at&deleted_at=is.null&is_banned=eq.false&or=(" +
+      parts.join(",") + ")&order=last_seen_at.desc.nullslast&limit=20",
   );
   json(res, 200, { items: rows || [] });
+}
+
+async function adminNotificationTemplates(req, res) {
+  const actor = await requireAdmin(req, "notifications");
+  if (req.method === "GET") {
+    const rows = await select(
+      "admin_notification_templates",
+      "select=id,name,title,body,audience,deep_link,enabled,created_by,updated_by,created_at,updated_at&order=updated_at.desc&limit=200",
+    );
+    return json(res, 200, { items: rows || [] });
+  }
+  const body = await readJson(req);
+  const name = String(body.name || "").trim().slice(0, 100);
+  const title = String(body.title || "").trim().slice(0, 80);
+  const message = String(body.body || "").trim().slice(0, 500);
+  const audience = ["all","user","users","verified","active","inactive"].includes(body.audience) ? body.audience : "all";
+  if (!name || !title || !message) return json(res, 400, { error: "اسم القالب والعنوان والنص مطلوبة" });
+  const rows = await insert("admin_notification_templates", {
+    name,
+    title,
+    body: message,
+    audience,
+    deep_link: body.deep_link && typeof body.deep_link === "object" ? body.deep_link : {},
+    created_by: actor.user.id,
+    updated_by: actor.user.id,
+    enabled: true,
+    updated_at: new Date().toISOString(),
+  });
+  const item = rows?.[0] || null;
+  await writeAudit(actor.user.id, "create_notification_template", "notification_template", item?.id || null, { name });
+  json(res, 201, { item });
+}
+
+async function updateNotificationTemplate(req, res, templateId) {
+  const actor = await requireAdmin(req, "notifications");
+  const body = await readJson(req);
+  const patch = { updated_by: actor.user.id, updated_at: new Date().toISOString() };
+  if (body.name !== undefined) patch.name = String(body.name || "").trim().slice(0, 100);
+  if (body.title !== undefined) patch.title = String(body.title || "").trim().slice(0, 80);
+  if (body.body !== undefined) patch.body = String(body.body || "").trim().slice(0, 500);
+  if (body.audience !== undefined && ["all","user","users","verified","active","inactive"].includes(body.audience)) patch.audience = body.audience;
+  if (body.deep_link !== undefined && body.deep_link && typeof body.deep_link === "object") patch.deep_link = body.deep_link;
+  if (body.enabled !== undefined) patch.enabled = Boolean(body.enabled);
+  await update("admin_notification_templates", "id=eq." + encodeURIComponent(templateId), patch, { returning: false });
+  await writeAudit(actor.user.id, "update_notification_template", "notification_template", templateId, {});
+  json(res, 200, { ok: true });
+}
+
+async function deleteNotificationTemplate(req, res, templateId) {
+  const actor = await requireAdmin(req, "notifications");
+  await remove("admin_notification_templates", "id=eq." + encodeURIComponent(templateId));
+  await writeAudit(actor.user.id, "delete_notification_template", "notification_template", templateId, {});
+  json(res, 200, { ok: true });
+}
+
+async function updateScheduledAdminNotification(req, res, notificationId) {
+  const actor = await requireAdmin(req, "notifications");
+  const rows = await select(
+    "admin_notification_history",
+    "select=id,status,title,body,audience,target_user_id,target_user_ids,deep_link,scheduled_at&id=eq." +
+      encodeURIComponent(notificationId) + "&limit=1",
+  );
+  const current = rows?.[0];
+  if (!current) return json(res, 404, { error: "الإشعار غير موجود" });
+  if (current.status !== "scheduled") return json(res, 409, { error: "يمكن تعديل الإشعارات المجدولة فقط" });
+  const body = await readJson(req);
+  const title = body.title !== undefined ? String(body.title || "").trim().slice(0,80) : current.title;
+  const message = body.body !== undefined ? String(body.body || "").trim().slice(0,500) : current.body;
+  const audience = body.audience !== undefined && ["all","user","users","verified","active","inactive"].includes(body.audience)
+    ? body.audience : current.audience;
+  const userId = audience === "user" ? String(body.user_id ?? current.target_user_id ?? "").trim() : null;
+  const userIds = audience === "users"
+    ? [...new Set((Array.isArray(body.user_ids) ? body.user_ids : current.target_user_ids || []).map(String).filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].slice(0,500)
+    : [];
+  const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : new Date(current.scheduled_at);
+  if (!title || !message || Number.isNaN(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now() + 10_000) {
+    return json(res, 400, { error: "تحقق من النص وموعد الجدولة المستقبلي" });
+  }
+  const preview = await notificationRecipients(audience, userId, userIds);
+  if (!preview.count) return json(res, 400, { error: "لا يوجد مستلمون مطابقون" });
+  await update("admin_notification_history", "id=eq." + encodeURIComponent(notificationId), {
+    title,
+    body: message,
+    audience,
+    target_user_id: userId,
+    target_user_ids: userIds,
+    deep_link: body.deep_link && typeof body.deep_link === "object" ? body.deep_link : current.deep_link,
+    scheduled_at: scheduledAt.toISOString(),
+    recipient_count: preview.count,
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "update_scheduled_notification", "notification", notificationId, { recipient_count: preview.count });
+  json(res, 200, { ok: true, recipient_count: preview.count });
+}
+
+async function cancelScheduledAdminNotification(req, res, notificationId) {
+  const actor = await requireAdmin(req, "notifications");
+  const rows = await select("admin_notification_history", "select=id,status&id=eq." + encodeURIComponent(notificationId) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "الإشعار غير موجود" });
+  if (rows[0].status !== "scheduled") return json(res, 409, { error: "الإشعار ليس مجدولًا" });
+  await update("admin_notification_history", "id=eq." + encodeURIComponent(notificationId), {
+    status: "cancelled",
+    cancelled_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { returning: false });
+  await writeAudit(actor.user.id, "cancel_notification", "notification", notificationId, {});
+  json(res, 200, { ok: true });
+}
+
+async function resendAdminNotification(req, res, notificationId) {
+  const actor = await requireAdmin(req, "notifications");
+  const rows = await select(
+    "admin_notification_history",
+    "select=id,title,body,audience,target_user_id,target_user_ids,deep_link,template_id&id=eq." + encodeURIComponent(notificationId) + "&limit=1",
+  );
+  const original = rows?.[0];
+  if (!original) return json(res, 404, { error: "الإشعار غير موجود" });
+  const body = await readJson(req).catch(() => ({}));
+  const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : null;
+  if (scheduledAt && Number.isNaN(scheduledAt.getTime())) return json(res, 400, { error: "موعد الإرسال غير صالح" });
+  const preview = await notificationRecipients(original.audience, original.target_user_id, original.target_user_ids || []);
+  const created = await insert("admin_notification_history", {
+    actor_user_id: actor.user.id,
+    title: original.title,
+    body: original.body,
+    audience: original.audience,
+    target_user_id: original.target_user_id,
+    target_user_ids: original.target_user_ids || [],
+    deep_link: original.deep_link || {},
+    template_id: original.template_id || null,
+    scheduled_at: scheduledAt ? scheduledAt.toISOString() : null,
+    recipient_count: preview.count,
+    failure_count: 0,
+    updated_at: new Date().toISOString(),
+    status: scheduledAt && scheduledAt.getTime() > Date.now() + 15_000 ? "scheduled" : "pending",
+  });
+  const record = created?.[0];
+  if (record.status === "scheduled") {
+    await writeAudit(actor.user.id, "reschedule_notification", "notification", record.id, { source_id: notificationId });
+    return json(res, 202, { ok: true, scheduled: true, id: record.id });
+  }
+  try {
+    const push = await deliverAdminNotification(record);
+    await writeAudit(actor.user.id, "resend_notification", "notification", record.id, { source_id: notificationId });
+    json(res, 200, { ok: true, id: record.id, push });
+  } catch (error) {
+    await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
+      status: "failed",
+      failure_count: preview.count,
+      push_result: { error: String(error.message || error).slice(0, 1000) },
+      updated_at: new Date().toISOString(),
+    }, { returning: false }).catch(() => {});
+    await logSystemError("notifications", error, { history_id: record.id, source_id: notificationId }, actor.user.id);
+    throw error;
+  }
 }
 
 async function adminContent(req, res, url) {
@@ -4382,28 +4703,37 @@ async function siteSettings(req, res) {
   json(res, 200, { ok: true });
 }
 
-async function notificationRecipients(audience, targetUserId = null) {
+async function notificationRecipients(audience, targetUserId = null, targetUserIds = []) {
   if (audience === "user") {
-    return targetUserId ? { ids: [targetUserId], all: false } : { ids: [], all: false };
+    return targetUserId ? { ids: [targetUserId], all: false, count: 1 } : { ids: [], all: false, count: 0 };
   }
-  let query = "select=id&is_banned=eq.false&limit=10000";
-  if (audience === "verified") query += "&is_verified=eq.true";
+  if (audience === "users") {
+    const ids = [...new Set((Array.isArray(targetUserIds) ? targetUserIds : []).filter((id) => /^[0-9a-f-]{36}$/i.test(String(id))))];
+    return { ids, all: false, count: ids.length };
+  }
+  let filter = "is_banned=eq.false&deleted_at=is.null";
+  if (audience === "verified") filter += "&is_verified=eq.true";
   if (audience === "active") {
     const since = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
-    query += "&last_seen_at=gte." + encodeURIComponent(since);
+    filter += "&last_seen_at=gte." + encodeURIComponent(since);
   }
   if (audience === "inactive") {
     const before = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
-    query += "&or=(last_seen_at.is.null,last_seen_at.lt." + encodeURIComponent(before) + ")";
+    filter += "&or=(last_seen_at.is.null,last_seen_at.lt." + encodeURIComponent(before) + ")";
   }
-  const users = await select("profiles", query);
-  return { ids: (users || []).map((x) => x.id), all: audience === "all" };
+  const [users, total] = await Promise.all([
+    select("profiles", "select=id&" + filter + "&limit=10000"),
+    count("profiles", filter),
+  ]);
+  return { ids: (users || []).map((x) => x.id), all: audience === "all", count: Number(total || 0) };
 }
 
 async function deliverAdminNotification(record) {
   const audience = record.audience || "all";
   const targetUserId = record.target_user_id || null;
-  const recipients = await notificationRecipients(audience, targetUserId);
+  const targetUserIds = Array.isArray(record.target_user_ids) ? record.target_user_ids : [];
+  const recipients = await notificationRecipients(audience, targetUserId, targetUserIds);
+  if (!recipients.count) throw new Error("لا يوجد مستلمون مطابقون لهذا الاستهداف");
   const data = {
     kind: "system",
     ...(record.deep_link || {}),
@@ -4430,13 +4760,19 @@ async function deliverAdminNotification(record) {
     data,
     idempotencyKey: record.id,
   });
+  if (push?.skipped || push?.ok === false) {
+    throw new Error(push?.reason || push?.errors || "تعذر إرسال الإشعار");
+  }
 
   await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
     status: "sent",
     sent_at: new Date().toISOString(),
+    recipient_count: recipients.count,
+    failure_count: 0,
     push_result: push || {},
+    updated_at: new Date().toISOString(),
   }, { returning: false });
-  return push;
+  return { ...push, recipient_count: recipients.count };
 }
 
 async function sendAdminNotification(req, res) {
@@ -4444,19 +4780,29 @@ async function sendAdminNotification(req, res) {
   const body = await readJson(req);
   const title = String(body.title || "").trim().slice(0, 80);
   const message = String(body.body || "").trim().slice(0, 500);
-  const audience = ["all", "user", "verified", "active", "inactive"].includes(body.audience)
+  const audience = ["all", "user", "users", "verified", "active", "inactive"].includes(body.audience)
     ? body.audience
     : "all";
   const userId = audience === "user" ? String(body.user_id || "").trim() : null;
+  const userIds = audience === "users"
+    ? [...new Set((Array.isArray(body.user_ids) ? body.user_ids : []).map(String).filter((id) => /^[0-9a-f-]{36}$/i.test(id)))].slice(0, 500)
+    : [];
   const deepLink = body.deep_link && typeof body.deep_link === "object" ? body.deep_link : {};
   const scheduledAt = body.scheduled_at ? new Date(body.scheduled_at) : null;
+  const templateId = /^[0-9a-f-]{36}$/i.test(String(body.template_id || "")) ? String(body.template_id) : null;
   if (!title || !message) return json(res, 400, { error: "العنوان والنص مطلوبان" });
   if (audience === "user" && !/^[0-9a-f-]{36}$/i.test(userId || "")) {
     return json(res, 400, { error: "معرف المستخدم مطلوب" });
   }
+  if (audience === "users" && !userIds.length) {
+    return json(res, 400, { error: "اختر مستخدمًا واحدًا على الأقل" });
+  }
   if (scheduledAt && Number.isNaN(scheduledAt.getTime())) {
     return json(res, 400, { error: "موعد الإرسال غير صالح" });
   }
+
+  const preview = await notificationRecipients(audience, userId, userIds);
+  if (!preview.count) return json(res, 400, { error: "لا يوجد مستلمون مطابقون لهذا الاستهداف" });
 
   const rows = await insert("admin_notification_history", {
     actor_user_id: actor.user.id,
@@ -4464,25 +4810,36 @@ async function sendAdminNotification(req, res) {
     body: message,
     audience,
     target_user_id: userId,
+    target_user_ids: userIds,
     deep_link: deepLink,
     scheduled_at: scheduledAt ? scheduledAt.toISOString() : null,
+    recipient_count: preview.count,
+    failure_count: 0,
+    template_id: templateId,
+    updated_at: new Date().toISOString(),
     status: scheduledAt && scheduledAt.getTime() > Date.now() + 15_000 ? "scheduled" : "pending",
   });
   const record = rows?.[0];
 
   if (record.status === "scheduled") {
-    await writeAudit(actor.user.id, "schedule_notification", "notification", record.id, { audience, scheduled_at: record.scheduled_at });
-    return json(res, 202, { ok: true, scheduled: true, id: record.id });
+    await writeAudit(actor.user.id, "schedule_notification", "notification", record.id, {
+      audience, scheduled_at: record.scheduled_at, recipient_count: preview.count,
+    });
+    return json(res, 202, { ok: true, scheduled: true, id: record.id, recipient_count: preview.count });
   }
 
   try {
     const push = await deliverAdminNotification(record);
-    await writeAudit(actor.user.id, "send_notification", "notification", record.id, { audience });
-    return json(res, 200, { ok: true, push, id: record.id });
+    await writeAudit(actor.user.id, "send_notification", "notification", record.id, {
+      audience, recipient_count: preview.count,
+    });
+    return json(res, 200, { ok: true, push, id: record.id, recipient_count: preview.count });
   } catch (error) {
     await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
       status: "failed",
+      failure_count: preview.count,
       push_result: { error: String(error.message || error).slice(0, 1000) },
+      updated_at: new Date().toISOString(),
     }, { returning: false }).catch(() => {});
     await logSystemError("notifications", error, { history_id: record.id }, actor.user.id);
     throw error;
@@ -4494,26 +4851,29 @@ async function processScheduledAdminNotifications() {
   const now = new Date().toISOString();
   const rows = await select(
     "admin_notification_history",
-    "select=id,actor_user_id,title,body,audience,target_user_id,deep_link,scheduled_at,status&status=eq.scheduled&scheduled_at=lte." +
+    "select=id,actor_user_id,title,body,audience,target_user_id,target_user_ids,deep_link,scheduled_at,status,recipient_count&status=eq.scheduled&scheduled_at=lte." +
       encodeURIComponent(now) + "&order=scheduled_at.asc&limit=20",
   ).catch(() => []);
   for (const record of rows || []) {
     await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
       status: "processing",
+      updated_at: new Date().toISOString(),
     }, { returning: false }).catch(() => {});
     try {
       await deliverAdminNotification(record);
     } catch (error) {
       await update("admin_notification_history", "id=eq." + encodeURIComponent(record.id), {
         status: "failed",
+        failure_count: Math.max(1, Number(record.recipient_count || 0)),
         push_result: { error: String(error.message || error).slice(0, 1000) },
+        updated_at: new Date().toISOString(),
       }, { returning: false }).catch(() => {});
       await logSystemError("notifications", error, { history_id: record.id }, record.actor_user_id);
     }
   }
 }
 
-async function healthDetails(res) {
+async function collectHealthDetails(includeInternal = false) {
   const ready = readiness();
   let db = { ok: false, detail: "بانتظار إضافة مفتاح الخادم" };
   if (ready.database) {
@@ -4526,8 +4886,9 @@ async function healthDetails(res) {
   }
 
   const tg = await testTelegramConnection();
-  json(res, 200, {
+  const result = {
     status: ready.database ? "running" : "setup_required",
+    checked_at: new Date().toISOString(),
     services: {
       api: { ok: true, label: "بوابة آشور", detail: "تعمل" },
       database: { ...db, label: "قاعدة البيانات" },
@@ -4538,7 +4899,56 @@ async function healthDetails(res) {
         detail: notificationsConfigured() ? "مهيأة" : "بانتظار بيانات ون سيغنال",
       },
     },
-  });
+  };
+
+  if (includeInternal && ready.database) {
+    const [queuedUploads, activeUploads, failedUploads, cleanupPending, cleanupFailed, notificationOutbox,
+      scheduledNotifications, failedNotifications, openErrors, connectedChannels] = await Promise.all([
+      count("upload_jobs", "status=eq.queued"),
+      count("upload_jobs", "status=in.(receiving,storing)"),
+      count("upload_jobs", "status=eq.failed"),
+      count("media_cleanup_jobs", "status=in.(pending,processing)"),
+      count("media_cleanup_jobs", "status=eq.failed"),
+      count("notification_outbox", "processed_at=is.null&attempts=lt.5"),
+      count("admin_notification_history", "status=eq.scheduled"),
+      count("admin_notification_history", "status=eq.failed"),
+      count("system_errors", "status=neq.resolved"),
+      count("storage_channels", "enabled=eq.true&status=eq.connected"),
+    ]);
+    const memory = process.memoryUsage();
+    result.runtime = {
+      api_version: "1.3.0",
+      admin_revision: "A10",
+      commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
+      uptime_seconds: Math.floor(process.uptime()),
+      memory_mb: {
+        rss: Math.round(memory.rss / 1024 / 1024),
+        heap_used: Math.round(memory.heapUsed / 1024 / 1024),
+      },
+    };
+    result.queues = {
+      uploads_queued: queuedUploads,
+      uploads_active: activeUploads,
+      uploads_failed: failedUploads,
+      cleanup_pending: cleanupPending,
+      cleanup_failed: cleanupFailed,
+      notification_outbox: notificationOutbox,
+      notifications_scheduled: scheduledNotifications,
+      notifications_failed: failedNotifications,
+      errors_open: openErrors,
+      storage_connected: connectedChannels,
+    };
+  }
+  return result;
+}
+
+async function healthDetails(res) {
+  json(res, 200, await collectHealthDetails(false));
+}
+
+async function adminSystemHealth(req, res) {
+  await requireAdmin(req, "storage");
+  json(res, 200, await collectHealthDetails(true));
 }
 
 async function processNotificationOutbox() {
@@ -4615,7 +5025,7 @@ const server = http.createServer(async (req, res) => {
         messaging_revision: "E2",
         stories_revision: "S3",
         content_revision: "C3",
-        admin_revision: "A8",
+        admin_revision: "A10",
         commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
         readiness: readiness()
       });
@@ -4847,9 +5257,16 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/v1/admin/errors") {
       return adminErrors(req, res, url);
     }
+    if (req.method === "GET" && url.pathname === "/v1/admin/system/health") {
+      return adminSystemHealth(req, res);
+    }
     const errorResolveMatch = /^\/v1\/admin\/errors\/(\d+)\/resolve$/.exec(url.pathname);
     if (req.method === "POST" && errorResolveMatch) {
       return resolveSystemError(req, res, errorResolveMatch[1]);
+    }
+    const errorReopenMatch = /^\/v1\/admin\/errors\/(\d+)\/reopen$/.exec(url.pathname);
+    if (req.method === "POST" && errorReopenMatch) {
+      return reopenSystemError(req, res, errorReopenMatch[1]);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/support") {
       return adminSupport(req, res, url);
@@ -4870,7 +5287,35 @@ const server = http.createServer(async (req, res) => {
       return updateRelease(req, res, releaseMatch[1]);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/notifications/history") {
-      return adminNotificationHistory(req, res);
+      return adminNotificationHistory(req, res, url);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/notifications/preview") {
+      return adminNotificationPreview(req, res, url);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/admin/notifications/users") {
+      return adminNotificationUsers(req, res, url);
+    }
+    if (url.pathname === "/v1/admin/notification-templates" && ["GET", "POST"].includes(req.method)) {
+      return adminNotificationTemplates(req, res);
+    }
+    const notificationTemplateMatch = /^\/v1\/admin\/notification-templates\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (notificationTemplateMatch && req.method === "PATCH") {
+      return updateNotificationTemplate(req, res, notificationTemplateMatch[1]);
+    }
+    if (notificationTemplateMatch && req.method === "DELETE") {
+      return deleteNotificationTemplate(req, res, notificationTemplateMatch[1]);
+    }
+    const scheduledNotificationMatch = /^\/v1\/admin\/notifications\/([0-9a-f-]{36})$/.exec(url.pathname);
+    if (scheduledNotificationMatch && req.method === "PATCH") {
+      return updateScheduledAdminNotification(req, res, scheduledNotificationMatch[1]);
+    }
+    const cancelNotificationMatch = /^\/v1\/admin\/notifications\/([0-9a-f-]{36})\/cancel$/.exec(url.pathname);
+    if (cancelNotificationMatch && req.method === "POST") {
+      return cancelScheduledAdminNotification(req, res, cancelNotificationMatch[1]);
+    }
+    const resendNotificationMatch = /^\/v1\/admin\/notifications\/([0-9a-f-]{36})\/resend$/.exec(url.pathname);
+    if (resendNotificationMatch && req.method === "POST") {
+      return resendAdminNotification(req, res, resendNotificationMatch[1]);
     }
 
 

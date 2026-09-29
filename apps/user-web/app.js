@@ -575,10 +575,43 @@
   }
 
   async function api(path, options={}){
+    const {retrySafe=false, gatewayTimeoutMs, ...fetchOptions}=options;
+    const method=String(fetchOptions.method||"GET").toUpperCase();
+    const canRetry=retrySafe===true||method==="GET"||method==="HEAD";
+    const maxAttempts=canRetry?3:1;
+    const timeoutMs=Number(gatewayTimeoutMs||12000);
+
     const request = async(token)=>{
-      const headers = new Headers(options.headers || {});
-      if(token) headers.set("Authorization", "Bearer "+token);
-      return fetch(apiUrl(path), {...options, headers});
+      let lastError=null;
+      for(let attempt=0;attempt<maxAttempts;attempt++){
+        const headers = new Headers(fetchOptions.headers || {});
+        if(token) headers.set("Authorization", "Bearer "+token);
+        const controller=canRetry&&typeof AbortController!=="undefined"?new AbortController():null;
+        const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
+        try{
+          const res=await fetch(apiUrl(path), {
+            ...fetchOptions,
+            headers,
+            ...(controller?{signal:controller.signal}:{})
+          });
+          if(timer)clearTimeout(timer);
+          if(canRetry&&[502,503,504].includes(res.status)&&attempt<maxAttempts-1){
+            await new Promise(resolve=>setTimeout(resolve,attempt===0?450:1100));
+            continue;
+          }
+          setNetworkState(true);
+          return res;
+        }catch(error){
+          if(timer)clearTimeout(timer);
+          lastError=error;
+          if(!canRetry||attempt>=maxAttempts-1)break;
+          await new Promise(resolve=>setTimeout(resolve,attempt===0?450:1100));
+        }
+      }
+      setNetworkState(false,"تعذر الاتصال ببوابة آشور. جارٍ إعادة الاتصال.");
+      const gatewayError=new Error("تعذر الاتصال ببوابة آشور. تحقق من الإنترنت وحاول مجددًا.");
+      gatewayError.cause=lastError;
+      throw gatewayError;
     };
 
     let token = await accessToken().catch(()=>"");
@@ -596,6 +629,10 @@
     const body = type.includes("json") ? await res.json() : await res.text();
     if(!res.ok){
       if(res.status===401)throw new Error("انتهت جلسة الدخول. سجّل الدخول من جديد.");
+      if([502,503,504].includes(res.status)){
+        setNetworkState(false,"بوابة آشور تعيد الاتصال بالخدمة.");
+        throw new Error("الخدمة تعيد الاتصال الآن. حاول مرة أخرى بعد قليل.");
+      }
       throw new Error(body?.error || body?.message || body || "تعذر تنفيذ الطلب");
     }
     return body;

@@ -330,64 +330,102 @@
     </section>
 
     <section id="releases" class="page">
-      <div class="page-title"><div><span class="eyebrow">التطبيق</span><h2>إدارة الإصدارات</h2><p>سجل نسخ APK وحالة الاختبار والنشر.</p></div></div>
-      <form id="releaseForm" class="panel form">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 11</span><h2>الإصدارات والتحديثات</h2><p>إدارة APK والتحقق من SHA-256 ونشر التحديث إلى التطبيق والموقع من سجل واحد.</p></div></div>
+      <div id="releaseSummary" class="stage11-summary"></div>
+      <div id="currentPublishedRelease" class="panel stage11-current-release"></div>
+      <form id="releaseForm" class="panel form stage11-release-form">
+        <div class="panel-head">
+          <div><span class="eyebrow">بيانات الإصدار</span><h3 id="releaseFormTitle">إضافة إصدار</h3></div>
+          <button id="releaseCancelEdit" class="small hidden" type="button">إلغاء التعديل</button>
+        </div>
         <div class="grid2 fields">
-          <label><span>الإصدار</span><input id="releaseVersion" placeholder="1.2.0" required></label>
+          <label><span>Version</span><input id="releaseVersion" placeholder="1.7.0" required></label>
           <label><span>Version Code</span><input id="releaseCode" type="number" min="1" required></label>
         </div>
-        <label><span>رابط الملف</span><input id="releaseUrl"></label>
-        <label><span>ملاحظات الإصدار</span><textarea id="releaseNotes"></textarea></label>
+        <label><span>رابط APK</span><input id="releaseUrl" inputmode="url" placeholder="https://...apk"></label>
+        <label><span>SHA-256</span><input id="releaseSha256" maxlength="64" inputmode="text" autocomplete="off" placeholder="64 hexadecimal characters"></label>
+        <label><span>رسالة التحديث</span><textarea id="releaseUpdateMessage" maxlength="1000" placeholder="النص الذي سيظهر للمستخدم عند توفر التحديث"></textarea></label>
+        <label><span>ملاحظات الإصدار</span><textarea id="releaseNotes" maxlength="4000" placeholder="تغييرات الإصدار والسجل الداخلي"></textarea></label>
         <div class="grid2 fields">
-          <label><span>أقل إصدار مسموح</span><input id="releaseMinimum"></label>
+          <label><span>أقل إصدار مسموح</span><input id="releaseMinimum" placeholder="1.0.0"></label>
           <label><span>الحالة</span><select id="releaseStatus"><option value="draft">مسودة</option><option value="testing">اختبار</option><option value="published">منشور</option><option value="retired">متقاعد</option></select></label>
         </div>
-        <label class="switch"><span><b>تحديث إجباري</b></span><input id="releaseRequired" type="checkbox"></label>
-        <button class="primary" type="submit">إضافة الإصدار</button>
+        <label class="switch"><span><b>تحديث إجباري</b><small>يمنع متابعة استخدام الإصدارات الأقل من الحد الأدنى</small></span><input id="releaseRequired" type="checkbox"></label>
+        <div class="stage11-release-actions">
+          <button id="releaseSubmitButton" class="primary" type="submit">إضافة الإصدار</button>
+        </div>
         <p id="releaseMessage" class="message"></p>
       </form>
-      <div id="releasesList" class="table-list"></div>
+      <div class="panel stage11-release-history">
+        <div class="panel-head"><div><span class="eyebrow">السجل</span><h3>كل الإصدارات</h3></div></div>
+        <div id="releasesList" class="table-list"></div>
+      </div>
     </section>
 
     <section id="appSettings" class="page">
-      <div class="page-title"><div><span class="eyebrow">التحكم</span><h2>إعدادات التطبيق</h2><p>التحديث والصيانة والمزايا وحدود الرفع.</p></div></div>
-      <form id="appSettingsForm" class="settings-grid">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 12</span><h2>إعدادات التطبيق</h2><p>التحكم بالتحديث والصيانة والمزايا وحدود الرفع مع تاريخ كامل وإمكانية الاستعادة.</p></div></div>
+      <div id="appSettingsSummary" class="stage12-summary"></div>
+      <form id="appSettingsForm" class="settings-grid stage12-settings-grid">
         <article class="panel form">
-          <div class="panel-head"><div><span class="eyebrow">الإصدار</span><h3>التحديثات</h3></div></div>
-          <label><span>آخر إصدار</span><input id="latestVersion"></label>
-          <label><span>أقل إصدار مسموح</span><input id="minimumVersion"></label>
-          <label><span>رابط التحميل</span><input id="appDownloadUrl"></label>
-          <label class="switch"><span><b>تحديث إجباري</b><small>منع استخدام الإصدارات القديمة</small></span><input id="requiredUpdate" type="checkbox"></label>
+          <div class="panel-head"><div><span class="eyebrow">التحديث</span><h3>الإصدار الحالي</h3></div></div>
+          <div class="grid2 fields">
+            <label><span>آخر إصدار</span><input id="latestVersion" placeholder="1.7.0"></label>
+            <label><span>Version Code</span><input id="latestVersionCode" type="number" min="0"></label>
+          </div>
+          <label><span>أقل إصدار مسموح</span><input id="minimumVersion" placeholder="1.0.0"></label>
+          <label><span>رابط التحميل</span><input id="appDownloadUrl" inputmode="url"></label>
+          <label><span>SHA-256</span><input id="appUpdateSha256" maxlength="64" autocomplete="off"></label>
+          <label><span>رسالة التحديث</span><textarea id="appUpdateMessage" maxlength="1000"></textarea></label>
+          <label class="switch"><span><b>تحديث إجباري</b><small>منع استخدام الإصدارات الأقل من الحد الأدنى</small></span><input id="requiredUpdate" type="checkbox"></label>
         </article>
         <article class="panel form">
           <div class="panel-head"><div><span class="eyebrow">الحالة</span><h3>الصيانة</h3></div></div>
-          <label class="switch"><span><b>وضع الصيانة</b><small>إيقاف نسخة المستخدم مؤقتًا</small></span><input id="maintenanceEnabled" type="checkbox"></label>
-          <label><span>رسالة الصيانة</span><textarea id="maintenanceMessage"></textarea></label>
+          <label class="switch"><span><b>وضع الصيانة</b><small>تفعيل رسالة توقف الخدمة ضمن الفترة المحددة</small></span><input id="maintenanceEnabled" type="checkbox"></label>
+          <label><span>عنوان الصيانة</span><input id="maintenanceTitle" maxlength="120" placeholder="آشور"></label>
+          <label><span>رسالة الصيانة</span><textarea id="maintenanceMessage" maxlength="1000"></textarea></label>
+          <div class="grid2 fields">
+            <label><span>بدء الصيانة</span><input id="maintenanceStartAt" type="datetime-local"></label>
+            <label><span>انتهاء الصيانة</span><input id="maintenanceEndAt" type="datetime-local"></label>
+          </div>
         </article>
-        <article class="panel form">
+        <article class="panel form stage12-features-panel">
           <div class="panel-head"><div><span class="eyebrow">المزايا</span><h3>تشغيل الأقسام</h3></div></div>
-          <label class="switch"><span><b>القصص</b></span><input id="featureStories" type="checkbox"></label>
-          <label class="switch"><span><b>الريلز</b></span><input id="featureReels" type="checkbox"></label>
-          <label class="switch"><span><b>الرسائل</b></span><input id="featureMessages" type="checkbox"></label>
-          <label class="switch"><span><b>المجموعات</b></span><input id="featureGroups" type="checkbox"></label>
-          <label class="switch"><span><b>التسجيل</b></span><input id="featureRegistration" type="checkbox"></label>
-          <label class="switch"><span><b>التعليقات</b></span><input id="featureComments" type="checkbox"></label>
-          <label class="switch"><span><b>الاكتشاف</b></span><input id="featureExplore" type="checkbox"></label>
-          <label class="switch"><span><b>رفع الملفات</b></span><input id="featureUploads" type="checkbox"></label>
-          <label class="switch"><span><b>البحث</b></span><input id="featureSearch" type="checkbox"></label>
-          <label class="switch"><span><b>المحفوظات</b></span><input id="featureSaved" type="checkbox"></label>
-          <label class="switch"><span><b>الإشعارات</b></span><input id="featureNotifications" type="checkbox"></label>
+          <div class="stage12-feature-grid">
+            <label class="switch"><span><b>القصص</b></span><input id="featureStories" type="checkbox"></label>
+            <label class="switch"><span><b>الريلز</b></span><input id="featureReels" type="checkbox"></label>
+            <label class="switch"><span><b>الرسائل</b></span><input id="featureMessages" type="checkbox"></label>
+            <label class="switch"><span><b>المجموعات</b></span><input id="featureGroups" type="checkbox"></label>
+            <label class="switch"><span><b>التسجيل</b></span><input id="featureRegistration" type="checkbox"></label>
+            <label class="switch"><span><b>التعليقات</b></span><input id="featureComments" type="checkbox"></label>
+            <label class="switch"><span><b>البحث</b></span><input id="featureSearch" type="checkbox"></label>
+            <label class="switch"><span><b>الاكتشاف</b></span><input id="featureExplore" type="checkbox"></label>
+            <label class="switch"><span><b>المحفوظات</b></span><input id="featureSaved" type="checkbox"></label>
+            <label class="switch"><span><b>الإشعارات</b></span><input id="featureNotifications" type="checkbox"></label>
+            <label class="switch"><span><b>رفع الملفات</b></span><input id="featureUploads" type="checkbox"></label>
+          </div>
         </article>
         <article class="panel form">
           <div class="panel-head"><div><span class="eyebrow">الحدود</span><h3>أحجام الرفع</h3></div></div>
-          <label><span>الحد العام بالميغابايت</span><input id="limitGeneral" type="number" min="1" max="60"></label>
-          <label><span>القصة بالميغابايت</span><input id="limitStory" type="number" min="1" max="60"></label>
-          <label><span>الصورة بالميغابايت</span><input id="limitImage" type="number" min="1" max="60"></label>
-          <label><span>فيديو المحادثة بالميغابايت</span><input id="limitChatVideo" type="number" min="1" max="60"></label>
-          <label><span>الصوت بالميغابايت</span><input id="limitAudio" type="number" min="1" max="60"></label>
+          <div class="stage12-limits-grid">
+            <label><span>الحد العام MB</span><input id="limitGeneral" type="number" min="1" max="60"></label>
+            <label><span>القصة MB</span><input id="limitStory" type="number" min="1" max="60"></label>
+            <label><span>الريلز MB</span><input id="limitReel" type="number" min="1" max="60"></label>
+            <label><span>الصورة MB</span><input id="limitImage" type="number" min="1" max="60"></label>
+            <label><span>فيديو المحادثة MB</span><input id="limitChatVideo" type="number" min="1" max="60"></label>
+            <label><span>الصوت MB</span><input id="limitAudio" type="number" min="1" max="60"></label>
+          </div>
         </article>
-        <button class="primary save-settings" type="submit">حفظ إعدادات التطبيق</button>
+        <article class="panel form stage12-save-panel">
+          <div class="panel-head"><div><span class="eyebrow">الحفظ</span><h3>تسجيل التغيير</h3></div></div>
+          <label><span>سبب التعديل</span><input id="appSettingsReason" maxlength="500" placeholder="مثال: تجهيز الإصدار الجديد"></label>
+          <button class="primary save-settings" type="submit">حفظ إعدادات التطبيق</button>
+          <p id="appSettingsMessage" class="message"></p>
+        </article>
       </form>
+      <div class="panel stage12-history-panel">
+        <div class="panel-head"><div><span class="eyebrow">النسخ السابقة</span><h3>سجل الإعدادات</h3></div><button id="refreshSettingsHistory" class="small" type="button">تحديث</button></div>
+        <div id="settingsHistory" class="stage12-history-list"></div>
+      </div>
     </section>
 
     <section id="siteSettings" class="page">
@@ -467,7 +505,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage10";
+      app.src="./app.js?v=1.3.0-stage12";
       document.body.appendChild(app);
     };
     s.onerror=next;

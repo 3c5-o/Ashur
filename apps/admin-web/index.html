@@ -138,15 +138,44 @@
     </section>
 
     <section id="reports" class="page">
-      <div class="page-title"><div><span class="eyebrow">الأمان</span><h2>البلاغات</h2><p>مراجعة البلاغات واتخاذ القرار.</p></div></div>
-      <div class="toolbar"><select id="reportStatus"><option value="">كل البلاغات</option><option value="open">جديد</option><option value="review">قيد المراجعة</option><option value="resolved">تم اتخاذ إجراء</option><option value="rejected">مرفوض</option></select></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 5</span><h2>مركز البلاغات</h2><p>فرز البلاغات، معاينة الهدف، اتخاذ الإجراء ومتابعة سجل المراجعة.</p></div></div>
+      <div class="toolbar admin-filter-bar stage56-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="reportSearch" class="search" placeholder="ابحث بالسبب أو التفاصيل"></div>
+        <select id="reportStatus"><option value="">كل الحالات</option><option value="open">جديد</option><option value="review">قيد المراجعة</option><option value="resolved">تم الحل</option><option value="rejected">مرفوض</option></select>
+        <select id="reportType"><option value="">كل الأنواع</option><option value="profile">حساب</option><option value="post">منشور</option><option value="reel">ريلز</option><option value="story">قصة</option><option value="comment">تعليق</option><option value="message">رسالة</option></select>
+        <select id="reportPriority"><option value="">كل الأولويات</option><option value="urgent">عاجل</option><option value="high">عالية</option><option value="normal">عادية</option><option value="low">منخفضة</option></select>
+        <select id="reportAssigned"><option value="">كل التعيينات</option><option value="me">المسندة لي</option><option value="unassigned">غير مسندة</option></select>
+        <label class="compact-date"><span>من</span><input id="reportFrom" type="date"></label>
+        <label class="compact-date"><span>إلى</span><input id="reportTo" type="date"></label>
+        <button id="resetReportFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="reportDetail" class="panel stage56-detail hidden"></div>
       <div id="reportsList" class="table-list"></div>
+      <div id="reportsPager" class="admin-pager hidden">
+        <button id="reportsPrevPage" class="small" type="button">السابق</button>
+        <span id="reportsPageLabel">1 / 1</span>
+        <button id="reportsNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="support" class="page">
-      <div class="page-title"><div><span class="eyebrow">المساعدة</span><h2>تذاكر الدعم</h2><p>طلبات المستخدمين والمشاكل التقنية ورد الإدارة.</p></div></div>
-      <div class="toolbar"><select id="supportStatus"><option value="">كل الحالات</option><option value="open">جديد</option><option value="in_progress">قيد المتابعة</option><option value="answered">تم الرد</option><option value="closed">مغلق</option></select></div>
+      <div class="page-title"><div><span class="eyebrow">المرحلة 6</span><h2>الدعم الفني</h2><p>طابور التذاكر، المحادثة مع المستخدم، الأولوية والتعيين وسجل المعالجة.</p></div></div>
+      <div class="toolbar admin-filter-bar stage56-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="supportSearch" class="search" placeholder="ابحث بعنوان أو تفاصيل التذكرة"></div>
+        <select id="supportStatus"><option value="">كل الحالات</option><option value="open">جديد</option><option value="in_progress">قيد المتابعة</option><option value="answered">تم الرد</option><option value="closed">مغلق</option></select>
+        <select id="supportPriority"><option value="">كل الأولويات</option><option value="urgent">عاجل</option><option value="high">عالية</option><option value="normal">عادية</option><option value="low">منخفضة</option></select>
+        <select id="supportCategory"><option value="">كل الأنواع</option><option value="technical">تقنية</option><option value="account">الحساب</option><option value="content">المحتوى</option><option value="upload">الرفع</option><option value="other">أخرى</option><option value="general">عام</option></select>
+        <select id="supportAssigned"><option value="">كل التعيينات</option><option value="me">المسندة لي</option><option value="unassigned">غير مسندة</option></select>
+        <select id="supportUnread"><option value="">القراءة: الكل</option><option value="true">تحتاج رد</option><option value="false">مقروءة</option></select>
+        <button id="resetSupportFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="supportDetail" class="panel stage56-detail hidden"></div>
       <div id="supportList" class="table-list"></div>
+      <div id="supportPager" class="admin-pager hidden">
+        <button id="supportPrevPage" class="small" type="button">السابق</button>
+        <span id="supportPageLabel">1 / 1</span>
+        <button id="supportNextPage" class="small" type="button">التالي</button>
+      </div>
     </section>
 
     <section id="storage" class="page">
@@ -340,7 +369,7 @@
     s.onload=()=>{
       if(!window.supabase?.createClient)return next();
       const app=document.createElement("script");
-      app.src="./app.js?v=1.3.0-stage4";
+      app.src="./app.js?v=1.3.0-stage6";
       document.body.appendChild(app);
     };
     s.onerror=next;

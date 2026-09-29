@@ -145,3 +145,13 @@ footer>div{display:flex;gap:16px}
   .download{padding:90px 16px}.download h2{font-size:34px}
   footer{flex-direction:column;text-align:center}
 }
+
+
+.site-update-note{
+  margin-top:12px;display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;background:rgba(255,255,255,.04);max-width:620px
+}
+.site-update-note b{font-size:13px}
+.site-update-note span{font-size:12px;line-height:1.7;opacity:.78}
+.hidden{display:none!important}
+.disabled-link{opacity:.45;pointer-events:none}

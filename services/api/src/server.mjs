@@ -179,12 +179,33 @@ async function adminFor(userId) {
   return rows?.[0] || null;
 }
 
+const ADMIN_PERMISSION_KEYS = [
+  "analytics",
+  "users",
+  "content",
+  "reports",
+  "support",
+  "storage",
+  "notifications",
+  "admins",
+  "settings",
+];
+
 const ADMIN_ROLE_PERMISSIONS = {
   moderator: new Set(["analytics", "users", "reports"]),
   content_moderator: new Set(["analytics", "content", "reports"]),
   support: new Set(["analytics", "support", "users"]),
   analyst: new Set(["analytics"]),
 };
+
+function sanitizeAdminPermissions(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const key of ADMIN_PERMISSION_KEYS) {
+    if (source[key] === true || source[key] === false) result[key] = source[key];
+  }
+  return result;
+}
 
 function adminHasPermission(admin, permission) {
   if (!admin || !admin.active) return false;
@@ -193,6 +214,10 @@ function adminHasPermission(admin, permission) {
   if (admin.permissions?.[permission] === true) return true;
   if (admin.permissions?.[permission] === false) return false;
   return ADMIN_ROLE_PERMISSIONS[admin.role]?.has(permission) || false;
+}
+
+function effectiveAdminPermissions(admin) {
+  return Object.fromEntries(ADMIN_PERMISSION_KEYS.map((key) => [key, adminHasPermission(admin, key)]));
 }
 
 async function requireAdmin(req, permission = null) {
@@ -3170,26 +3195,94 @@ async function reportAction(req, res, reportId) {
   json(res, 200, { ok: true, status, priority, assigned_to: assignedTo, result });
 }
 
+async function adminCandidates(req, res, url) {
+  const actor = await requireAdmin(req, "admins");
+  if (!["owner","secondary_admin"].includes(actor.admin.role)) {
+    return json(res, 403, { error: "إضافة المشرفين متاحة للإدارة العليا فقط" });
+  }
+  const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "").slice(0, 80);
+  if (q.length < 2) return json(res, 200, { items: [] });
+
+  let query = "select=id,name,username,avatar_media_id,is_verified,is_banned,deleted_at&limit=20";
+  if (/^[0-9a-f-]{36}$/i.test(q)) query += "&id=eq." + encodeURIComponent(q);
+  else query += "&or=(username.ilike.*" + encodeURIComponent(q.replace(/^@/,"")) + "*,name.ilike.*" + encodeURIComponent(q) + "*)";
+
+  const [profiles, adminRows] = await Promise.all([
+    select("profiles", query).catch(() => []),
+    select("admins", "select=user_id&limit=1000").catch(() => []),
+  ]);
+  const excluded = new Set((adminRows || []).map(x => x.user_id));
+  if (config.ownerUserId) excluded.add(config.ownerUserId);
+
+  const items = (profiles || []).filter(profile =>
+    profile &&
+    !excluded.has(profile.id) &&
+    !profile.deleted_at &&
+    !profile.is_banned
+  );
+  json(res, 200, { items });
+}
+
 async function updateAdminRecord(req, res, adminUserId) {
   const actor = await requireAdmin(req, "admins");
-  if (actor.admin.role !== "owner" && actor.admin.role !== "secondary_admin") {
+  if (!["owner","secondary_admin"].includes(actor.admin.role)) {
     return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
   }
+  if (config.ownerUserId && adminUserId === config.ownerUserId) {
+    return json(res, 400, { error: "صلاحيات المالك الأساسية لا يمكن تعديلها من هنا" });
+  }
+
+  const currentRows = await select(
+    "admins",
+    "select=user_id,role,permissions,active&user_id=eq." + encodeURIComponent(adminUserId) + "&limit=1",
+  );
+  const current = currentRows?.[0];
+  if (!current) return json(res, 404, { error: "المشرف غير موجود" });
+
   const body = await readJson(req);
   const allowed = ["secondary_admin", "moderator", "content_moderator", "support", "analyst"];
   const patch = { updated_at: new Date().toISOString() };
+
+  if (adminUserId === actor.user.id && (body.role !== undefined || body.active === false)) {
+    return json(res, 400, { error: "لا يمكنك خفض دور حسابك أو تعطيله من الجلسة الحالية" });
+  }
+
   if (body.role !== undefined) {
     if (!allowed.includes(body.role)) return json(res, 400, { error: "الدور غير صالح" });
     patch.role = body.role;
+    if (body.role === "secondary_admin") patch.permissions = {};
   }
-  if (body.permissions !== undefined) patch.permissions = body.permissions || {};
+  if (body.permissions !== undefined && (body.role || current.role) !== "secondary_admin") {
+    patch.permissions = sanitizeAdminPermissions(body.permissions);
+  }
   if (body.active !== undefined) patch.active = Boolean(body.active);
+
   await update("admins", "user_id=eq." + encodeURIComponent(adminUserId), patch, { returning: false });
-  await writeAudit(actor.user.id, "update_admin", "admin", adminUserId, patch);
+  await writeAudit(actor.user.id, "update_admin", "admin", adminUserId, {
+    role: patch.role ?? current.role,
+    permissions: patch.permissions ?? current.permissions,
+    active: patch.active ?? current.active,
+  });
   json(res, 200, { ok: true });
 }
 
-async function adminUploads(req, res, url) {
+async function removeAdminRecord(req, res, adminUserId) {
+  const actor = await requireAdmin(req, "admins");
+  if (!["owner","secondary_admin"].includes(actor.admin.role)) {
+    return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
+  }
+  if (adminUserId === actor.user.id) return json(res, 400, { error: "لا يمكنك حذف حسابك الإداري الحالي" });
+  if (config.ownerUserId && adminUserId === config.ownerUserId) {
+    return json(res, 400, { error: "لا يمكن حذف حساب المالك" });
+  }
+  const rows = await select("admins", "select=user_id,role&user_id=eq." + encodeURIComponent(adminUserId) + "&limit=1");
+  if (!rows?.[0]) return json(res, 404, { error: "المشرف غير موجود" });
+  await remove("admins", "user_id=eq." + encodeURIComponent(adminUserId));
+  await writeAudit(actor.user.id, "remove_admin", "admin", adminUserId, { role: rows[0].role });
+  json(res, 200, { ok: true });
+}
+
+async function adminUploads(req, res, url) {async function adminUploads(req, res, url) {
   await requireAdmin(req, "storage");
   const status = String(url.searchParams.get("status") || "").trim();
   let query = "select=id,client_upload_id,user_id,kind,original_name,size_bytes,received_bytes,status,error,media_id,cancel_requested,created_at,updated_at,completed_at&order=created_at.desc&limit=200";
@@ -3775,55 +3868,91 @@ async function resolveReport(req, res, reportId) {
 
 async function addAdmin(req, res) {
   const actor = await requireAdmin(req, "admins");
+  if (!["owner","secondary_admin"].includes(actor.admin.role)) {
+    return json(res, 403, { error: "إضافة المشرفين متاحة للإدارة العليا فقط" });
+  }
   const body = await readJson(req);
   const userId = String(body.user_id || "").trim();
   const role = String(body.role || "").trim();
   const allowed = ["secondary_admin","moderator","content_moderator","support","analyst"];
-  if (!/^[0-9a-f-]{36}$/.test(userId)) return json(res, 400, { error: "معرف المستخدم غير صالح" });
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) return json(res, 400, { error: "معرف المستخدم غير صالح" });
   if (!allowed.includes(role)) return json(res, 400, { error: "الدور غير صالح" });
+  if (config.ownerUserId && userId === config.ownerUserId) {
+    return json(res, 409, { error: "هذا الحساب هو مالك المنصة بالفعل" });
+  }
 
   const profiles = await select(
     "profiles",
-    `select=id,name,username&id=eq.${encodeURIComponent(userId)}&limit=1`,
+    "select=id,name,username,is_banned,deleted_at&id=eq." + encodeURIComponent(userId) + "&limit=1",
   );
-  if (!profiles?.[0]) return json(res, 404, { error: "الحساب غير موجود" });
+  const profile = profiles?.[0];
+  if (!profile || profile.deleted_at || profile.is_banned) return json(res, 404, { error: "الحساب غير متاح" });
 
-  const rows = await upsert("admins", {
+  const existing = await select("admins", "select=user_id&user_id=eq." + encodeURIComponent(userId) + "&limit=1");
+  if (existing?.[0]) return json(res, 409, { error: "هذا الحساب مضاف ضمن المشرفين بالفعل" });
+
+  const permissions = role === "secondary_admin" ? {} : sanitizeAdminPermissions(body.permissions);
+  const rows = await insert("admins", {
     user_id: userId,
     role,
-    permissions: body.permissions || {},
+    permissions,
     active: true,
-  }, "user_id");
+  });
 
-  await insert("audit_logs", {
-    actor_user_id: actor.user.id,
-    action: "add_admin",
-    target_type: "admin",
-    target_id: userId,
-    details: { role },
-  }, { returning: false }).catch(() => {});
-
-  json(res, 201, rows?.[0] || { ok: true });
+  await writeAudit(actor.user.id, "add_admin", "admin", userId, { role, permissions });
+  json(res, 201, { ...(rows?.[0] || {}), profile });
 }
 
 async function adminAdmins(req, res) {
-  await requireAdmin(req, "admins");
+  const actor = await requireAdmin(req, "admins");
+  if (!["owner","secondary_admin"].includes(actor.admin.role)) {
+    return json(res, 403, { error: "إدارة المشرفين متاحة للإدارة العليا فقط" });
+  }
+
   const rows = await select(
     "admins",
     "select=user_id,role,permissions,active,last_active_at,created_at,updated_at&order=created_at.asc",
   );
   const items = [];
+
+  if (config.ownerUserId) {
+    const ownerProfiles = await select(
+      "profiles",
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(config.ownerUserId) + "&limit=1",
+    ).catch(() => []);
+    items.push({
+      user_id: config.ownerUserId,
+      role: "owner",
+      permissions: { all: true },
+      effective_permissions: Object.fromEntries(ADMIN_PERMISSION_KEYS.map(key => [key, true])),
+      active: true,
+      last_active_at: null,
+      created_at: null,
+      updated_at: null,
+      profiles: ownerProfiles?.[0] || null,
+    });
+  }
+
   for (const row of rows || []) {
+    if (config.ownerUserId && row.user_id === config.ownerUserId) continue;
     const profiles = await select(
       "profiles",
-      `select=id,name,username&id=eq.${encodeURIComponent(row.user_id)}&limit=1`,
-    );
-    items.push({ ...row, profiles: profiles?.[0] || null });
+      "select=id,name,username,avatar_media_id,is_verified&id=eq." + encodeURIComponent(row.user_id) + "&limit=1",
+    ).catch(() => []);
+    items.push({
+      ...row,
+      effective_permissions: effectiveAdminPermissions(row),
+      profiles: profiles?.[0] || null,
+    });
   }
-  json(res, 200, { items });
+  json(res, 200, {
+    items,
+    permission_keys: ADMIN_PERMISSION_KEYS,
+    role_defaults: Object.fromEntries(Object.entries(ADMIN_ROLE_PERMISSIONS).map(([role,set]) => [role,[...set]])),
+  });
 }
 
-async function adminAudit(req, res) {
+async function adminAudit(req, res) {async function adminAudit(req, res) {
   await requireAdmin(req, "admins");
   const items = await select(
     "audit_logs",
@@ -4259,6 +4388,8 @@ const server = http.createServer(async (req, res) => {
         id: result.user.id,
         role: result.admin.role,
         permissions: result.admin.permissions || {},
+        effective_permissions: effectiveAdminPermissions(result.admin),
+        permission_keys: ADMIN_PERMISSION_KEYS,
       });
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/stats") {
@@ -4366,9 +4497,15 @@ const server = http.createServer(async (req, res) => {
       if (req.method === "GET") return adminAdmins(req, res);
       if (req.method === "POST") return addAdmin(req, res);
     }
+    if (req.method === "GET" && url.pathname === "/v1/admin/admin-candidates") {
+      return adminCandidates(req, res, url);
+    }
     const adminRecordMatch = /^\/v1\/admin\/admins\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (req.method === "PATCH" && adminRecordMatch) {
       return updateAdminRecord(req, res, adminRecordMatch[1]);
+    }
+    if (req.method === "DELETE" && adminRecordMatch) {
+      return removeAdminRecord(req, res, adminRecordMatch[1]);
     }
     if (req.method === "GET" && url.pathname === "/v1/admin/audit") {
       return adminAudit(req, res);

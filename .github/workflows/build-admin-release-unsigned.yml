@@ -16,6 +16,14 @@ jobs:
       - name: جلب المشروع
         uses: actions/checkout@v4
 
+      - name: إعداد Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: تجهيز مكتبات الويب المحلية
+        run: npm install --ignore-scripts --no-audit --no-fund
+
       - name: إعداد جافا
         uses: actions/setup-java@v5
         with:

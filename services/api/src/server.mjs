@@ -5507,7 +5507,7 @@ const server = http.createServer(async (req, res) => {
         messaging_revision: "E2",
         stories_revision: "S3",
         content_revision: "C3",
-        admin_revision: "A10",
+        admin_revision: "A14",
         commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT_SHA || "",
         readiness: readiness()
       });

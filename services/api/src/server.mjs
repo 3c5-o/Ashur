@@ -2493,10 +2493,18 @@ async function adminUsers(req, res, url) {
     if (/^[0-9a-f-]{36}$/i.test(q)) parts.push("id.eq." + encodeURIComponent(q));
     filters.push("or=(" + parts.join(",") + ")");
   }
+  const nowIso = new Date().toISOString();
   if (status === "active") {
-    filters.push("deleted_at=is.null", "is_banned=eq.false");
+    filters.push(
+      "deleted_at=is.null",
+      "is_banned=eq.false",
+      "or=(banned_until.is.null,banned_until.lte." + encodeURIComponent(nowIso) + ")"
+    );
   } else if (status === "banned") {
-    filters.push("is_banned=eq.true");
+    filters.push(
+      "deleted_at=is.null",
+      "or=(is_banned.eq.true,banned_until.gt." + encodeURIComponent(nowIso) + ")"
+    );
   } else if (status === "deleted") {
     filters.push("deleted_at=not.is.null");
   }
@@ -2963,6 +2971,7 @@ async function adminContent(req, res, url) {
   const { page, limit, offset } = pageParams(url, 24, 60);
   const status = String(url.searchParams.get("status") || "").trim();
   const authorRaw = String(url.searchParams.get("author") || url.searchParams.get("author_id") || "").trim();
+  const targetId = String(url.searchParams.get("target_id") || "").trim();
   const q = String(url.searchParams.get("q") || "").trim().replace(/[,*()]/g, "");
   const visibility = String(url.searchParams.get("visibility") || "").trim();
   const comments = String(url.searchParams.get("comments") || "").trim();
@@ -2987,6 +2996,7 @@ async function adminContent(req, res, url) {
 
   const filters = [];
   if (status) filters.push("moderation_status=eq." + encodeURIComponent(status));
+  if (targetId && /^[0-9a-f-]{36}$/i.test(targetId)) filters.push("id=eq." + encodeURIComponent(targetId));
   if (authorId) filters.push("author_id=eq." + encodeURIComponent(authorId));
   if (q) filters.push("caption=ilike.*" + encodeURIComponent(q) + "*");
   if (visibility && table !== "stories") filters.push("visibility=eq." + encodeURIComponent(visibility));

@@ -594,3 +594,190 @@ dialog[open].panel-dialog{
   visibility:hidden!important;
   pointer-events:none!important;
 }
+
+
+/* Camera, viewer, story and confirmation surfaces */
+.camera-studio-dialog[open],
+.media-viewer-dialog[open],
+.story-viewer[open]{
+  position:fixed!important;
+  inset:0!important;
+  width:100vw!important;
+  max-width:100vw!important;
+  height:100dvh!important;
+  max-height:100dvh!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  overflow:hidden!important;
+  background:#000!important;
+}
+.camera-stage,
+.media-viewer-stage,
+.story-viewer-media{
+  width:100%!important;
+  height:100%!important;
+  max-width:100%!important;
+  max-height:100%!important;
+}
+.camera-stage video,
+.media-viewer-stage video,
+.media-viewer-stage img,
+.story-viewer-media video,
+.story-viewer-media img{
+  width:100%!important;
+  height:100%!important;
+  max-width:100%!important;
+  max-height:100%!important;
+  object-fit:contain!important;
+}
+.camera-close,
+.media-viewer-close,
+.story-close{
+  top:calc(10px + var(--ashur-safe-top))!important;
+}
+.camera-close,
+.media-viewer-close{
+  right:max(10px,var(--ashur-safe-right))!important;
+}
+.story-close{
+  left:max(10px,var(--ashur-safe-left))!important;
+}
+.camera-side-tools{
+  top:calc(68px + var(--ashur-safe-top))!important;
+  right:max(10px,var(--ashur-safe-right))!important;
+  max-height:calc(100dvh - 190px - var(--ashur-safe-top) - var(--ashur-safe-bottom))!important;
+  overflow-y:auto!important;
+}
+.camera-bottom-panel{
+  left:max(8px,var(--ashur-safe-left))!important;
+  right:max(8px,var(--ashur-safe-right))!important;
+  bottom:max(8px,var(--ashur-safe-bottom))!important;
+  width:auto!important;
+  max-width:620px!important;
+  margin-inline:auto!important;
+  box-sizing:border-box!important;
+}
+.camera-mode-tabs,
+.camera-publish-tabs{
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  width:100%!important;
+}
+.camera-mode-tabs{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.camera-capture-row{
+  display:grid!important;
+  grid-template-columns:52px minmax(76px,1fr) 52px!important;
+  align-items:center!important;
+  justify-items:center!important;
+  gap:10px!important;
+}
+.media-viewer-top{
+  box-sizing:border-box!important;
+  padding-top:calc(10px + var(--ashur-safe-top))!important;
+  padding-inline:max(10px,var(--ashur-safe-left)) max(10px,var(--ashur-safe-right))!important;
+}
+.media-viewer-toolbar{
+  left:max(8px,var(--ashur-safe-left))!important;
+  right:max(8px,var(--ashur-safe-right))!important;
+  bottom:max(10px,var(--ashur-safe-bottom))!important;
+  width:auto!important;
+  max-width:720px!important;
+  margin-inline:auto!important;
+}
+.story-progress{
+  top:calc(8px + var(--ashur-safe-top))!important;
+  left:max(10px,var(--ashur-safe-left))!important;
+  right:max(10px,var(--ashur-safe-right))!important;
+}
+.story-viewer-head{
+  top:calc(18px + var(--ashur-safe-top))!important;
+  left:max(10px,var(--ashur-safe-left))!important;
+  right:max(10px,var(--ashur-safe-right))!important;
+}
+.story-viewer-caption,
+.story-viewer-actions{
+  bottom:calc(18px + var(--ashur-safe-bottom))!important;
+  max-width:calc(100vw - 24px)!important;
+}
+.confirm-dialog[open]{
+  position:fixed!important;
+  inset:0!important;
+  width:100vw!important;
+  max-width:100vw!important;
+  height:100dvh!important;
+  max-height:100dvh!important;
+  margin:0!important;
+  padding:
+    calc(16px + var(--ashur-safe-top))
+    max(14px,var(--ashur-safe-right))
+    calc(16px + var(--ashur-safe-bottom))
+    max(14px,var(--ashur-safe-left))!important;
+  display:grid!important;
+  place-items:center!important;
+  overflow-y:auto!important;
+}
+.confirm-card{
+  box-sizing:border-box!important;
+  width:min(100%,460px)!important;
+  max-height:calc(100dvh - var(--ashur-safe-top) - var(--ashur-safe-bottom) - 32px)!important;
+  overflow-y:auto!important;
+  padding:18px!important;
+}
+.confirm-actions{
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  gap:9px!important;
+}
+.chat-dialog[open]{
+  grid-template-rows:auto minmax(0,1fr) auto auto auto!important;
+}
+.chat-topbar{
+  box-sizing:border-box!important;
+  min-height:calc(58px + var(--ashur-safe-top))!important;
+  padding-top:calc(8px + var(--ashur-safe-top))!important;
+  padding-inline:max(8px,var(--ashur-safe-left)) max(8px,var(--ashur-safe-right))!important;
+}
+.chat-messages{
+  min-height:0!important;
+  overflow-y:auto!important;
+}
+.chat-form{
+  box-sizing:border-box!important;
+  padding-bottom:calc(8px + var(--ashur-safe-bottom))!important;
+  padding-inline:max(8px,var(--ashur-safe-left)) max(8px,var(--ashur-safe-right))!important;
+}
+.chat-form input,
+.chat-form textarea{
+  min-width:0!important;
+  width:100%!important;
+}
+.public-profile-scroll{
+  min-height:0!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  padding-bottom:calc(20px + var(--ashur-safe-bottom))!important;
+}
+.comments-sheet .chat-messages{
+  padding-bottom:10px!important;
+}
+@media (max-width:359px){
+  .camera-side-tools button span{display:none!important}
+  .camera-side-tools button{width:40px!important;height:40px!important}
+  .camera-capture-row{grid-template-columns:44px minmax(68px,1fr) 44px!important}
+  .confirm-actions{grid-template-columns:1fr!important}
+}
+@media (max-height:560px) and (orientation:landscape){
+  .camera-side-tools{
+    top:calc(52px + var(--ashur-safe-top))!important;
+    max-height:calc(100dvh - 110px)!important;
+  }
+  .camera-bottom-panel{
+    max-width:520px!important;
+    padding:6px!important;
+  }
+  .camera-bottom-panel p{display:none!important}
+  .camera-capture{width:58px!important;height:58px!important}
+  .story-viewer-caption{max-height:30dvh!important;overflow-y:auto!important}
+}

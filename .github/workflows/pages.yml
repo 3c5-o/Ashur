@@ -73,3 +73,40 @@ jobs:
       - name: نشر GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+
+  verify:
+    name: فحص الموقع المنشور
+    runs-on: ubuntu-24.04
+    needs: deploy
+    steps:
+      - name: انتظار توفر GitHub Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE="https://3c5-o.github.io/Ashur/"
+          APP="${SITE}app/"
+          for attempt in {1..12}; do
+            if curl -fsSL --connect-timeout 10 --max-time 25 "$SITE" -o /tmp/site.html               && curl -fsSL --connect-timeout 10 --max-time 25 "$APP" -o /tmp/app.html               && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}config.js?v=1.9.0" -o /tmp/app-config.js; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "تعذر الوصول إلى GitHub Pages بعد النشر"
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: التحقق من محتوى الموقع
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "آشور" /tmp/site.html
+          grep -q "ASHUR_UI_STABILITY_1_9_0" /tmp/app.html
+          grep -q "3c5-o.github.io/Ashur" /tmp/app-config.js
+          grep -q 'appVersion: "1.9.0"' /tmp/app-config.js
+          if grep -qi "ashur-alpha.vercel.app" /tmp/site.html /tmp/app.html /tmp/app-config.js; then
+            echo "تم العثور على رابط Vercel قديم في النسخة المنشورة"
+            exit 1
+          fi
+          echo "GitHub Pages يعمل والنسخة المنشورة صحيحة."

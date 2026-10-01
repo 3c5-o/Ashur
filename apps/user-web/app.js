@@ -1135,12 +1135,13 @@
       $("#systemTitle").textContent="يتوفر تحديث جديد";
       $("#systemMessage").textContent=version.message||`يتوفر الإصدار ${version.latest} من آشور.`;
       const link=$("#systemPrimary");
-      if(version.download_url){
-        link.href=version.download_url;
-        link.classList.remove("hidden");
-      }else{
-        link.classList.add("hidden");
-      }
+      const fallbackDownload=(String(cfg.shareBaseUrl||"https://3c5-o.github.io/Ashur").replace(/\/$/,""))+"/download/ASHUR-User-latest.apk";
+      const configuredDownload=String(version.download_url||"").trim();
+      const safeDownload=configuredDownload&&!/\.vercel\.app(?:\/|$)/i.test(configuredDownload)
+        ?configuredDownload
+        :fallbackDownload;
+      link.href=safeDownload;
+      link.classList.remove("hidden");
       $("#systemLater").classList.toggle("hidden",required);
       $("#systemDialog").dataset.blocking=required?"1":"0";
       if(!$("#systemDialog").open)openDialog($("#systemDialog"));

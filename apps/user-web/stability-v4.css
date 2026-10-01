@@ -586,3 +586,11 @@ dialog[open].panel-dialog{
     transition-duration:.01ms!important;
   }
 }
+
+
+/* Home-only actions: prevent topbar crowding on secondary pages. */
+.topbar:not(.home-context) #publishButton,
+.topbar:not(.home-context) #notificationsButton{
+  visibility:hidden!important;
+  pointer-events:none!important;
+}

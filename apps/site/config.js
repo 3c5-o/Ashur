@@ -3,5 +3,5 @@ window.ASHUR_SITE_CONFIG = {
   supabaseKey: "sb_publishable_sj7LvpsRztNtSaK9jvzQsg_ypXNxXQT",
   canonicalBaseUrl: "https://3c5-o.github.io/Ashur/",
   webUrl: "https://3c5-o.github.io/Ashur/app/",
-  downloadUrl: "https://3c5-o.github.io/Ashur/download/ASHUR-User-latest.apk"
+  downloadUrl: "https://raw.githubusercontent.com/3c5-o/Ashur/main/apps/site/download/ASHUR-User-latest.apk"
 };

@@ -6,7 +6,9 @@
   <meta name="theme-color" content="#050706">
   <meta name="color-scheme" content="dark light">
   <title>آشور</title>
-  <link rel="stylesheet" href="./style.css">\n  <link rel="stylesheet" href="./premium-v3.css">\n  <!-- ASHUR_PREMIUM_MINIMAL_1_8_0 -->
+  <link rel="stylesheet" href="./style.css">\n  <link rel="stylesheet" href="./premium-v3.css">
+  <link rel="stylesheet" href="./stability-v4.css">
+  <!-- ASHUR_UI_STABILITY_1_8_1 -->\n  <!-- ASHUR_PREMIUM_MINIMAL_1_8_0 -->
 </head>
 <body>
   <div id="splash" class="splash">
@@ -188,8 +190,19 @@
       <button data-publish="story"><span class="option-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg></span><span><b>قصة</b><small>صورة أو فيديو لمدة ٢٤ ساعة</small></span></button>
       <button data-publish="post"><span class="option-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m7 16 4-4 3 3 3-4 3 5"/></svg></span><span><b>منشور</b><small>صورة أو فيديو مع وصف</small></span></button>
       <button data-publish="reel"><span class="option-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg></span><span><b>ريلز</b><small>فيديو عمودي قصير</small></span></button>
+      <button id="openDraftsButton" class="drafts-entry" type="button"><span class="option-icon"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5Z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span><b>المسودات</b><small id="draftsEntryHint">المحتوى المحفوظ قبل النشر</small></span><span id="draftsEntryBadge" class="draft-count hidden">0</span></button>
     </div>
     <button id="closePublish" class="secondary-wide" type="button">إلغاء</button>
+  </dialog>
+
+  <dialog id="draftsDialog" class="panel-dialog drafts-dialog">
+    <div class="dialog-head drafts-head">
+      <div><span class="eyebrow">استوديو آشور</span><h3>المسودات</h3><small>المحتوى المحفوظ على هذا الجهاز</small></div>
+      <button id="closeDrafts" class="close-btn" type="button" aria-label="إغلاق"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <div class="dialog-body drafts-body">
+      <div id="draftsList" class="drafts-list"></div>
+    </div>
   </dialog>
 
   <dialog id="composerDialog" class="panel-dialog creator-dialog">

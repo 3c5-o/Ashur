@@ -2597,6 +2597,14 @@ $("#appSettingsForm").onsubmit=async e=>{
   }catch(error){$("#appSettingsMessage").textContent=error.message}
 };
 
+const GITHUB_SITE_WEB_URL="https://3c5-o.github.io/Ashur/app/";
+const GITHUB_SITE_APK_URL="https://3c5-o.github.io/Ashur/download/ASHUR-User-latest.apk";
+function normalizeGithubPublicUrl(value,fallback){
+  const url=String(value||"").trim();
+  if(!url||/\.vercel\.app(?:\/|$)/i.test(url))return fallback;
+  return url;
+}
+
 const defaultSiteFeatures=[
   ["المنشورات","شارك الصور والفيديو والنصوص مع التفاعل والحفظ والمشاركة."],
   ["الريلز","فيديو عمودي سريع مع التفاعل والمشاهدة السلسة."],
@@ -2617,8 +2625,8 @@ async function loadSiteSettings(){
     const d=await api("/v1/admin/settings/site");
     $("#siteTitle").value=d.hero?.title||"آشور";
     $("#siteSubtitle").value=d.hero?.subtitle||"";
-    $("#siteAndroidUrl").value=d.download?.android_url||"";
-    $("#siteWebUrl").value=d.download?.web_url||"";
+    $("#siteAndroidUrl").value=normalizeGithubPublicUrl(d.download?.android_url,GITHUB_SITE_APK_URL);
+    $("#siteWebUrl").value=normalizeGithubPublicUrl(d.download?.web_url,GITHUB_SITE_WEB_URL);
     $("#siteVersion").value=d.download?.version||"";
     $("#siteSize").value=d.download?.size||"";
     $("#siteSha256").value=d.download?.sha256||"";
@@ -2655,8 +2663,8 @@ $("#siteSettingsForm").onsubmit=async e=>{
     await api("/v1/admin/settings/site",{method:"PUT",body:JSON.stringify({
       hero:{title:$("#siteTitle").value.trim(),subtitle:$("#siteSubtitle").value.trim()},
       download:{
-        android_url:$("#siteAndroidUrl").value.trim(),
-        web_url:$("#siteWebUrl").value.trim(),
+        android_url:normalizeGithubPublicUrl($("#siteAndroidUrl").value,GITHUB_SITE_APK_URL),
+        web_url:normalizeGithubPublicUrl($("#siteWebUrl").value,GITHUB_SITE_WEB_URL),
         version:$("#siteVersion").value.trim(),
         size:$("#siteSize").value.trim(),
         sha256:$("#siteSha256").value.trim()

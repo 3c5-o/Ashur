@@ -1,0 +1,75 @@
+name: نشر آشور على GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/site/**"
+      - "apps/user-web/**"
+      - "package.json"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المشروع
+        uses: actions/checkout@v4
+
+      - name: إعداد Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: تثبيت المكتبات
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: تجهيز موقع GitHub Pages
+        run: |
+          rm -rf .pages
+          mkdir -p .pages
+          cp -R apps/site/. .pages/
+          mkdir -p .pages/app
+          cp -R apps/user-web/. .pages/app/
+
+          mkdir -p .pages/vendor .pages/app/vendor
+          cp node_modules/@supabase/supabase-js/dist/umd/supabase.js .pages/vendor/supabase.min.js
+          cp node_modules/@supabase/supabase-js/dist/umd/supabase.js .pages/app/vendor/supabase.min.js
+
+          touch .pages/.nojekyll
+
+          test -f .pages/index.html
+          test -f .pages/app/index.html
+          test -s .pages/vendor/supabase.min.js
+          test -s .pages/app/vendor/supabase.min.js
+
+      - name: إعداد GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: رفع ملفات Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .pages
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: نشر GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

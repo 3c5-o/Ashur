@@ -2,7 +2,9 @@ name: فحص كود آشور
 
 on:
   push:
-    branches: [main, feature/ashur-1.2-full-build]
+    branches: [main, feature/ashur-1.2-full-build, "refactor/**"]
+  pull_request:
+    branches: [main]
     paths:
       - "apps/**/*.js"
       - "apps/**/*.html"
@@ -33,6 +35,7 @@ jobs:
           node --check apps/user-web/auth-core.js
           node --check apps/user-web/profile-core.js
           node --check apps/user-web/app.js
+          for file in apps/user-web/pages/*.js; do node --check "$file"; done
           node <<'NODE'
           const fs = require('fs');
           const vm = require('vm');
@@ -69,6 +72,13 @@ jobs:
           const server = fs.readFileSync('services/api/src/server.mjs','utf8');
           const manifest = fs.readFileSync('android/user/app/src/main/AndroidManifest.xml','utf8');
           const main = fs.readFileSync('android/user/app/src/main/java/app/ashur/social/MainActivity.java','utf8');
+          const pageFiles = fs.readdirSync('apps/user-web/pages').filter(name=>name.endsWith('.js'));
+          const pageSource = pageFiles.map(name=>fs.readFileSync('apps/user-web/pages/'+name,'utf8')).join('\n');
+          const siteConfig = fs.readFileSync('apps/site/config.js','utf8');
+          const siteApp = fs.readFileSync('apps/site/app.js','utf8');
+          const missingPageModules = !index.includes('./pages/registry.js') || !pageSource.includes('searchPage') || !pageSource.includes('messagesPage') || !pageSource.includes('profilePage');
+          const staleVercelReference = /vercel\.app/i.test(siteConfig) || /vercel\.app/i.test(app) || /vercel\.app/i.test(index);
+          const missingGithubPages = !siteConfig.includes('3c5-o.github.io/Ashur') || !siteApp.includes('staleHost');
           const directSingleForEach = /(^|[^$])\$\((?:"[^"]*"|'[^']*')\)\.forEach/g.test(app);
           const triple = app.includes('$' + '$' + '$' + '(');
           const remoteUi = /REMOTE_APP_URL|vercel\.app\/app/.test(main);
@@ -114,7 +124,7 @@ jobs:
           const missingFollowActions = !app.includes('followListActionLabel') || !server.includes('viewer_status') || !server.includes('follows_viewer');
           const missingStage5Composer = !app.includes('composer-video-frame') || !app.includes('setComposerOverallProgress') || !app.includes('composerPublishing');
           const composerLeaksFilename = app.includes('files[0].name+" · "') || app.includes('"الملف "+file.name');
-          const missingStage5Topbar = !app.includes('labels={') || !app.includes('topbar.dataset.page');
+          const missingStage5Topbar = !(app.includes('topbar.dataset.page') || pageSource.includes('topbar.dataset.page')) || !pageSource.includes('const labels=');
           const missingStage5SearchLayout = !style.includes('#searchPage .section-head.sticky-head') || !style.includes('top:calc(58px + var(--safe-top))');
           const missingStage5FileMetaHide = !style.includes('.composer-file-meta{display:none!important}');
           const missingStage6IncrementalChat = !app.includes('reconcileChatMessages') || !app.includes('appendRealtimeMessage') || !app.includes('chatMessageCache:new Map()');
@@ -129,8 +139,8 @@ jobs:
           const missingStage7CommentLock = !app.includes('التعليقات مغلقة لهذا المحتوى') || !app.includes('.select("author_id,comments_enabled")');
 
 
-          if (directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation || missingInteractionLocks || missingReelPagination || missingStoryViewersApi || missingMediaVisibilityScan || missingCommentFeedback || missingMessageIdempotency || missingMessageApiRead || missingMessagingRealtime || missingChatStatus || directMessageWrites || missingAudioNative || missingConversationSoftDelete || missingCameraNative || missingCameraStudio || missingMediaViewer || missingReelViews || missingDoubleTapLike || missingPostPins || missingCommentPins || missingMentionDelivery || missingCombinedProfileCount || missingStage4IdentityRules || missingRegistrationAvatar || missingDesignedConfirm || missingStage4Search || missingFollowActions || missingStage5Composer || composerLeaksFilename || missingStage5Topbar || missingStage5SearchLayout || missingStage5FileMetaHide || missingStage6IncrementalChat || stage6FullChatRerender || stage6AggressivePoll || missingStage6ImmediateSend || missingStage6MediaUi || stage6FilenameLeak || missingStage7Drafts || missingStage7ExitGuard || missingStage7AudienceEdit || missingStage7CommentLock) {
-            console.error({directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation,missingInteractionLocks,missingReelPagination,missingStoryViewersApi,missingMediaVisibilityScan,missingCommentFeedback,missingMessageIdempotency,missingMessageApiRead,missingMessagingRealtime,missingChatStatus,directMessageWrites,missingAudioNative,missingConversationSoftDelete,missingCameraNative,missingCameraStudio,missingMediaViewer,missingReelViews,missingDoubleTapLike,missingPostPins,missingCommentPins,missingMentionDelivery,missingCombinedProfileCount,missingStage4IdentityRules,missingRegistrationAvatar,missingDesignedConfirm,missingStage4Search,missingFollowActions,missingStage5Composer,composerLeaksFilename,missingStage5Topbar,missingStage5SearchLayout,missingStage5FileMetaHide,missingStage6IncrementalChat,stage6FullChatRerender,stage6AggressivePoll,missingStage6ImmediateSend,missingStage6MediaUi,stage6FilenameLeak,missingStage7Drafts,missingStage7ExitGuard,missingStage7AudienceEdit,missingStage7CommentLock});
+          if (missingPageModules || staleVercelReference || missingGithubPages || directSingleForEach || triple || remoteUi || missingBack || missingLocal || runtimeCdn || missingLocalVendor || missingCore || appNotUsingCore || missingAuthCore || unsafeUrlDetection || missingAuthReady || missingSingleTask || missingLocalLogout || missingProfileCore || missingProfileMediaGuard || missingDeleteRevocation || missingInteractionLocks || missingReelPagination || missingStoryViewersApi || missingMediaVisibilityScan || missingCommentFeedback || missingMessageIdempotency || missingMessageApiRead || missingMessagingRealtime || missingChatStatus || directMessageWrites || missingAudioNative || missingConversationSoftDelete || missingCameraNative || missingCameraStudio || missingMediaViewer || missingReelViews || missingDoubleTapLike || missingPostPins || missingCommentPins || missingMentionDelivery || missingCombinedProfileCount || missingStage4IdentityRules || missingRegistrationAvatar || missingDesignedConfirm || missingStage4Search || missingFollowActions || missingStage5Composer || composerLeaksFilename || missingStage5Topbar || missingStage5SearchLayout || missingStage5FileMetaHide || missingStage6IncrementalChat || stage6FullChatRerender || stage6AggressivePoll || missingStage6ImmediateSend || missingStage6MediaUi || stage6FilenameLeak || missingStage7Drafts || missingStage7ExitGuard || missingStage7AudienceEdit || missingStage7CommentLock) {
+            console.error({missingPageModules,staleVercelReference,missingGithubPages,directSingleForEach,triple,remoteUi,missingBack,missingLocal,runtimeCdn,missingLocalVendor,missingCore,appNotUsingCore,missingAuthCore,unsafeUrlDetection,missingAuthReady,missingSingleTask,missingLocalLogout,missingProfileCore,missingProfileMediaGuard,missingDeleteRevocation,missingInteractionLocks,missingReelPagination,missingStoryViewersApi,missingMediaVisibilityScan,missingCommentFeedback,missingMessageIdempotency,missingMessageApiRead,missingMessagingRealtime,missingChatStatus,directMessageWrites,missingAudioNative,missingConversationSoftDelete,missingCameraNative,missingCameraStudio,missingMediaViewer,missingReelViews,missingDoubleTapLike,missingPostPins,missingCommentPins,missingMentionDelivery,missingCombinedProfileCount,missingStage4IdentityRules,missingRegistrationAvatar,missingDesignedConfirm,missingStage4Search,missingFollowActions,missingStage5Composer,composerLeaksFilename,missingStage5Topbar,missingStage5SearchLayout,missingStage5FileMetaHide,missingStage6IncrementalChat,stage6FullChatRerender,stage6AggressivePoll,missingStage6ImmediateSend,missingStage6MediaUi,stage6FilenameLeak,missingStage7Drafts,missingStage7ExitGuard,missingStage7AudienceEdit,missingStage7CommentLock});
             process.exit(1);
           }
           NODE

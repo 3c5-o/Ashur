@@ -902,6 +902,13 @@
     }
   };
 
+  if(window.location.hostname!=="appassets.androidplatform.net"){
+    const currentAuthLink=window.location.href;
+    if(/[?#&](code|access_token|refresh_token|error|error_code|type)=/i.test(currentAuthLink)){
+      setTimeout(()=>window.ASHUR_HANDLE_AUTH_LINK(currentAuthLink),0);
+    }
+  }
+
   function showAuthMessage(text, good=false){
     const el=$("#authMessage");
     if(!el)return;
@@ -1128,12 +1135,13 @@
       $("#systemTitle").textContent="يتوفر تحديث جديد";
       $("#systemMessage").textContent=version.message||`يتوفر الإصدار ${version.latest} من آشور.`;
       const link=$("#systemPrimary");
-      if(version.download_url){
-        link.href=version.download_url;
-        link.classList.remove("hidden");
-      }else{
-        link.classList.add("hidden");
-      }
+      const fallbackDownload=(String(cfg.shareBaseUrl||"https://3c5-o.github.io/Ashur").replace(/\/$/,""))+"/download/ASHUR-User-latest.apk";
+      const configuredDownload=String(version.download_url||"").trim();
+      const safeDownload=configuredDownload&&!/\.vercel\.app(?:\/|$)/i.test(configuredDownload)
+        ?configuredDownload
+        :fallbackDownload;
+      link.href=safeDownload;
+      link.classList.remove("hidden");
       $("#systemLater").classList.toggle("hidden",required);
       $("#systemDialog").dataset.blocking=required?"1":"0";
       if(!$("#systemDialog").open)openDialog($("#systemDialog"));
@@ -1431,24 +1439,15 @@
   };
 
   function updateTopbarContext(page){
+    if(window.AshurPages?.updateShell){
+      window.AshurPages.updateShell(page);
+      return;
+    }
     const topbar=$(".topbar");
     if(!topbar)return;
-    const labels={
-      homePage:"آشور",
-      searchPage:"البحث",
-      reelsPage:"الريلز",
-      messagesPage:"الرسائل",
-      profilePage:"حسابي"
-    };
     const home=page==="homePage";
     topbar.classList.toggle("home-context",home);
     topbar.dataset.page=page||"homePage";
-    const brand=$("#brandButton");
-    const logo=brand?.querySelector("img");
-    const label=brand?.querySelector("span");
-    if(label)label.textContent=labels[page]||"آشور";
-    if(logo)logo.classList.toggle("hidden",!home);
-    if(brand)brand.setAttribute("aria-label",home?"الرئيسية":(labels[page]||"آشور"));
   }
 
   async function navigateTo(page,{fromBack=false,replace=false}={}){
@@ -1473,14 +1472,19 @@
       for(const timer of state.reelViewTimers.values())clearTimeout(timer);
       state.reelViewTimers.clear();
     }
-    if(page!=="messagesPage")closeInboxRealtime();
-    if(page==="searchPage")await loadExplore();
-    if(page==="reelsPage")await loadReels();
-    if(page==="messagesPage"){
-      await loadConversations();
-      subscribeInboxRealtime();
+    const pageApi={loadExplore,loadReels,loadConversations,subscribeInboxRealtime,closeInboxRealtime,loadProfile};
+    if(window.AshurPages?.enter){
+      await window.AshurPages.enter(page,{previous,fromBack,replace,state,api:pageApi});
+    }else{
+      if(page!=="messagesPage")closeInboxRealtime();
+      if(page==="searchPage")await loadExplore();
+      if(page==="reelsPage")await loadReels();
+      if(page==="messagesPage"){
+        await loadConversations();
+        subscribeInboxRealtime();
+      }
+      if(page==="profilePage")await loadProfile();
     }
-    if(page==="profilePage")await loadProfile();
     window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
   }
   $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
@@ -4654,7 +4658,8 @@
 
   $("#publishButton").onclick=async()=>{
     await updateDraftEntryBadge().catch(()=>{});
-    openDialog($("#publishDialog"));
+    if(window.AshurPublishPage?.openChooser)window.AshurPublishPage.openChooser();
+    else openDialog($("#publishDialog"));
   };
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
@@ -6275,6 +6280,7 @@
 
   async function openSettings(){
     openDialog($("#settingsDialog"));
+    window.AshurSettingsPage?.normalize?.();
     syncThemeControls(currentTheme());
     try{
       const {data,error}=await client.from("notification_preferences")

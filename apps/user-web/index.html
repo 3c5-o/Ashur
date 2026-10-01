@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#050706">
   <meta name="color-scheme" content="dark light">
   <title>آشور</title>
-  <link rel="stylesheet" href="./style.css?v=1.8.1">\n  <link rel="stylesheet" href="./premium-v3.css?v=1.8.1">
-  <link rel="stylesheet" href="./stability-v4.css?v=1.8.1">
+  <link rel="stylesheet" href="./style.css?v=1.8.1">\n  <link rel="stylesheet" href="./premium-v3.css?v=1.9.0">
+  <link rel="stylesheet" href="./stability-v4.css?v=1.9.0">
   <!-- ASHUR_UI_STABILITY_1_8_1 -->\n  <!-- ASHUR_PREMIUM_MINIMAL_1_8_0 -->
 </head>
 <body>
@@ -629,10 +629,18 @@
 
   <div id="mentionSuggestions" class="mention-suggestions hidden" role="listbox" aria-label="اقتراحات الحسابات"></div>
 
-  <script src="./config.js?v=1.8.1"></script>
-  <script src="./core.js?v=1.8.1"></script>
-  <script src="./auth-core.js?v=1.8.1"></script>
-  <script src="./profile-core.js?v=1.8.1"></script>
+  <script src="./config.js?v=1.9.0"></script>
+  <script src="./core.js?v=1.9.0"></script>
+  <script src="./auth-core.js?v=1.9.0"></script>
+  <script src="./profile-core.js?v=1.9.0"></script>
+  <script src="./pages/registry.js?v=1.9.0"></script>
+  <script src="./pages/home.js?v=1.9.0"></script>
+  <script src="./pages/search.js?v=1.9.0"></script>
+  <script src="./pages/reels.js?v=1.9.0"></script>
+  <script src="./pages/messages.js?v=1.9.0"></script>
+  <script src="./pages/profile.js?v=1.9.0"></script>
+  <script src="./pages/publish.js?v=1.9.0"></script>
+  <script src="./pages/settings.js?v=1.9.0"></script>
   <script>
     (() => {
       let finished = false;
@@ -656,7 +664,7 @@
         if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
         if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=1.8.1-ui-stability";
+        script.src = "./app.js?v=1.9.0-github-pages";
         script.onload = () => { finished = true; };
         script.onerror = () => fail("تعذر تشغيل واجهة آشور المحلية.");
         document.body.appendChild(script);

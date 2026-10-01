@@ -4652,7 +4652,10 @@
     await openCameraStudio();
   }
 
-  $("#publishButton").onclick=async()=>{\n    await updateDraftEntryBadge().catch(()=>{});\n    openDialog($("#publishDialog"));\n  };
+  $("#publishButton").onclick=async()=>{
+    await updateDraftEntryBadge().catch(()=>{});
+    openDialog($("#publishDialog"));
+  };
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
 
@@ -4725,7 +4728,8 @@
     const snapshot=composerDraftSnapshot();
     if(!snapshot)return;
     if(!composerHasDraftContent()){
-      await deleteComposerDraft(state.composerType).catch(()=>{});\n      updateDraftEntryBadge().catch(()=>{});
+      await deleteComposerDraft(state.composerType).catch(()=>{});
+      updateDraftEntryBadge().catch(()=>{});
       return;
     }
     const db=await openComposerDraftDb();

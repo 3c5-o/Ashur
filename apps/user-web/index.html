@@ -676,7 +676,16 @@
       vendor.src = "./vendor/supabase.min.js";
       vendor.async = false;
       vendor.onload = loadApp;
-      vendor.onerror = () => fail("ملف التشغيل المحلي غير مكتمل. ثبّت أحدث نسخة من التطبيق.");
+      vendor.onerror = () => {
+        const fallback = String(window.ASHUR_CONFIG?.webVendorFallbackUrl || "").trim();
+        if (!fallback) return fail("ملف التشغيل المحلي غير مكتمل. ثبّت أحدث نسخة من التطبيق.");
+        const remoteVendor = document.createElement("script");
+        remoteVendor.src = fallback;
+        remoteVendor.async = false;
+        remoteVendor.onload = loadApp;
+        remoteVendor.onerror = () => fail("تعذر تحميل مكونات نسخة الويب.");
+        document.head.appendChild(remoteVendor);
+      };
       document.head.appendChild(vendor);
 
       setTimeout(() => {

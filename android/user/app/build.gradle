@@ -19,8 +19,8 @@ android {
         applicationId 'app.ashur.social'
         minSdk 24
         targetSdk 36
-        versionCode 14
-        versionName '1.7.0'
+        versionCode 15
+        versionName '1.8.0'
 
         buildConfigField "String", "ASHUR_API_URL", '"' + apiUrl + '"'
         buildConfigField "String", "ONESIGNAL_APP_ID", '"' + oneSignalAppId + '"'

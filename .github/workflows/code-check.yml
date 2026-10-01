@@ -124,7 +124,7 @@ jobs:
           const missingFollowActions = !app.includes('followListActionLabel') || !server.includes('viewer_status') || !server.includes('follows_viewer');
           const missingStage5Composer = !app.includes('composer-video-frame') || !app.includes('setComposerOverallProgress') || !app.includes('composerPublishing');
           const composerLeaksFilename = app.includes('files[0].name+" · "') || app.includes('"الملف "+file.name');
-          const missingStage5Topbar = !app.includes('labels={') || !app.includes('topbar.dataset.page');
+          const missingStage5Topbar = !(app.includes('topbar.dataset.page') || pageSource.includes('topbar.dataset.page')) || !pageSource.includes('const labels=');
           const missingStage5SearchLayout = !style.includes('#searchPage .section-head.sticky-head') || !style.includes('top:calc(58px + var(--safe-top))');
           const missingStage5FileMetaHide = !style.includes('.composer-file-meta{display:none!important}');
           const missingStage6IncrementalChat = !app.includes('reconcileChatMessages') || !app.includes('appendRealtimeMessage') || !app.includes('chatMessageCache:new Map()');

@@ -1,0 +1,49 @@
+name: تصدير أدوات توقيع Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/export-android-signing-tools.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: جلب المشروع
+        uses: actions/checkout@v4
+
+      - name: تثبيت Android Build Tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "build-tools;36.0.0"
+
+      - name: تجهيز أدوات التوقيع
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          mkdir -p signing-tools/lib
+          cp "$BT/apksigner" signing-tools/
+          cp "$BT/lib/apksigner.jar" signing-tools/lib/
+          cp "$BT/zipalign" signing-tools/
+          chmod +x signing-tools/apksigner signing-tools/zipalign
+          ./signing-tools/apksigner version
+          ./signing-tools/zipalign -h >/dev/null 2>&1 || true
+
+      - name: حفظ الأدوات
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-signing-tools-36.0.0
+          path: signing-tools/
+          if-no-files-found: error

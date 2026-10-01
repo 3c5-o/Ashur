@@ -4652,7 +4652,7 @@
     await openCameraStudio();
   }
 
-  $("#publishButton").onclick=()=>openQuickPublish("post").catch(error=>openInfoDialog("الكاميرا",'<div class="empty error">'+escapeHtml(error.message)+'</div>'));
+  $("#publishButton").onclick=async()=>{\n    await updateDraftEntryBadge().catch(()=>{});\n    openDialog($("#publishDialog"));\n  };
   $("#closePublish").onclick=()=>$("#publishDialog").close();
   $("#publishDialog").querySelectorAll("[data-publish]").forEach(b=>b.onclick=()=>openComposer(b.dataset.publish));
 
@@ -4717,6 +4717,7 @@
       tx.onerror=resolve;
     });
     db.close();
+    updateDraftEntryBadge().catch(()=>{});
   }
 
   async function saveComposerDraft({silent=true}={}){
@@ -4724,7 +4725,7 @@
     const snapshot=composerDraftSnapshot();
     if(!snapshot)return;
     if(!composerHasDraftContent()){
-      await deleteComposerDraft(state.composerType).catch(()=>{});
+      await deleteComposerDraft(state.composerType).catch(()=>{});\n      updateDraftEntryBadge().catch(()=>{});
       return;
     }
     const db=await openComposerDraftDb();
@@ -4735,6 +4736,7 @@
       tx.onerror=()=>reject(tx.error||new Error("تعذر حفظ المسودة"));
     });
     db.close();
+    updateDraftEntryBadge().catch(()=>{});
     if(!silent&&$("#composerMessage"))$("#composerMessage").textContent="تم حفظ المسودة على هذا الجهاز.";
   }
 
@@ -4752,6 +4754,100 @@
     db.close();
     return value;
   }
+
+  async function listComposerDrafts(){
+    if(!state.user?.id)return [];
+    const db=await openComposerDraftDb().catch(()=>null);
+    if(!db)return [];
+    const prefix=state.user.id+":";
+    const rows=await new Promise(resolve=>{
+      const tx=db.transaction(COMPOSER_DRAFT_STORE,"readonly");
+      const request=tx.objectStore(COMPOSER_DRAFT_STORE).getAll();
+      request.onsuccess=()=>resolve((request.result||[]).filter(row=>String(row?.key||"").startsWith(prefix)));
+      request.onerror=()=>resolve([]);
+    });
+    db.close();
+    return rows.sort((a,b)=>Number(b.saved_at||0)-Number(a.saved_at||0));
+  }
+
+  function composerDraftTypeLabel(type){
+    return type==="story"?"قصة":type==="reel"?"ريلز":"منشور";
+  }
+
+  function composerDraftIcon(type){
+    if(type==="story")return '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg>';
+    if(type==="reel")return '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 6 3-6 3Z"/></svg>';
+    return '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m7 16 4-4 3 3 3-4 3 5"/></svg>';
+  }
+
+  function formatDraftTime(value){
+    const ts=Number(value||0);
+    if(!ts)return "بدون وقت";
+    try{return new Date(ts).toLocaleString("ar-IQ",{dateStyle:"medium",timeStyle:"short"})}catch{return new Date(ts).toLocaleString("ar-IQ")}
+  }
+
+  async function updateDraftEntryBadge(){
+    const rows=await listComposerDrafts();
+    const badge=$("#draftsEntryBadge");
+    const hint=$("#draftsEntryHint");
+    if(badge){
+      badge.textContent=String(rows.length);
+      badge.classList.toggle("hidden",!rows.length);
+    }
+    if(hint)hint.textContent=rows.length?("لديك "+rows.length+" مسودة محفوظة"):"لا توجد مسودات محفوظة";
+    return rows;
+  }
+
+  async function renderDraftsDialog(){
+    const list=$("#draftsList");
+    if(!list)return;
+    list.innerHTML='<div class="empty">جارٍ تحميل المسودات...</div>';
+    const rows=await updateDraftEntryBadge();
+    if(!rows.length){
+      list.innerHTML='<div class="empty"><b>لا توجد مسودات</b><div>ابدأ منشورًا أو قصة أو ريلز، وسيُحفظ تلقائيًا عند الخروج.</div></div>';
+      return;
+    }
+    list.innerHTML=rows.map(row=>{
+      const type=row.type==="story"||row.type==="reel"?row.type:"post";
+      const caption=String(row.caption||row.overlay_text||"").trim();
+      const mediaCount=Array.isArray(row.files)?row.files.length:0;
+      const summary=caption||((mediaCount?mediaCount+" ملف وسائط":"مسودة محفوظة"));
+      return '<article class="draft-card" data-draft-card="'+escapeHtml(type)+'">'+
+        '<span class="draft-card-icon">'+composerDraftIcon(type)+'</span>'+
+        '<div class="draft-card-copy"><b>'+composerDraftTypeLabel(type)+'</b><p>'+escapeHtml(summary)+'</p><small>'+escapeHtml(formatDraftTime(row.saved_at))+'</small></div>'+
+        '<div class="draft-card-actions">'+
+          '<button class="draft-open" type="button" data-open-draft="'+escapeHtml(type)+'">فتح</button>'+
+          '<button class="draft-delete" type="button" data-delete-draft="'+escapeHtml(type)+'">حذف</button>'+
+        '</div>'+
+      '</article>';
+    }).join("");
+
+    list.querySelectorAll("[data-open-draft]").forEach(button=>button.onclick=async()=>{
+      const type=button.dataset.openDraft||"post";
+      $("#draftsDialog").close();
+      await openComposer(type);
+    });
+
+    list.querySelectorAll("[data-delete-draft]").forEach(button=>button.onclick=async()=>{
+      const type=button.dataset.deleteDraft||"post";
+      const ok=await confirmAction({
+        title:"حذف المسودة؟",
+        text:"سيتم حذف هذه المسودة من هذا الجهاز.",
+        acceptLabel:"حذف",
+        danger:true
+      });
+      if(!ok)return;
+      await deleteComposerDraft(type).catch(()=>{});
+      await renderDraftsDialog();
+    });
+  }
+
+  $("#openDraftsButton")?.addEventListener("click",async()=>{
+    $("#publishDialog").close();
+    openDialog($("#draftsDialog"));
+    await renderDraftsDialog();
+  });
+  $("#closeDrafts")?.addEventListener("click",()=>$("#draftsDialog").close());
 
   function scheduleComposerDraftSave(){
     if(state.composerDraftRestoring||!$("#composerDialog")?.open)return;

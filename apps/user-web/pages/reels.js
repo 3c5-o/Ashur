@@ -1,0 +1,1 @@
+(()=>{window.AshurPages?.register("reelsPage",{enter:async({api})=>{await api?.loadReels?.()},leave:async()=>{document.querySelectorAll("#reelsFeed video").forEach(video=>{try{video.pause()}catch(_){}})}})})();

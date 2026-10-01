@@ -1,0 +1,1 @@
+(()=>{window.AshurPublishPage={openChooser:()=>{const d=document.querySelector("#publishDialog");if(d&&!d.open)d.showModal()},closeChooser:()=>document.querySelector("#publishDialog")?.close()}})();

@@ -87,7 +87,9 @@ jobs:
           SITE="https://3c5-o.github.io/Ashur/"
           APP="${SITE}app/"
           for attempt in {1..12}; do
-            if curl -fsSL --connect-timeout 10 --max-time 25 "$SITE" -o /tmp/site.html               && curl -fsSL --connect-timeout 10 --max-time 25 "$APP" -o /tmp/app.html               && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}config.js?v=2.0.0" -o /tmp/app-config.js; then
+            if curl -fsSL --connect-timeout 10 --max-time 25 "$SITE" -o /tmp/site.html               && curl -fsSL --connect-timeout 10 --max-time 25 "$APP" -o /tmp/app.html               && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}config.js?v=2.0.0" -o /tmp/app-config.js \
+              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}app.js?v=2.0.1-web" -o /tmp/app-runtime.js \
+              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}reference-ui-v5.css?v=2.0.1-web" -o /tmp/reference-ui.css; then
               break
             fi
             if [ "$attempt" -eq 12 ]; then
@@ -102,7 +104,16 @@ jobs:
         run: |
           set -euo pipefail
           grep -q "آشور" /tmp/site.html
-          grep -q 'reference-ui-v5.css?v=2.0.0' /tmp/app.html
+          grep -q 'reference-ui-v5.css?v=2.0.1-web' /tmp/app.html
+          grep -q 'app.js?v=2.0.1-web' /tmp/app.html
+          grep -q 'browserRouteKey' /tmp/app-runtime.js
+          grep -q 'popstate' /tmp/app-runtime.js
+          if grep -q '\$document' /tmp/app-runtime.js; then
+            echo "تم العثور على مرجع تنقل غير صالح في نسخة الويب"
+            exit 1
+          fi
+          grep -q -- '--bg:var(--ref-bg)' /tmp/reference-ui.css
+          grep -q -- '--surface:var(--ref-card)' /tmp/reference-ui.css
           grep -q "3c5-o.github.io/Ashur" /tmp/app-config.js
           grep -q 'appVersion: "2.0.0"' /tmp/app-config.js
           if grep -qi "ashur-alpha.vercel.app" /tmp/site.html /tmp/app.html /tmp/app-config.js; then

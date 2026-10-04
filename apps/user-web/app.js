@@ -62,6 +62,11 @@
     activeConversation:null,
     commentTarget:null,
     stories:new Map(),
+    storyGroups:new Map(),
+    storyAuthorOrder:[],
+    currentStoryAuthor:null,
+    currentStoryIndex:0,
+    pendingNativePush:null,
     profileTab:"posts",
     searchType:"all",
     chatTimer:null,
@@ -852,6 +857,7 @@
       }
       await checkRuntimeSettings().catch(()=>{});
       await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
+      await consumePendingNativePush().catch(()=>{});
       lastHydratedKey=key;
       rememberPendingConfirmation("");
       store.emit("auth:ready",{userId:state.user.id,reason});
@@ -1014,6 +1020,11 @@
       if(dialog.id==="mediaViewerDialog"){
         $("#mediaViewerStage")?.querySelectorAll("video,audio").forEach(media=>media.pause?.());
         $("#mediaViewerStage").innerHTML="";
+      }
+      if(dialog.id==="storyViewerDialog"){
+        clearTimeout(state.storyTimer);
+        state.storyTimer=null;
+        $("#storyViewerMedia")?.querySelectorAll("video,audio").forEach(media=>media.pause?.());
       }
       try{dialog.close()}catch(_){}
     });
@@ -1548,6 +1559,7 @@
       const bt=new Date(b[1][b[1].length-1]?.created_at||0).getTime();
       return bt-at;
     });
+    state.storyAuthorOrder=ordered.map(([authorId])=>authorId);
     let html=`<button class="story" data-own-story="1"><div class="story-ring"><div class="fallback">+</div></div><span>إضافة قصة</span></button>`;
     html+=ordered.map(([authorId,group])=>{
       const p=profiles[authorId]||{};
@@ -1574,12 +1586,29 @@
   }
 
   function moveStory(direction){
+    const step=direction<0?-1:1;
     const group=storyGroup(state.currentStoryAuthor);
     if(!group.length)return closeStoryViewer();
-    const next=Number(state.currentStoryIndex||0)+direction;
-    if(next<0||next>=group.length)return closeStoryViewer();
-    state.currentStoryIndex=next;
-    return openStoryViewer(group[next].id,{preserveGroup:true});
+
+    const next=Number(state.currentStoryIndex||0)+step;
+    if(next>=0&&next<group.length){
+      state.currentStoryIndex=next;
+      return openStoryViewer(group[next].id,{preserveGroup:true});
+    }
+
+    const authors=Array.isArray(state.storyAuthorOrder)?state.storyAuthorOrder:[];
+    const currentAuthorIndex=authors.indexOf(state.currentStoryAuthor);
+    const nextAuthorIndex=currentAuthorIndex+step;
+    if(currentAuthorIndex<0||nextAuthorIndex<0||nextAuthorIndex>=authors.length){
+      return closeStoryViewer();
+    }
+
+    const nextAuthor=authors[nextAuthorIndex];
+    const nextGroup=storyGroup(nextAuthor);
+    if(!nextGroup.length)return closeStoryViewer();
+    state.currentStoryAuthor=nextAuthor;
+    state.currentStoryIndex=step>0?0:nextGroup.length-1;
+    return openStoryViewer(nextGroup[state.currentStoryIndex].id,{preserveGroup:true});
   }
 
   async function storySharedDetails(story){
@@ -4644,6 +4673,50 @@
     return navigateTo("homePage");
   }
 
+  function normalizeNativePush(payload={}){
+    const data=payload&&typeof payload==="object"?payload:{};
+    const kind=String(data.kind||"system");
+    if(data.conversation_id){
+      return {kind:"message",entity_type:"conversation",entity_id:String(data.conversation_id)};
+    }
+    if(data.ticket_id){
+      return {kind:"support",entity_type:"support_ticket",entity_id:String(data.ticket_id)};
+    }
+    return {
+      kind,
+      entity_type:String(data.entity_type||kind||"system"),
+      entity_id:String(data.entity_id||""),
+      actor_id:data.actor_id?String(data.actor_id):""
+    };
+  }
+
+  async function consumePendingNativePush(){
+    if(!state.user||!state.pendingNativePush)return false;
+    const payload=state.pendingNativePush;
+    state.pendingNativePush=null;
+    try{
+      await handleNotificationTarget(normalizeNativePush(payload));
+      await loadNotificationsBadge().catch(()=>{});
+      return true;
+    }catch(error){
+      console.warn("ASHUR_PUSH_NAVIGATION_FAILED",error);
+      return false;
+    }
+  }
+
+  window.ASHUR_HANDLE_PUSH=(payload)=>{
+    try{
+      const data=typeof payload==="string"?JSON.parse(payload):payload;
+      if(!data||typeof data!=="object")return false;
+      state.pendingNativePush=data;
+      if(state.user)queueMicrotask(()=>consumePendingNativePush().catch(()=>{}));
+      return true;
+    }catch(error){
+      console.warn("ASHUR_PUSH_PAYLOAD_INVALID",error);
+      return false;
+    }
+  };
+
   $("#notificationsButton").onclick=async()=>{
     openDialog($("#notificationsDialog"));
     $("#notificationsList").innerHTML='<div class="empty">جارٍ تحميل الإشعارات...</div>';
@@ -6838,6 +6911,47 @@
       e.preventDefault();
       try{window.AshurNative.openExternal(href)}catch(_){}
     }
+  });
+
+  function suspendTransientActivity(){
+    clearTimeout(state.storyTimer);
+    state.storyTimer=null;
+    clearTimeout(state.chatRefreshTimer);
+    clearTimeout(state.inboxRefreshTimer);
+    for(const timer of state.reelViewTimers.values())clearTimeout(timer);
+    state.reelViewTimers.clear();
+    document.querySelectorAll("video,audio").forEach(media=>{
+      try{media.pause()}catch(_){}
+    });
+    closeInboxRealtime();
+    if($("#chatDialog")?.open)closeChatRealtime({resetMessages:false});
+  }
+
+  async function resumeForegroundState(){
+    if(!state.user)return;
+    await Promise.allSettled([checkRuntimeSettings(),loadNotificationsBadge()]);
+    if(state.activePage==="messagesPage"){
+      await loadConversations().catch(()=>{});
+      subscribeInboxRealtime();
+    }
+    if($("#chatDialog")?.open&&state.activeConversation){
+      await loadChat({quiet:true,markRead:true}).catch(()=>{});
+      subscribeChatRealtime();
+    }
+    if($("#storyViewerDialog")?.open&&state.currentStoryAuthor){
+      const group=storyGroup(state.currentStoryAuthor);
+      const current=group[Number(state.currentStoryIndex||0)];
+      if(current)await openStoryViewer(current.id,{preserveGroup:true}).catch(()=>{});
+    }
+    await consumePendingNativePush().catch(()=>{});
+  }
+
+  document.addEventListener("visibilitychange",()=>{
+    if(document.hidden){
+      suspendTransientActivity();
+      return;
+    }
+    resumeForegroundState().catch(error=>console.warn("ASHUR_FOREGROUND_REFRESH_FAILED",error));
   });
 
   try{window.AshurNative?.authReady?.()}catch(_){}

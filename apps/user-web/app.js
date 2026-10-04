@@ -143,6 +143,26 @@
     isValid:(page)=>Boolean(document.getElementById(page))
   });
 
+  const nativeShell=window.location.hostname==="appassets.androidplatform.net";
+  const browserRouteKey="ashurPage";
+
+  function syncBrowserRoute(page,{replace=false}={}){
+    if(nativeShell||!window.history?.pushState)return;
+    const currentState=history.state&&typeof history.state==="object"?history.state:{};
+    const nextState={...currentState,[browserRouteKey]:page};
+    try{
+      if(replace)history.replaceState(nextState,"");
+      else if(currentState?.[browserRouteKey]!==page)history.pushState(nextState,"");
+    }catch(error){
+      console.warn("ASHUR_BROWSER_HISTORY_FAILED",error);
+    }
+  }
+
+  function currentOpenDialog(){
+    const dialogs=[...document.querySelectorAll("dialog[open]")];
+    return dialogs.length?dialogs[dialogs.length-1]:null;
+  }
+
   const escapeHtml = (v="") => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   const initials = (name="آشور") => escapeHtml(name.trim().slice(0,1) || "آ");
   const richText = (value="") => {
@@ -223,7 +243,7 @@
 
   function avatar(profile, cls="avatar"){
     if (profile?.avatar_media_id) return `<img class="${cls}" data-media-id="${profile.avatar_media_id}" alt="">`;
-    return `<div class="${cls}" style="display:grid;place-items:center;background:#2a231e;color:#d7b16f;font-weight:800">${initials(profile?.name)}</div>`;
+    return `<div class="${cls} avatar-fallback">${initials(profile?.name)}</div>`;
   }
 
   async function mediaAccess(mediaId){
@@ -954,6 +974,7 @@
     onboarding?.classList.toggle("hidden",!showIntro);
     $("#auth").classList.toggle("hidden",loggedIn||showIntro);
     $("#app").classList.toggle("hidden",!loggedIn);
+    if(loggedIn)syncBrowserRoute(state.activePage||"homePage",{replace:true});
     if(!loggedIn){
       closeTransientDialogs();
       router.reset("homePage");
@@ -1505,7 +1526,20 @@
     topbar.dataset.page=page||"homePage";
   }
 
-  async function navigateTo(page,{fromBack=false,replace=false}={}){
+  function renderPageLoadError(page,error){
+    const message=error?.message||"تعذر تحميل هذه الصفحة.";
+    const targets={
+      homePage:"#feed",
+      searchPage:"#searchResults",
+      reelsPage:"#reelsFeed",
+      messagesPage:"#conversationList",
+      profilePage:"#profileContent"
+    };
+    const root=$(targets[page]||"");
+    if(root)root.innerHTML=errorMarkup(message,page);
+  }
+
+  async function navigateTo(page,{fromBack=false,replace=false,browserPop=false}={}){
     const previous=state.activePage||$(".page.active")?.id||"homePage";
     const pageFeature={searchPage:"search",reelsPage:"reels",messagesPage:"messages"}[page];
     if(pageFeature&&!runtimeFeatureEnabled(pageFeature)){
@@ -1513,13 +1547,26 @@
       page="homePage";
       replace=true;
     }
+
     page=router.navigate(page,{current:previous,fromBack,replace});
     closeTransientDialogs();
     state.activePage=page;
-    store.emit("route:change",{page,previous,fromBack,replace});
+    store.emit("route:change",{page,previous,fromBack,replace,browserPop});
     updateTopbarContext(page);
-    $document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+
+    document.querySelectorAll(".nav-item").forEach(item=>{
+      const active=item.dataset.page===page;
+      item.classList.toggle("active",active);
+      item.setAttribute("aria-current",active?"page":"false");
+    });
+    document.querySelectorAll(".page").forEach(view=>{
+      const active=view.id===page;
+      view.classList.toggle("active",active);
+      view.toggleAttribute("aria-hidden",!active);
+    });
+
+    if(!browserPop)syncBrowserRoute(page,{replace:replace||fromBack});
+
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
       state.reelObserver?.disconnect?.();
@@ -1527,23 +1574,62 @@
       for(const timer of state.reelViewTimers.values())clearTimeout(timer);
       state.reelViewTimers.clear();
     }
+
     const pageApi={loadExplore,loadReels,loadConversations,subscribeInboxRealtime,closeInboxRealtime,loadProfile};
-    if(window.AshurPages?.enter){
-      await window.AshurPages.enter(page,{previous,fromBack,replace,state,api:pageApi});
-    }else{
-      if(page!=="messagesPage")closeInboxRealtime();
-      if(page==="searchPage")await loadExplore();
-      if(page==="reelsPage")await loadReels();
-      if(page==="messagesPage"){
-        await loadConversations();
-        subscribeInboxRealtime();
+    try{
+      if(window.AshurPages?.enter){
+        await window.AshurPages.enter(page,{previous,fromBack,replace,state,api:pageApi});
+      }else{
+        if(page!=="messagesPage")closeInboxRealtime();
+        if(page==="searchPage")await loadExplore();
+        if(page==="reelsPage")await loadReels();
+        if(page==="messagesPage"){
+          await loadConversations();
+          subscribeInboxRealtime();
+        }
+        if(page==="profilePage")await loadProfile();
       }
-      if(page==="profilePage")await loadProfile();
+    }catch(error){
+      console.error("ASHUR_PAGE_ENTER_FAILED",page,error);
+      renderPageLoadError(page,error);
     }
-    window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
+
+    if(page!=="reelsPage"){
+      window.scrollTo({top:0,behavior:fromBack||browserPop?"auto":"smooth"});
+    }
+    return page;
   }
-  $document.querySelectorAll(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
-  $("#brandButton").onclick=()=>navigateTo("homePage");
+
+  document.querySelectorAll(".nav-item").forEach(btn=>{
+    btn.onclick=()=>{
+      if(btn.dataset.page===state.activePage){
+        if(btn.dataset.page==="homePage")window.scrollTo({top:0,behavior:"smooth"});
+        return;
+      }
+      navigateTo(btn.dataset.page).catch(error=>console.error("ASHUR_NAVIGATION_FAILED",error));
+    };
+  });
+  $("#brandButton").onclick=()=>navigateTo("homePage").catch(error=>console.error("ASHUR_NAVIGATION_FAILED",error));
+
+  if(!nativeShell){
+    try{
+      const initial=$(".page.active")?.id||"homePage";
+      syncBrowserRoute(initial,{replace:true});
+    }catch(_){}
+
+    window.addEventListener("popstate",event=>{
+      if(!state.user)return;
+      const dialog=currentOpenDialog();
+      if(dialog){
+        window.ASHUR_HANDLE_BACK?.();
+        syncBrowserRoute(state.activePage||"homePage",{replace:false});
+        return;
+      }
+      const target=event.state?.[browserRouteKey]||"homePage";
+      navigateTo(target,{fromBack:true,replace:true,browserPop:true})
+        .catch(error=>console.error("ASHUR_BROWSER_BACK_FAILED",error));
+    });
+  }
 
   async function loadHome(){
     const status=$("#homeStatus");

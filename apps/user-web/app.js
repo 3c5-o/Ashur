@@ -953,8 +953,8 @@
       router.reset("homePage");
       state.activePage="homePage";
       store.emit("session:reset",{activePage:"homePage"});
-      $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
-      $(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+      document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
 
@@ -1484,8 +1484,8 @@
     state.activePage=page;
     store.emit("route:change",{page,previous,fromBack,replace});
     updateTopbarContext(page);
-    $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    $document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id===page));
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
       state.reelObserver?.disconnect?.();
@@ -1508,7 +1508,7 @@
     }
     window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
   }
-  $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $document.querySelectorAll(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){

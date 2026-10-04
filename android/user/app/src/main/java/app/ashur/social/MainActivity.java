@@ -39,10 +39,12 @@ public class MainActivity extends Activity {
     private static final int AUDIO_PERMISSION_REQUEST = 4108;
     private static final int MEDIA_PERMISSION_REQUEST = 4109;
     private static final String LOCAL_APP_URL = "https://appassets.androidplatform.net/assets/www/index.html";
+    private static final String EXTRA_PUSH_DATA = "ashur_push_data";
     private WebView webView;
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermissionRequest;
     private String pendingDeepLink;
+    private String pendingPushData;
     private long lastBackPressedAt = 0L;
 
     @Override
@@ -50,6 +52,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         pendingDeepLink = getIntent() != null ? getIntent().getDataString() : null;
+        pendingPushData = getIntent() != null ? getIntent().getStringExtra(EXTRA_PUSH_DATA) : null;
 
         webView = new WebView(this);
         setContentView(webView);
@@ -117,6 +120,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 dispatchPendingDeepLink();
+                dispatchPendingPushData();
             }
         });
 
@@ -193,6 +197,15 @@ public class MainActivity extends Activity {
         if (deepLink != null && !deepLink.isBlank()) {
             handleDeepLink(deepLink);
         }
+        handlePushIntent(intent);
+    }
+
+    private void handlePushIntent(Intent intent) {
+        if (intent == null) return;
+        String payload = intent.getStringExtra(EXTRA_PUSH_DATA);
+        if (payload == null || payload.isBlank()) return;
+        pendingPushData = payload;
+        dispatchPendingPushData();
     }
 
     private void handleDeepLink(String deepLink) {
@@ -211,6 +224,21 @@ public class MainActivity extends Activity {
                 handled -> {
                     if ("true".equals(handled)) {
                         pendingDeepLink = null;
+                    }
+                }
+        );
+    }
+
+    private void dispatchPendingPushData() {
+        if (webView == null || pendingPushData == null || pendingPushData.isBlank()) return;
+        final String payload = pendingPushData;
+        webView.evaluateJavascript(
+                "(function(){try{if(window.ASHUR_HANDLE_PUSH){return !!window.ASHUR_HANDLE_PUSH(" +
+                        JSONObject.quote(payload) +
+                        ");}return false;}catch(e){return false;}})()",
+                handled -> {
+                    if ("true".equals(handled)) {
+                        pendingPushData = null;
                     }
                 }
         );
@@ -326,7 +354,10 @@ public class MainActivity extends Activity {
     public class AshurBridge {
         @JavascriptInterface
         public void authReady() {
-            runOnUiThread(() -> dispatchPendingDeepLink());
+            runOnUiThread(() -> {
+                dispatchPendingDeepLink();
+                dispatchPendingPushData();
+            });
         }
 
         @JavascriptInterface

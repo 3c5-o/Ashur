@@ -9,6 +9,6 @@
     authRedirectUrl: nativeHost ? "ashur://reset-password" : "https://3c5-o.github.io/Ashur/app/",
     webVendorFallbackUrl: nativeHost ? "" : "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js",
     maxUploadMb: 60,
-    appVersion: "1.9.0"
+    appVersion: "2.0.0"
   };
 })();

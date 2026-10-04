@@ -2,7 +2,7 @@ name: بناء تطبيقات آشور
 
 on:
   push:
-    branches: [main, feature/ashur-1.2-full-build]
+    branches: [main, feature/ashur-1.2-full-build, "refactor/**"]
     paths:
       - "android/**"
       - "apps/user-web/**"

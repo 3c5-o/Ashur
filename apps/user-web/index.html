@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="./style.css?v=1.9.0">
   <link rel="stylesheet" href="./premium-v3.css?v=1.9.0">
   <link rel="stylesheet" href="./stability-v4.css?v=1.9.0">
+  <link rel="stylesheet" href="./reference-ui-v5.css?v=2.0.0">
   <!-- ASHUR_UI_STABILITY_1_9_0 -->
   <!-- ASHUR_PREMIUM_MINIMAL_1_9_0 -->
 </head>
@@ -17,14 +18,40 @@
     <div class="splash-glow"></div>
     <img src="./assets/logo.svg" class="splash-logo" alt="آشور">
     <div class="splash-name">آشور</div>
-    <div class="splash-subtitle">تواصل بطريقتك</div>
+    <div class="splash-subtitle">مستقبل التواصل الاجتماعي العربي</div>
   </div>
+
+
+  <section id="onboarding" class="onboarding-shell hidden" aria-label="الترحيب بآشور">
+    <div class="onboarding-card">
+      <div class="onboarding-visual">
+        <div class="onboarding-orbit orbit-one"></div>
+        <div class="onboarding-orbit orbit-two"></div>
+        <div class="onboarding-mark"><img src="./assets/logo.svg" alt="آشور"></div>
+        <span class="onboarding-chip chip-one">قصص</span>
+        <span class="onboarding-chip chip-two">ريلز</span>
+        <span class="onboarding-chip chip-three">مجتمع</span>
+      </div>
+      <div class="onboarding-copy">
+        <span class="eyebrow">أهلاً بك في آشور</span>
+        <h1>مجتمع عربي<br>بروح أصيلة</h1>
+        <p>اكتشف القصص، شارك لحظاتك، وتواصل مع مجتمعك في تجربة عربية مصممة للهاتف من البداية.</p>
+        <div class="onboarding-points" aria-label="مزايا آشور">
+          <div><b>01</b><span>قصص وريلز سريعة وسلسة</span></div>
+          <div><b>02</b><span>رسائل خاصة ومجموعات</span></div>
+          <div><b>03</b><span>خصوصية وتحكم بالمحتوى</span></div>
+        </div>
+        <button id="onboardingStart" class="onboarding-primary" type="button">ابدأ الآن</button>
+        <button id="onboardingLogin" class="onboarding-secondary" type="button">لدي حساب بالفعل</button>
+      </div>
+    </div>
+  </section>
 
   <div id="auth" class="auth-shell hidden">
     <section class="auth-card">
       <div class="auth-brand">
         <div class="auth-logo-wrap"><img src="./assets/logo.svg" alt="آشور"></div>
-        <div><h1>آشور</h1><p>منصة اجتماعية عربية حديثة</p></div>
+        <div><h1>آشور</h1><p>مجتمع عربي بروح أصيلة</p></div>
       </div>
 
       <div class="auth-tabs">

@@ -1201,6 +1201,18 @@
     if(!error)await refreshProfile();
   }
 
+  function startupTimeout(promise,ms,label="startup"){
+    let timer;
+    const timeout=new Promise((_,reject)=>{
+      timer=setTimeout(()=>{
+        const error=new Error("startup_timeout:"+label);
+        error.code="ASHUR_STARTUP_TIMEOUT";
+        reject(error);
+      },ms);
+    });
+    return Promise.race([Promise.resolve(promise),timeout]).finally(()=>clearTimeout(timer));
+  }
+
   async function boot(){
     const splash=$("#splash");
     const closeSplash=()=>{
@@ -1208,22 +1220,33 @@
       splash.style.opacity="0";
       setTimeout(()=>splash.remove(),240);
     };
-    const fallbackTimer=setTimeout(closeSplash,5000);
+    const fallbackTimer=setTimeout(closeSplash,4500);
     setNetworkState(navigator.onLine);
     rememberPendingConfirmation(pendingConfirmationEmail());
 
     try{
-      await checkRuntimeSettings().catch(()=>{});
-      const {data:{session},error:sessionError}=await client.auth.getSession();
+      await startupTimeout(checkRuntimeSettings().catch(()=>{}),3500,"runtime-settings").catch(()=>{});
+      const sessionResult=await startupTimeout(client.auth.getSession(),5000,"session");
+      const {data:{session},error:sessionError}=sessionResult;
       if(sessionError)throw sessionError;
       if(!session){
         clearAuthSession();
         return;
       }
-      await hydrateAuthenticatedSession(session,{reason:"boot"});
+      await startupTimeout(hydrateAuthenticatedSession(session,{reason:"boot"}),9000,"hydrate");
+    }catch(error){
+      console.error("ASHUR_STARTUP_RECOVERY",error);
+      state.user=null;
+      state.profile=null;
+      showApp(false);
+      showAuthMessage(
+        error?.code==="ASHUR_STARTUP_TIMEOUT"
+          ?"الاتصال بالخدمة بطيء. يمكنك المحاولة من جديد الآن."
+          :"تعذر إكمال بدء التطبيق. تحقق من الاتصال وحاول مرة أخرى."
+      );
     }finally{
       clearTimeout(fallbackTimer);
-      setTimeout(closeSplash,350);
+      setTimeout(closeSplash,120);
     }
   }
 
@@ -6992,6 +7015,8 @@
     }
     return false;
   };
+
+  window.ASHUR_APP_RUNTIME_READY=true;
 
   boot().catch(e=>{
     console.error("ASHUR_BOOT_ERROR",e);

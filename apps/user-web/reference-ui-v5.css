@@ -468,3 +468,129 @@ html[data-theme="dark"] .profile-cover{background:linear-gradient(135deg,#0b2517
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+
+/* ASHUR Web consistency pass 2.0.1
+   Remap legacy tokens so every existing screen inherits the approved white/emerald palette. */
+html[data-theme="light"]{
+  --bg:var(--ref-bg);
+  --surface:var(--ref-card);
+  --surface-2:var(--ref-card-2);
+  --surface-3:#eef4f0;
+  --line:var(--ref-line);
+  --line-strong:var(--ref-line-strong);
+  --text:var(--ref-text);
+  --text-2:var(--ref-text-2);
+  --muted:var(--ref-muted);
+  --brand:var(--ref-green);
+  --brand-2:var(--ref-green-2);
+  --danger:var(--ref-danger);
+}
+html[data-theme="dark"]{
+  --bg:var(--ref-bg);
+  --surface:var(--ref-card);
+  --surface-2:var(--ref-card-2);
+  --surface-3:#172019;
+  --line:var(--ref-line);
+  --line-strong:var(--ref-line-strong);
+  --text:var(--ref-text);
+  --text-2:var(--ref-text-2);
+  --muted:var(--ref-muted);
+  --brand:var(--ref-green);
+  --brand-2:var(--ref-green-2);
+  --danger:#ff6976;
+}
+
+.app,.main-shell,.page,.messages-page,.profile-page,.search-page-v8{
+  background:var(--ref-bg)!important;
+  color:var(--ref-text)!important;
+}
+body:has(.app:not(.hidden)),body:has(.auth-shell:not(.hidden)){
+  background:var(--ref-bg)!important;
+}
+.avatar-fallback,.fallback.avatar{
+  display:grid!important;
+  place-items:center!important;
+  background:var(--ref-green-soft)!important;
+  color:var(--ref-green)!important;
+  border-color:var(--ref-green-line)!important;
+  font-weight:900!important;
+}
+.caption,.profile-result,.search-post-owner,.conversation-item,
+.close-btn,.publish-options button,.settings-row,.profile-settings-fab,
+.error-state b,.error-state button,.creator-circle,.list-card,
+.public-profile-head,.conversation-main,.conversation-preview{
+  color:var(--ref-text)!important;
+}
+.caption,.conversation-preview,.conversation-item small,.list-card small,
+.search-context-hint,.messages-head small,.profile-link{
+  color:var(--ref-text-2)!important;
+}
+.close-btn,.publish-options button,.error-state button,.creator-circle,
+.secondary-wide,.small-button,.list-card{
+  background:var(--ref-card)!important;
+  border-color:var(--ref-line)!important;
+}
+.publish-options button:active,.list-card:active,.settings-row:active,
+.conversation-item:active,.small-button:active{
+  background:var(--ref-green-soft)!important;
+}
+input,textarea,select,.comment-form textarea{
+  background:var(--ref-card)!important;
+  color:var(--ref-text)!important;
+  border-color:var(--ref-line-strong)!important;
+}
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+html[data-theme="dark"] .comment-form textarea{
+  background:var(--ref-card-2)!important;
+}
+input::placeholder,textarea::placeholder{color:var(--ref-muted)!important;opacity:1}
+.sheet,.panel-dialog,.public-profile-dialog,.conversation-info-dialog,
+.new-conversation-dialog,.edit-profile-dialog,.settings-dialog,.comments-sheet{
+  background:var(--ref-bg)!important;
+  color:var(--ref-text)!important;
+}
+dialog::backdrop{background:rgba(1,8,4,.52)}
+.profile-result,.search-post-owner{color:var(--ref-text)!important}
+.search-post-owner small{color:var(--ref-muted)!important}
+.search-post-open{background:var(--ref-card)!important}
+.search-post-card>p{color:var(--ref-text-2)!important}
+.notification-item.unread{
+  border-color:var(--ref-green-line)!important;
+  background:linear-gradient(135deg,var(--ref-green-soft),var(--ref-card))!important;
+}
+.notification-item time{color:var(--ref-muted)!important}
+.messages-search svg,.search-box-v8 svg{stroke:var(--ref-muted)!important}
+.nav-item{isolation:isolate}
+.nav-item::before{
+  content:"";position:absolute;inset:5px;border-radius:13px;
+  background:transparent;z-index:-1;transition:background .15s ease;
+}
+.nav-item.active::before{background:var(--ref-green-soft)}
+.nav-item:focus-visible{outline:2px solid color-mix(in srgb,var(--ref-green) 48%,transparent)!important;outline-offset:-2px}
+.topbar[data-page]:not([data-page="homePage"]) .publish-action{
+  background:var(--ref-card)!important;color:var(--ref-green)!important;border-color:var(--ref-green-line)!important;
+}
+.topbar[data-page="reelsPage"]{
+  background:rgba(0,0,0,.72)!important;border-bottom-color:rgba(255,255,255,.10)!important;
+}
+.topbar[data-page="reelsPage"] .top-brand,
+.topbar[data-page="reelsPage"] .top-action{
+  color:#fff!important;
+}
+.topbar[data-page="reelsPage"] .top-action{
+  background:rgba(0,0,0,.34)!important;border-color:rgba(255,255,255,.14)!important;
+}
+#homePage,#searchPage,#messagesPage,#profilePage{
+  min-height:calc(100dvh - 60px - 76px - var(--safe-top) - var(--safe-bottom))!important;
+}
+.page[aria-hidden="true"]{pointer-events:none!important}
+.page.active{pointer-events:auto!important}
+@media (hover:hover){
+  .nav-item:hover{color:var(--ref-green)!important}
+  .settings-row:hover,.conversation-item:hover,.list-card:hover,.search-account-card:hover{
+    background:var(--ref-green-soft)!important;
+  }
+}

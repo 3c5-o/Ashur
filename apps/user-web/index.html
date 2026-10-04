@@ -1,17 +1,20 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#050706">
+  <meta name="theme-color" content="#f6f8f7">
   <meta name="color-scheme" content="dark light">
   <title>آشور</title>
-  <link rel="stylesheet" href="./style.css?v=2.0.0">
-  <link rel="stylesheet" href="./premium-v3.css?v=2.0.0">
-  <link rel="stylesheet" href="./stability-v4.css?v=2.0.0">
-  <link rel="stylesheet" href="./reference-ui-v5.css?v=2.0.0">
-  <!-- ASHUR_UI_STABILITY_2_0_0 -->
-  <!-- ASHUR_PREMIUM_MINIMAL_2_0_0 -->
+  <script>
+    (()=>{try{document.documentElement.dataset.theme=localStorage.getItem("ashur_theme_v1")==="dark"?"dark":"light"}catch(_){document.documentElement.dataset.theme="light"}})();
+  </script>
+  <link rel="stylesheet" href="./style.css?v=2.0.1-web">
+  <link rel="stylesheet" href="./premium-v3.css?v=2.0.1-web">
+  <link rel="stylesheet" href="./stability-v4.css?v=2.0.1-web">
+  <link rel="stylesheet" href="./reference-ui-v5.css?v=2.0.1-web">
+  <!-- ASHUR_UI_STABILITY_2_0_1_WEB -->
+  <!-- ASHUR_PREMIUM_MINIMAL_2_0_1_WEB -->
 </head>
 <body>
   <div id="splash" class="splash">
@@ -658,18 +661,18 @@
 
   <div id="mentionSuggestions" class="mention-suggestions hidden" role="listbox" aria-label="اقتراحات الحسابات"></div>
 
-  <script src="./config.js?v=2.0.0"></script>
-  <script src="./core.js?v=2.0.0"></script>
-  <script src="./auth-core.js?v=2.0.0"></script>
-  <script src="./profile-core.js?v=2.0.0"></script>
-  <script src="./pages/registry.js?v=2.0.0"></script>
-  <script src="./pages/home.js?v=2.0.0"></script>
-  <script src="./pages/search.js?v=2.0.0"></script>
-  <script src="./pages/reels.js?v=2.0.0"></script>
-  <script src="./pages/messages.js?v=2.0.0"></script>
-  <script src="./pages/profile.js?v=2.0.0"></script>
-  <script src="./pages/publish.js?v=2.0.0"></script>
-  <script src="./pages/settings.js?v=2.0.0"></script>
+  <script src="./config.js?v=2.0.1-web"></script>
+  <script src="./core.js?v=2.0.1-web"></script>
+  <script src="./auth-core.js?v=2.0.1-web"></script>
+  <script src="./profile-core.js?v=2.0.1-web"></script>
+  <script src="./pages/registry.js?v=2.0.1-web"></script>
+  <script src="./pages/home.js?v=2.0.1-web"></script>
+  <script src="./pages/search.js?v=2.0.1-web"></script>
+  <script src="./pages/reels.js?v=2.0.1-web"></script>
+  <script src="./pages/messages.js?v=2.0.1-web"></script>
+  <script src="./pages/profile.js?v=2.0.1-web"></script>
+  <script src="./pages/publish.js?v=2.0.1-web"></script>
+  <script src="./pages/settings.js?v=2.0.1-web"></script>
   <script>
     (() => {
       let finished = false;
@@ -706,7 +709,7 @@
         if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
         if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=2.0.0-github-pages";
+        script.src = "./app.js?v=2.0.1-web";
         script.onload = () => {
           appScriptLoaded = true;
           if (window.ASHUR_APP_RUNTIME_READY) finished = true;

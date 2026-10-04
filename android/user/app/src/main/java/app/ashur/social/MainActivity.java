@@ -16,6 +16,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Toast;
 
 import org.json.JSONObject;
 
@@ -42,6 +43,7 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private PermissionRequest pendingPermissionRequest;
     private String pendingDeepLink;
+    private long lastBackPressedAt = 0L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -278,7 +280,15 @@ public class MainActivity extends Activity {
                 "(function(){try{return window.ASHUR_HANDLE_BACK ? !!window.ASHUR_HANDLE_BACK() : false;}catch(e){return false;}})()",
                 handled -> {
                     if (!"true".equals(handled)) {
-                        MainActivity.super.onBackPressed();
+                        long now = System.currentTimeMillis();
+                        if (now - lastBackPressedAt <= 1800L) {
+                            MainActivity.super.onBackPressed();
+                        } else {
+                            lastBackPressedAt = now;
+                            Toast.makeText(MainActivity.this, "اضغط رجوع مرة ثانية للخروج", Toast.LENGTH_SHORT).show();
+                        }
+                    } else {
+                        lastBackPressedAt = 0L;
                     }
                 }
         );

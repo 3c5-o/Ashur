@@ -17,8 +17,21 @@
   const $$ = (s) => [...document.querySelectorAll(s)];
 
   const THEME_KEY="ashur_theme_v1";
+  const ONBOARDING_KEY="ashur_onboarding_seen_v2";
   function currentTheme(){
-    try{return localStorage.getItem(THEME_KEY)==="light"?"light":"dark"}catch{return "dark"}
+    try{
+      const saved=localStorage.getItem(THEME_KEY);
+      return saved==="dark"?"dark":"light";
+    }catch{return "light"}
+  }
+  function shouldShowOnboarding(){
+    try{return localStorage.getItem(ONBOARDING_KEY)!=="1"}catch{return false}
+  }
+  function completeOnboarding(view="login"){
+    try{localStorage.setItem(ONBOARDING_KEY,"1")}catch(_){}
+    $("#onboarding")?.classList.add("hidden");
+    $("#auth")?.classList.remove("hidden");
+    setAuthView(view);
   }
   function syncThemeControls(theme=currentTheme()){
     $$("[data-theme-choice]").forEach(button=>{
@@ -930,15 +943,18 @@
   });
 
   function showApp(loggedIn){
-    $("#auth").classList.toggle("hidden",loggedIn);
+    const onboarding=$("#onboarding");
+    const showIntro=!loggedIn&&!recoveryModeActive&&shouldShowOnboarding();
+    onboarding?.classList.toggle("hidden",!showIntro);
+    $("#auth").classList.toggle("hidden",loggedIn||showIntro);
     $("#app").classList.toggle("hidden",!loggedIn);
     if(!loggedIn){
       closeTransientDialogs();
       router.reset("homePage");
       state.activePage="homePage";
       store.emit("session:reset",{activePage:"homePage"});
-      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
-      $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+      document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
 
@@ -1247,6 +1263,11 @@
     });
   });
 
+  const onboardingStart=$("#onboardingStart");
+  const onboardingLogin=$("#onboardingLogin");
+  if(onboardingStart)onboardingStart.onclick=()=>completeOnboarding("register");
+  if(onboardingLogin)onboardingLogin.onclick=()=>completeOnboarding("login");
+
   $("#loginTab").onclick=()=>setAuthView("login");
   $("#registerTab").onclick=()=>setAuthView("register");
 
@@ -1463,8 +1484,8 @@
     state.activePage=page;
     store.emit("route:change",{page,previous,fromBack,replace});
     updateTopbarContext(page);
-    $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
-    $$(".page").forEach(x=>x.classList.toggle("active",x.id===page));
+    $document.querySelectorAll(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page===page));
+    $document.querySelectorAll(".page").forEach(x=>x.classList.toggle("active",x.id===page));
     if(page!=="reelsPage"){
       $("#reelsFeed")?.querySelectorAll("video").forEach(video=>video.pause());
       state.reelObserver?.disconnect?.();
@@ -1487,7 +1508,7 @@
     }
     window.scrollTo({top:0,behavior:fromBack?"auto":"smooth"});
   }
-  $$(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
+  $document.querySelectorAll(".nav-item").forEach(btn=>btn.onclick=()=>navigateTo(btn.dataset.page));
   $("#brandButton").onclick=()=>navigateTo("homePage");
 
   async function loadHome(){

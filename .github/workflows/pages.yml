@@ -88,8 +88,9 @@ jobs:
           APP="${SITE}app/"
           for attempt in {1..12}; do
             if curl -fsSL --connect-timeout 10 --max-time 25 "$SITE" -o /tmp/site.html               && curl -fsSL --connect-timeout 10 --max-time 25 "$APP" -o /tmp/app.html               && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}config.js?v=2.0.0" -o /tmp/app-config.js \
-              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}app.js?v=2.0.1-web" -o /tmp/app-runtime.js \
-              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}reference-ui-v5.css?v=2.0.1-web" -o /tmp/reference-ui.css; then
+              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}app.js?v=2.0.2-web" -o /tmp/app-runtime.js \
+              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}navigation.js?v=2.0.2-web" -o /tmp/navigation.js \
+              && curl -fsSL --connect-timeout 10 --max-time 25 "${APP}reference-ui-v5.css?v=2.0.2-web" -o /tmp/reference-ui.css; then
               break
             fi
             if [ "$attempt" -eq 12 ]; then
@@ -104,10 +105,14 @@ jobs:
         run: |
           set -euo pipefail
           grep -q "آشور" /tmp/site.html
-          grep -q 'reference-ui-v5.css?v=2.0.1-web' /tmp/app.html
-          grep -q 'app.js?v=2.0.1-web' /tmp/app.html
+          grep -q 'reference-ui-v5.css?v=2.0.2-web' /tmp/app.html
+          grep -q 'app.js?v=2.0.2-web' /tmp/app.html
+          grep -q 'navigation.js?v=2.0.2-web' /tmp/app.html
           grep -q 'browserRouteKey' /tmp/app-runtime.js
           grep -q 'popstate' /tmp/app-runtime.js
+          grep -q 'AshurNavigation.setHandler' /tmp/app-runtime.js
+          grep -q 'AshurNavigation' /tmp/navigation.js
+          grep -q '.bottom-nav .nav-item\[data-page\]' /tmp/navigation.js
           if grep -q '\$document' /tmp/app-runtime.js; then
             echo "تم العثور على مرجع تنقل غير صالح في نسخة الويب"
             exit 1

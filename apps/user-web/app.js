@@ -17,8 +17,21 @@
   const $$ = (s) => [...document.querySelectorAll(s)];
 
   const THEME_KEY="ashur_theme_v1";
+  const ONBOARDING_KEY="ashur_onboarding_seen_v2";
   function currentTheme(){
-    try{return localStorage.getItem(THEME_KEY)==="light"?"light":"dark"}catch{return "dark"}
+    try{
+      const saved=localStorage.getItem(THEME_KEY);
+      return saved==="dark"?"dark":"light";
+    }catch{return "light"}
+  }
+  function shouldShowOnboarding(){
+    try{return localStorage.getItem(ONBOARDING_KEY)!=="1"}catch{return false}
+  }
+  function completeOnboarding(view="login"){
+    try{localStorage.setItem(ONBOARDING_KEY,"1")}catch(_){}
+    $("#onboarding")?.classList.add("hidden");
+    $("#auth")?.classList.remove("hidden");
+    setAuthView(view);
   }
   function syncThemeControls(theme=currentTheme()){
     $$("[data-theme-choice]").forEach(button=>{
@@ -930,15 +943,18 @@
   });
 
   function showApp(loggedIn){
-    $("#auth").classList.toggle("hidden",loggedIn);
+    const onboarding=$("#onboarding");
+    const showIntro=!loggedIn&&!recoveryModeActive&&shouldShowOnboarding();
+    onboarding?.classList.toggle("hidden",!showIntro);
+    $("#auth").classList.toggle("hidden",loggedIn||showIntro);
     $("#app").classList.toggle("hidden",!loggedIn);
     if(!loggedIn){
       closeTransientDialogs();
       router.reset("homePage");
       state.activePage="homePage";
       store.emit("session:reset",{activePage:"homePage"});
-      $$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
-      $$(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
+      $(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.page==="homePage"));
+      $(".page").forEach(x=>x.classList.toggle("active",x.id==="homePage"));
     }
   }
 
@@ -1246,6 +1262,11 @@
       handleAuthEvent(event,session).catch(error=>console.error("ASHUR_AUTH_EVENT_ERROR",event,error));
     });
   });
+
+  const onboardingStart=$("#onboardingStart");
+  const onboardingLogin=$("#onboardingLogin");
+  if(onboardingStart)onboardingStart.onclick=()=>completeOnboarding("register");
+  if(onboardingLogin)onboardingLogin.onclick=()=>completeOnboarding("login");
 
   $("#loginTab").onclick=()=>setAuthView("login");
   $("#registerTab").onclick=()=>setAuthView("register");

@@ -1554,16 +1554,20 @@
     store.emit("route:change",{page,previous,fromBack,replace,browserPop});
     updateTopbarContext(page);
 
-    document.querySelectorAll(".nav-item").forEach(item=>{
-      const active=item.dataset.page===page;
-      item.classList.toggle("active",active);
-      item.setAttribute("aria-current",active?"page":"false");
-    });
-    document.querySelectorAll(".page").forEach(view=>{
-      const active=view.id===page;
-      view.classList.toggle("active",active);
-      view.toggleAttribute("aria-hidden",!active);
-    });
+    if(window.AshurNavigation?.activate){
+      window.AshurNavigation.activate(page);
+    }else{
+      document.querySelectorAll(".nav-item").forEach(item=>{
+        const active=item.dataset.page===page;
+        item.classList.toggle("active",active);
+        item.setAttribute("aria-current",active?"page":"false");
+      });
+      document.querySelectorAll(".page").forEach(view=>{
+        const active=view.id===page;
+        view.classList.toggle("active",active);
+        view.setAttribute("aria-hidden",active?"false":"true");
+      });
+    }
 
     if(!browserPop)syncBrowserRoute(page,{replace:replace||fromBack});
 
@@ -1600,15 +1604,20 @@
     return page;
   }
 
-  document.querySelectorAll(".nav-item").forEach(btn=>{
-    btn.onclick=()=>{
-      if(btn.dataset.page===state.activePage){
-        if(btn.dataset.page==="homePage")window.scrollTo({top:0,behavior:"smooth"});
-        return;
+  if(window.AshurNavigation?.setHandler){
+    window.AshurNavigation.setHandler(async(page,meta={})=>{
+      if(page===state.activePage){
+        if(page==="homePage")window.scrollTo({top:0,behavior:"smooth"});
+        return page;
       }
-      navigateTo(btn.dataset.page).catch(error=>console.error("ASHUR_NAVIGATION_FAILED",error));
-    };
-  });
+      return navigateTo(page,{browserPop:Boolean(meta.browserPop)});
+    });
+    window.AshurNavigation.activate(state.activePage||"homePage");
+  }else{
+    document.querySelectorAll(".nav-item").forEach(btn=>{
+      btn.onclick=()=>navigateTo(btn.dataset.page).catch(error=>console.error("ASHUR_NAVIGATION_FAILED",error));
+    });
+  }
   $("#brandButton").onclick=()=>navigateTo("homePage").catch(error=>console.error("ASHUR_NAVIGATION_FAILED",error));
 
   if(!nativeShell){
@@ -7101,6 +7110,17 @@
     }
     return false;
   };
+
+  window.ASHUR_DEBUG_ROUTE=()=>({
+    activePage:state.activePage,
+    domActive:$(".page.active")?.id||null,
+    history:[...(state.pageHistory||[])],
+    nav:[...document.querySelectorAll(".nav-item[data-page]")].map(button=>({
+      page:button.dataset.page,
+      active:button.classList.contains("active"),
+      hidden:button.classList.contains("hidden")
+    }))
+  });
 
   window.ASHUR_APP_RUNTIME_READY=true;
 

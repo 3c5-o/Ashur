@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="./style.css?v=2.0.1-web">
   <link rel="stylesheet" href="./premium-v3.css?v=2.0.1-web">
   <link rel="stylesheet" href="./stability-v4.css?v=2.0.1-web">
-  <link rel="stylesheet" href="./reference-ui-v5.css?v=2.0.1-web">
+  <link rel="stylesheet" href="./reference-ui-v5.css?v=2.0.2-web">
   <!-- ASHUR_UI_STABILITY_2_0_1_WEB -->
   <!-- ASHUR_PREMIUM_MINIMAL_2_0_1_WEB -->
 </head>
@@ -665,6 +665,7 @@
   <script src="./core.js?v=2.0.1-web"></script>
   <script src="./auth-core.js?v=2.0.1-web"></script>
   <script src="./profile-core.js?v=2.0.1-web"></script>
+  <script src="./navigation.js?v=2.0.2-web"></script>
   <script src="./pages/registry.js?v=2.0.1-web"></script>
   <script src="./pages/home.js?v=2.0.1-web"></script>
   <script src="./pages/search.js?v=2.0.1-web"></script>
@@ -709,7 +710,7 @@
         if (!window.AshurAuth?.parseAuthLink || !window.AshurAuth?.errorMessage) return fail();
         if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
-        script.src = "./app.js?v=2.0.1-web";
+        script.src = "./app.js?v=2.0.2-web";
         script.onload = () => {
           appScriptLoaded = true;
           if (window.ASHUR_APP_RUNTIME_READY) finished = true;

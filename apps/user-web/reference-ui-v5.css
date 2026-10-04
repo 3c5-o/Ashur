@@ -594,3 +594,32 @@ dialog::backdrop{background:rgba(1,8,4,.52)}
     background:var(--ref-green-soft)!important;
   }
 }
+
+
+/* Bottom navigation input hardening 2.0.2 */
+.bottom-nav{
+  pointer-events:auto!important;
+  touch-action:manipulation!important;
+  isolation:isolate!important;
+  z-index:10000!important;
+}
+.bottom-nav .nav-item{
+  position:relative!important;
+  z-index:2!important;
+  pointer-events:auto!important;
+  touch-action:manipulation!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  cursor:pointer!important;
+}
+.bottom-nav .nav-item>svg,
+.bottom-nav .nav-item>span{
+  pointer-events:none!important;
+}
+.bottom-nav::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+}

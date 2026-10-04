@@ -673,6 +673,8 @@
   <script>
     (() => {
       let finished = false;
+      let appScriptLoaded = false;
+      const startedAt = Date.now();
       const fail = (message = "تعذر تشغيل مكونات التطبيق المحلية. أعد فتح التطبيق بعد تثبيت آخر تحديث.") => {
         if (finished) return;
         finished = true;
@@ -687,6 +689,17 @@
         }
       };
 
+      window.addEventListener("error", (event) => {
+        const source=String(event?.filename||"");
+        if (source.includes("/app/app.js") || source.endsWith("/app.js")) {
+          setTimeout(() => {
+            if (!window.ASHUR_APP_RUNTIME_READY) {
+              fail("حدث خطأ أثناء تشغيل واجهة آشور. تم فتح شاشة الدخول بدل تعليق شاشة البداية.");
+            }
+          }, 0);
+        }
+      });
+
       const loadApp = () => {
         if (!window.supabase?.createClient) return fail();
         if (!window.AshurCore?.createStore || !window.AshurCore?.createRouter) return fail();
@@ -694,7 +707,10 @@
         if (!window.AshurProfile?.validateProfile || !window.AshurProfile?.validateImageFile) return fail();
         const script = document.createElement("script");
         script.src = "./app.js?v=2.0.0-github-pages";
-        script.onload = () => { finished = true; };
+        script.onload = () => {
+          appScriptLoaded = true;
+          if (window.ASHUR_APP_RUNTIME_READY) finished = true;
+        };
         script.onerror = () => fail("تعذر تشغيل واجهة آشور المحلية.");
         document.body.appendChild(script);
       };
@@ -716,8 +732,26 @@
       document.head.appendChild(vendor);
 
       setTimeout(() => {
-        if (!finished && !window.supabase?.createClient) fail();
-      }, 8000);
+        if (finished || window.ASHUR_APP_RUNTIME_READY) return;
+        if (!window.supabase?.createClient) {
+          return fail("تعذر تحميل مكتبة الاتصال. أعد تحميل الصفحة.");
+        }
+        if (appScriptLoaded) {
+          return fail("تعذر إكمال تشغيل واجهة آشور. تم إظهار شاشة الدخول بدل البقاء على شاشة البداية.");
+        }
+        fail("استغرق تشغيل آشور وقتًا أطول من المتوقع. أعد تحميل الصفحة.");
+      }, 7000);
+
+      setTimeout(() => {
+        const splash = document.getElementById("splash");
+        if (!splash) return;
+        if (window.ASHUR_APP_RUNTIME_READY) {
+          splash.style.opacity = "0";
+          setTimeout(() => splash.remove(), 180);
+          return;
+        }
+        fail("تعذر بدء آشور. تم تجاوز شاشة البداية حتى لا تبقى الصفحة معلقة.");
+      }, 10000);
     })();
   </script>
 </body>

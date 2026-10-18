@@ -5599,6 +5599,106 @@ async function cleanupCache() {
   }
 }
 
+const STATIC_MIME_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".mp4": "video/mp4",
+  ".mp3": "audio/mpeg",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+const APPLET_ROOT = process.cwd();
+
+async function serveStaticFile(req, res, url) {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return json(res, 405, { error: "الطريقة غير مدعومة" });
+  }
+
+  let pathname = decodeURIComponent(url.pathname);
+
+  // Normalize route shortcuts:
+  // Root path / or /app or /app/ -> /apps/user-web/index.html
+  if (pathname === "/" || pathname === "/app" || pathname === "/app/") {
+    pathname = "/apps/user-web/index.html";
+  } else if (pathname === "/admin" || pathname === "/admin/") {
+    pathname = "/apps/admin-web/index.html";
+  } else if (pathname === "/site" || pathname === "/site/") {
+    pathname = "/apps/site/index.html";
+  }
+
+  // Prevent directory traversal attacks
+  const safeRelativePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, "");
+  let fullPath = path.join(APPLET_ROOT, safeRelativePath);
+
+  try {
+    let stat = await fsp.stat(fullPath);
+    if (stat.isDirectory()) {
+      const candidate = path.join(fullPath, "index.html");
+      const subStat = await fsp.stat(candidate).catch(() => null);
+      if (subStat && subStat.isFile()) {
+        fullPath = candidate;
+        stat = subStat;
+      } else {
+        return json(res, 404, { error: "المسار غير موجود" });
+      }
+    }
+
+    if (!stat.isFile()) {
+      return json(res, 404, { error: "المسار غير موجود" });
+    }
+
+    const ext = path.extname(fullPath).toLowerCase();
+    const contentType = STATIC_MIME_TYPES[ext] || "application/octet-stream";
+
+    cors(res);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", String(stat.size));
+    if (ext === ".html") {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    } else {
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    }
+
+    if (req.method === "HEAD") {
+      return res.end();
+    }
+
+    fs.createReadStream(fullPath).pipe(res);
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      // If asking for a path inside user-web that isn't a physical file, serve index.html (SPA fallback)
+      if (pathname.startsWith("/apps/user-web/")) {
+        const spaIndex = path.join(APPLET_ROOT, "apps/user-web/index.html");
+        try {
+          const stat = await fsp.stat(spaIndex);
+          cors(res);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.setHeader("Content-Length", String(stat.size));
+          return fs.createReadStream(spaIndex).pipe(res);
+        } catch {}
+      }
+      return json(res, 404, { error: "المسار غير موجود" });
+    }
+    throw err;
+  }
+}
+
 async function handleHttpRequest(req, res) {
   cors(res);
   if (req.method === "OPTIONS") {
@@ -5949,6 +6049,10 @@ async function handleHttpRequest(req, res) {
     }
     if (req.method === "POST" && url.pathname === "/v1/admin/notifications/send") {
       return sendAdminNotification(req, res);
+    }
+
+    if (!url.pathname.startsWith("/v1/")) {
+      return serveStaticFile(req, res, url);
     }
 
     json(res, 404, { error: "المسار غير موجود" });

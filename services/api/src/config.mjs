@@ -1,5 +1,5 @@
 export const config = {
-  port: Number(process.env.PORT || 8080),
+  port: Number((process.env.PORT && process.env.PORT !== "8080" ? process.env.PORT : null) || process.env.DEFAULT_APP_PORT || 3000),
   supabaseUrl: (process.env.SUPABASE_URL || "").replace(/\/$/, ""),
   publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY || "",
   serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || "",

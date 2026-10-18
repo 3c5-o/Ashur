@@ -1,0 +1,6 @@
+{
+  "name": "آشور - Ashur",
+  "description": "منصة اجتماعية عربية حديثة - قصص، ريلز، منشورات، رسائل وإدارة متكاملة",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

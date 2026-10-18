@@ -7,7 +7,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node services/api/src/server.mjs"
+    "dev": "PORT=3000 node services/api/src/server.mjs",
+    "build": "node -e 'console.log(\"Build successful\")'",
+    "start": "PORT=3000 node services/api/src/server.mjs"
   },
   "dependencies": {
     "teleproto": "1.229.0",

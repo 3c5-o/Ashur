@@ -1,0 +1,1 @@
+(()=>{window.AshurSettingsPage={normalize:()=>{const body=document.querySelector("#settingsDialog .dialog-body");if(body){body.scrollTop=0;body.setAttribute("data-ready","1")}}}})();

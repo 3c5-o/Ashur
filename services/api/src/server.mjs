@@ -1082,7 +1082,7 @@ async function ensureCachedMedia(media) {
 }
 
 async function issueMediaTicket(req, res, mediaId) {
-  const user = await currentUser(req, true);
+  const user = await currentUser(req, false);
   const rows = await select(
     "media_objects",
     `select=*&id=eq.${encodeURIComponent(mediaId)}&status=eq.ready&limit=1`,
@@ -1092,7 +1092,7 @@ async function issueMediaTicket(req, res, mediaId) {
   if (!(await canReadMedia(user, media))) {
     return json(res, 403, { error: "لا تملك صلاحية مشاهدة هذا الملف" });
   }
-  const ticket = createMediaTicket(mediaId, user.id);
+  const ticket = createMediaTicket(mediaId, user?.id || "anonymous");
   return json(res, 200, {
     path: `/v1/media/${mediaId}?ticket=${encodeURIComponent(ticket)}`,
     mime_type: media.mime_type || "application/octet-stream",
@@ -5645,7 +5645,18 @@ async function serveStaticFile(req, res, url) {
   let fullPath = path.join(APPLET_ROOT, safeRelativePath);
 
   try {
-    let stat = await fsp.stat(fullPath);
+    let stat = await fsp.stat(fullPath).catch(() => null);
+    if (!stat && !pathname.startsWith("/apps/")) {
+      const userWebCandidate = path.join(APPLET_ROOT, "apps/user-web", safeRelativePath);
+      const userWebStat = await fsp.stat(userWebCandidate).catch(() => null);
+      if (userWebStat) {
+        fullPath = userWebCandidate;
+        stat = userWebStat;
+      }
+    }
+    if (!stat) {
+      return json(res, 404, { error: "المسار غير موجود" });
+    }
     if (stat.isDirectory()) {
       const candidate = path.join(fullPath, "index.html");
       const subStat = await fsp.stat(candidate).catch(() => null);

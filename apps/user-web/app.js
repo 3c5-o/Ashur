@@ -825,8 +825,11 @@
     showAuthMessage(message,true);
   }
 
+  const GUEST_STORAGE_KEY = "ashur_guest_session_v2";
+
   function clearAuthSession(){
     recoveryModeActive=false;
+    try{localStorage.removeItem(GUEST_STORAGE_KEY)}catch(_){}
     closeChatRealtime();
     closeInboxRealtime();
     authHydrationKey="";
@@ -838,6 +841,33 @@
     nativeLogout();
     showApp(false);
     store.emit("auth:signed-out",{});
+  }
+
+  async function loginAsGuest(){
+    const guestUser = {
+      id: "guest-user-ashur-demo",
+      email: "guest@ashur.app",
+      user_metadata: { name: "مستكشف آشور", username: "ashur.guest" }
+    };
+    const guestProfile = {
+      id: "guest-user-ashur-demo",
+      name: "مستكشف آشور",
+      username: "ashur.guest",
+      bio: "أهلاً بكم في آشور! مجتمع عربي بروح بلاد الرافدين 🌿",
+      is_verified: true,
+      follower_count: 1420,
+      following_count: 85,
+      posts_count: 12
+    };
+    try{localStorage.setItem(GUEST_STORAGE_KEY,"1")}catch(_){}
+    try{localStorage.setItem("ashur_cached_profile_guest-user-ashur-demo",JSON.stringify(guestProfile))}catch(_){}
+    state.user=guestUser;
+    state.profile=guestProfile;
+    completeOnboarding("login");
+    $("#auth")?.classList.add("hidden");
+    $("#splash")?.remove();
+    showApp(true);
+    await Promise.allSettled([loadHome(),loadNotificationsBadge()]);
   }
 
   function sessionKey(session){
@@ -1245,25 +1275,32 @@
     setNetworkState(navigator.onLine);
     rememberPendingConfirmation(pendingConfirmationEmail());
 
-    try{
-      await startupTimeout(checkRuntimeSettings().catch(()=>{}),3500,"runtime-settings").catch(()=>{});
-      const sessionResult=await startupTimeout(client.auth.getSession(),5000,"session");
-      const {data:{session},error:sessionError}=sessionResult;
+    try {
+      if(localStorage.getItem(GUEST_STORAGE_KEY)==="1"){
+        await loginAsGuest();
+        return;
+      }
+      const sessionResult=await startupTimeout(client.auth.getSession(),3500,"session").catch(()=>({data:{session:null}}));
+      const {data:{session},error:sessionError}=sessionResult||{data:{session:null}};
       if(sessionError)throw sessionError;
       if(!session){
         clearAuthSession();
         return;
       }
-      await startupTimeout(hydrateAuthenticatedSession(session,{reason:"boot"}),9000,"hydrate");
+      await startupTimeout(hydrateAuthenticatedSession(session,{reason:"boot"}),7000,"hydrate");
     }catch(error){
       console.error("ASHUR_STARTUP_RECOVERY",error);
+      if(localStorage.getItem(GUEST_STORAGE_KEY)==="1"){
+        await loginAsGuest();
+        return;
+      }
       state.user=null;
       state.profile=null;
       showApp(false);
       showAuthMessage(
         error?.code==="ASHUR_STARTUP_TIMEOUT"
-          ?"الاتصال بالخدمة بطيء. يمكنك المحاولة من جديد الآن."
-          :"تعذر إكمال بدء التطبيق. تحقق من الاتصال وحاول مرة أخرى."
+          ?"الاتصال بالخدمة بطيء. يمكنك الدخول السريع كضيف لتجربة التطبيق."
+          :"تعذر إكمال بدء التطبيق. يمكنك تجربة الدخول كضيف."
       );
     }finally{
       clearTimeout(fallbackTimer);
@@ -1320,8 +1357,12 @@
 
   const onboardingStart=$("#onboardingStart");
   const onboardingLogin=$("#onboardingLogin");
+  const onboardingGuest=$("#onboardingGuest");
+  const quickGuestLogin=$("#quickGuestLogin");
   if(onboardingStart)onboardingStart.onclick=()=>completeOnboarding("register");
   if(onboardingLogin)onboardingLogin.onclick=()=>completeOnboarding("login");
+  if(onboardingGuest)onboardingGuest.onclick=()=>loginAsGuest();
+  if(quickGuestLogin)quickGuestLogin.onclick=()=>loginAsGuest();
 
   $("#loginTab").onclick=()=>setAuthView("login");
   $("#registerTab").onclick=()=>setAuthView("register");

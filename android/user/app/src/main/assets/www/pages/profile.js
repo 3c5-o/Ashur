@@ -1,0 +1,1 @@
+(()=>{window.AshurPages?.register("profilePage",{enter:async({api})=>{await api?.loadProfile?.()}})})();

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "PORT=3000 node services/api/src/server.mjs",
-    "build": "node -e 'console.log(\"Build successful\")'",
+    "build": "bash scripts/build-apk.sh",
     "start": "PORT=3000 node services/api/src/server.mjs"
   },
   "dependencies": {

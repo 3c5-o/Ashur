@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050706">
+<meta name="color-scheme" content="dark light">
+<title>إدارة آشور</title>
+<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="./mobile.css">
+</head>
+<body>
+<div id="loginView" class="login-view">
+  <button id="loginThemeButton" class="floating-theme-button" type="button" aria-label="تغيير المظهر">
+    <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-.9-.1-1.4A7 7 0 0 1 12 3Z"/></svg>
+  </button>
+  <form id="loginForm" class="login-card">
+    <div class="admin-login-brand">
+      <div class="admin-login-logo"><img src="./assets/logo.svg" alt="آشور"></div>
+      <div><span>لوحة الإدارة</span><h1>آشور</h1><p>إدارة المنصة من مكان واحد</p></div>
+    </div>
+    <label><span>البريد الإلكتروني</span><input id="email" type="email" required placeholder="البريد الإلكتروني"></label>
+    <label><span>كلمة المرور</span><input id="password" type="password" required placeholder="كلمة المرور"></label>
+    <button id="loginSubmitButton" class="primary">دخول الإدارة</button>
+    <button id="forgotPasswordButton" class="text-button" type="button">نسيت كلمة المرور؟</button>
+    <div id="loginMessage" class="message"></div>
+  </form>
+</div>
+
+<div id="adminApp" class="admin-app hidden">
+  <header class="header">
+    <button id="menuButton" class="icon-button" aria-label="القائمة">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <div class="header-title"><span id="headerSectionName">الرئيسية</span><small>إدارة آشور</small></div>
+    <div class="header-actions">
+      <button id="themeButton" class="icon-button" aria-label="تغيير المظهر">
+        <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.5 0-.9-.1-1.4A7 7 0 0 1 12 3Z"/></svg>
+      </button>
+      <button id="refreshButton" class="icon-button" aria-label="تحديث">
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5"/><path d="M20 4v7h-7"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-brand"><img src="./assets/logo.svg" alt=""><div><b>آشور</b><span>الإدارة</span></div></div>
+    <div class="sidebar-group-label">الإدارة</div>
+    <button class="nav active" data-page="dashboard"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3Z"/><path d="M9 20v-6h6v6"/></svg></span>الرئيسية</button>
+    <button class="nav" data-page="users"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-5 4-7 7-7s6 2 7 7"/><path d="M16 5c3 0 5 2 5 5M18 14c2 1 3 3 4 6"/></svg></span>المستخدمون</button>
+    <button class="nav" data-page="content"><span class="nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg></span>المحتوى</button>
+    <button class="nav" data-page="comments"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v12H9l-5 4Z"/><path d="M8 9h8M8 13h5"/></svg></span>التعليقات</button>
+    <button class="nav" data-page="reports"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M5 3h14v18l-7-3-7 3Z"/><path d="M9 8h6M9 12h6"/></svg></span>البلاغات</button>
+    <button class="nav" data-page="support"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M4 13v-2a8 8 0 0 1 16 0v2"/><path d="M4 13h3v6H5a1 1 0 0 1-1-1ZM20 13h-3v6h2a1 1 0 0 0 1-1Z"/><path d="M17 19c-1 2-3 2-5 2"/></svg></span>الدعم</button>
+    <div class="sidebar-group-label">النظام</div>
+    <button class="nav" data-page="storage"><span class="nav-icon"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 2 4 3 8 3s8-1 8-3V6"/><path d="M4 12v6c0 2 4 3 8 3s8-1 8-3v-6"/></svg></span>التخزين</button>
+    <button class="nav" data-page="uploads"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v5h16v-5"/></svg></span>عمليات الرفع</button>
+    <button class="nav" data-page="errors"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19Z"/><path d="M12 9v5M12 17h.01"/></svg></span>الأخطاء</button>
+    <button class="nav" data-page="notifications"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0v5l2 3H4l2-3Z"/><path d="M10 20h4"/></svg></span>الإشعارات</button>
+    <button class="nav" data-page="admins"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-5 4-7 7-7 2 0 4 1 5 2"/><path d="m18 14 1 2 2 .5-1.5 1.5.5 2-2-1-2 1 .5-2L15 16.5l2-.5Z"/></svg></span>المشرفون</button>
+    <button class="nav" data-page="audit"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M6 3h12v18H6Z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>سجل الإدارة</button>
+    <button class="nav" data-page="releases"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M5 19h14"/></svg></span>الإصدارات</button>
+    <button class="nav" data-page="appSettings"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 13.5v-3l-2-.7-.8-1.8.9-1.9-2.1-2.1-1.9.9-1.8-.8L10.5 2h-3l-.7 2.1-1.8.8-1.9-.9L1 6.1 2 8l-.8 1.8-2 .7v3l2 .7L2 16l-1 1.9L3.1 20l1.9-.9 1.8.8.7 2.1h3l.8-2.1 1.8-.8 1.9.9 2.1-2.1-1-1.9.8-1.8Z" transform="translate(2 0) scale(.82)"/></svg></span>إعدادات التطبيق</button>
+    <button class="nav" data-page="siteSettings"><span class="nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4 6 4 9s-1 6-4 9c-3-3-4-6-4-9s1-6 4-9Z"/></svg></span>الموقع الرسمي</button>
+    <button class="nav" data-page="health"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg></span>حالة النظام</button>
+    <button id="logoutButton" class="nav danger"><span class="nav-icon"><svg viewBox="0 0 24 24"><path d="M10 4H4v16h6M14 8l4 4-4 4M8 12h10"/></svg></span>تسجيل الخروج</button>
+  </aside>
+
+  <main class="content">
+    <section id="dashboard" class="page active">
+      <div class="hero-panel">
+        <div><span class="eyebrow">نظرة عامة</span><h2>مرحبًا في إدارة آشور</h2><p>متابعة النشاط والمحتوى وحالة المنصة من لوحة واحدة.</p></div>
+        <img src="./assets/logo.svg" alt="">
+      </div>
+      <div id="stats" class="stats"></div>
+      <div class="grid2">
+        <article class="panel"><div class="panel-head"><div><span class="eyebrow">المراجعة</span><h3>آخر البلاغات</h3></div></div><div id="recentReports"></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="eyebrow">الحالة</span><h3>الخدمات</h3></div></div><div id="serviceStatus"></div></article>
+      </div>
+    </section>
+
+    <section id="users" class="page">
+      <div class="page-title"><div><span class="eyebrow">الحسابات</span><h2>المستخدمون</h2><p>إدارة الحسابات، التوثيق، التحذيرات، الجلسات والحظر.</p></div></div>
+      <div class="toolbar admin-filter-bar users-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="userSearch" class="search" placeholder="اسم، @يوزر أو UUID"></div>
+        <select id="userStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="banned">محظور</option><option value="deleted">معطل</option></select>
+        <select id="userVerified"><option value="">التوثيق: الكل</option><option value="true">موثق</option><option value="false">غير موثق</option></select>
+        <select id="userPrivacy"><option value="">الخصوصية: الكل</option><option value="public">عام</option><option value="private">خاص</option></select>
+      </div>
+      <div id="userDetail" class="panel user-detail hidden"></div>
+      <div id="usersList" class="table-list"></div>
+      <div id="usersPager" class="admin-pager hidden">
+        <button id="usersPrevPage" class="small" type="button">السابق</button>
+        <span id="usersPageLabel">1 / 1</span>
+        <button id="usersNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="content" class="page">
+      <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>المحتوى</h2><p>فلترة ومعاينة وإدارة المنشورات والريلز والقصص مع تنظيف التخزين.</p></div></div>
+      <div class="toolbar admin-filter-bar content-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="contentSearch" class="search" placeholder="ابحث في الوصف"></div>
+        <input id="contentAuthor" placeholder="@username أو UUID" aria-label="صاحب المحتوى">
+        <select id="contentStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="hidden">مخفي</option></select>
+        <select id="contentVisibility"><option value="">كل الخصوصيات</option><option value="public">عام</option><option value="followers">المتابعون</option></select>
+        <select id="contentComments"><option value="">التعليقات: الكل</option><option value="true">مفتوحة</option><option value="false">مغلقة</option></select>
+        <select id="contentExplore"><option value="">الاستكشاف: الكل</option><option value="true">مفعل</option><option value="false">معطل</option></select>
+        <select id="contentReports"><option value="">البلاغات: الكل</option><option value="true">عليه بلاغات</option><option value="false">بدون بلاغات</option></select>
+        <label class="compact-date"><span>من</span><input id="contentFrom" type="date"></label>
+        <label class="compact-date"><span>إلى</span><input id="contentTo" type="date"></label>
+        <button id="resetContentFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-content-kind="posts">المنشورات</button>
+        <button class="tab" data-content-kind="reels">الريلز</button>
+        <button class="tab" data-content-kind="stories">القصص</button>
+      </div>
+      <div id="contentList" class="table-list"></div>
+      <div id="contentPager" class="admin-pager hidden">
+        <button id="contentPrevPage" class="small" type="button">السابق</button>
+        <span id="contentPageLabel">1 / 1</span>
+        <button id="contentNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="comments" class="page">
+      <div class="page-title"><div><span class="eyebrow">الإشراف</span><h2>التعليقات</h2><p>البحث ومراجعة وإخفاء أو استعادة التعليقات.</p></div></div>
+      <div class="toolbar admin-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="commentSearch" class="search" placeholder="ابحث داخل التعليقات"></div>
+        <select id="commentStatus"><option value="">كل الحالات</option><option value="active">نشط</option><option value="hidden">مخفي</option></select>
+      </div>
+      <div id="commentsList" class="table-list"></div>
+      <div id="commentsPager" class="admin-pager hidden">
+        <button id="commentsPrevPage" class="small" type="button">السابق</button>
+        <span id="commentsPageLabel">1 / 1</span>
+        <button id="commentsNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="reports" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 5</span><h2>مركز البلاغات</h2><p>فرز البلاغات، معاينة الهدف، اتخاذ الإجراء ومتابعة سجل المراجعة.</p></div></div>
+      <div class="toolbar admin-filter-bar stage56-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="reportSearch" class="search" placeholder="ابحث بالسبب أو التفاصيل"></div>
+        <select id="reportStatus"><option value="">كل الحالات</option><option value="open">جديد</option><option value="review">قيد المراجعة</option><option value="resolved">تم الحل</option><option value="rejected">مرفوض</option></select>
+        <select id="reportType"><option value="">كل الأنواع</option><option value="profile">حساب</option><option value="post">منشور</option><option value="reel">ريلز</option><option value="story">قصة</option><option value="comment">تعليق</option><option value="message">رسالة</option></select>
+        <select id="reportPriority"><option value="">كل الأولويات</option><option value="urgent">عاجل</option><option value="high">عالية</option><option value="normal">عادية</option><option value="low">منخفضة</option></select>
+        <select id="reportAssigned"><option value="">كل التعيينات</option><option value="me">المسندة لي</option><option value="unassigned">غير مسندة</option></select>
+        <label class="compact-date"><span>من</span><input id="reportFrom" type="date"></label>
+        <label class="compact-date"><span>إلى</span><input id="reportTo" type="date"></label>
+        <button id="resetReportFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="reportDetail" class="panel stage56-detail hidden"></div>
+      <div id="reportsList" class="table-list"></div>
+      <div id="reportsPager" class="admin-pager hidden">
+        <button id="reportsPrevPage" class="small" type="button">السابق</button>
+        <span id="reportsPageLabel">1 / 1</span>
+        <button id="reportsNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="support" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 6</span><h2>الدعم الفني</h2><p>طابور التذاكر، المحادثة مع المستخدم، الأولوية والتعيين وسجل المعالجة.</p></div></div>
+      <div class="toolbar admin-filter-bar stage56-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="supportSearch" class="search" placeholder="ابحث بعنوان أو تفاصيل التذكرة"></div>
+        <select id="supportStatus"><option value="">كل الحالات</option><option value="open">جديد</option><option value="in_progress">قيد المتابعة</option><option value="answered">تم الرد</option><option value="closed">مغلق</option></select>
+        <select id="supportPriority"><option value="">كل الأولويات</option><option value="urgent">عاجل</option><option value="high">عالية</option><option value="normal">عادية</option><option value="low">منخفضة</option></select>
+        <select id="supportCategory"><option value="">كل الأنواع</option><option value="technical">تقنية</option><option value="account">الحساب</option><option value="content">المحتوى</option><option value="upload">الرفع</option><option value="other">أخرى</option><option value="general">عام</option></select>
+        <select id="supportAssigned"><option value="">كل التعيينات</option><option value="me">المسندة لي</option><option value="unassigned">غير مسندة</option></select>
+        <select id="supportUnread"><option value="">القراءة: الكل</option><option value="true">تحتاج رد</option><option value="false">مقروءة</option></select>
+        <button id="resetSupportFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="supportDetail" class="panel stage56-detail hidden"></div>
+      <div id="supportList" class="table-list"></div>
+      <div id="supportPager" class="admin-pager hidden">
+        <button id="supportPrevPage" class="small" type="button">السابق</button>
+        <span id="supportPageLabel">1 / 1</span>
+        <button id="supportNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="storage" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 8</span><h2>مركز التخزين</h2><p>مراقبة قنوات Telegram، أحجام الملفات، الصحة والاتصال بدون تغيير معرفات القنوات من الإدارة.</p></div></div>
+      <div class="info-banner"><span></span><p>معرف القناة وربط قناة جديدة يبقى من بوت تخزين آشور فقط. هنا تقدر تختبر، تعطل، تفعل أو تعيد الاتصال بأمان.</p></div>
+      <div id="storageSummary" class="stage8-summary"></div>
+      <div class="toolbar stage8-storage-toolbar">
+        <button id="testAllChannels" class="small" type="button">فحص جميع القنوات</button>
+        <span id="storageLiveState" class="live-state"><i></i> مراقبة التخزين</span>
+      </div>
+      <div id="channelsList" class="cards stage8-channel-grid"></div>
+    </section>
+
+    <section id="uploads" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 8</span><h2>عمليات الرفع</h2><p>متابعة مباشرة للتقدم، المستخدم، الحالة، الإلغاء وإعادة محاولة التخزين عند توفر الملف المؤقت.</p></div></div>
+      <div id="uploadSummary" class="stage8-summary"></div>
+      <div class="toolbar admin-filter-bar upload-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="uploadSearch" class="search" placeholder="ابحث باسم الملف"></div>
+        <input id="uploadUser" placeholder="@username أو UUID" aria-label="المستخدم">
+        <select id="uploadStatus"><option value="">كل الحالات</option><option value="queued">بالانتظار</option><option value="receiving">جارٍ الاستلام</option><option value="storing">جارٍ التخزين</option><option value="completed">مكتمل</option><option value="failed">فشل</option><option value="cancelled">ملغي</option></select>
+        <select id="uploadKind"><option value="">كل الأنواع</option><option value="profile">صورة حساب</option><option value="profile_cover">غلاف حساب</option><option value="post_image">صورة منشور</option><option value="post_video">فيديو منشور</option><option value="reel">ريلز</option><option value="reel_cover">غلاف ريلز</option><option value="story">قصة</option><option value="chat_image">صورة محادثة</option><option value="chat_video">فيديو محادثة</option><option value="chat_audio">صوتية</option><option value="chat_file">ملف محادثة</option><option value="group_media">وسائط مجموعة</option><option value="file">ملف عام</option></select>
+        <button id="resetUploadFilters" class="small" type="button">مسح الفلاتر</button>
+        <span class="live-state"><i></i> تحديث مباشر</span>
+      </div>
+      <div id="uploadsList" class="table-list"></div>
+      <div id="uploadsPager" class="admin-pager hidden">
+        <button id="uploadsPrevPage" class="small" type="button">السابق</button>
+        <span id="uploadsPageLabel">1 / 1</span>
+        <button id="uploadsNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="errors" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 9</span><h2>الأخطاء وحالة النظام</h2><p>تجميع الأخطاء المتكررة، تحديد الخطورة والسياق، ومتابعة مصدر المشكلة قبل إغلاقها.</p></div></div>
+      <div id="errorSummary" class="stage9-summary"></div>
+      <div class="toolbar admin-filter-bar stage9-error-filter">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="errorSearch" class="search" placeholder="رسالة الخطأ، الكود أو الخدمة"></div>
+        <select id="errorStatus"><option value="">كل الحالات</option><option value="new">جديد</option><option value="resolved">تم الحل</option></select>
+        <select id="errorSeverity"><option value="">كل الخطورة</option><option value="critical">حرج</option><option value="error">خطأ</option><option value="warning">تحذير</option><option value="info">معلومة</option></select>
+        <select id="errorService"><option value="">كل الخدمات</option></select>
+        <button id="resetErrorFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="errorServiceBreakdown" class="stage9-services"></div>
+      <div id="errorsList" class="table-list stage9-errors-list"></div>
+      <div id="errorsPager" class="admin-pager hidden">
+        <button id="errorsPrevPage" class="small" type="button">السابق</button>
+        <span id="errorsPageLabel">1 / 1</span>
+        <button id="errorsNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="notifications" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 10</span><h2>مركز الإشعارات</h2><p>استهداف ومعاينة وجدولة وقوالب وسجل كامل لرسائل آشور الرسمية.</p></div></div>
+      <div id="notificationSummary" class="stage10-summary"></div>
+
+      <div class="stage10-layout">
+        <form id="notificationForm" class="panel form stage10-composer">
+          <div class="panel-head">
+            <div><span class="eyebrow">إنشاء إشعار</span><h3>الرسالة والاستهداف</h3></div>
+            <select id="notificationTemplate"><option value="">بدون قالب</option></select>
+          </div>
+          <label><span>العنوان</span><input id="notificationTitle" maxlength="80" required></label>
+          <label><span>النص</span><textarea id="notificationBody" maxlength="500" required></textarea></label>
+          <label><span>المستلم</span>
+            <select id="notificationAudience">
+              <option value="all">جميع المستخدمين</option>
+              <option value="user">مستخدم واحد</option>
+              <option value="users">مستخدمون محددون</option>
+              <option value="verified">الحسابات الموثقة</option>
+              <option value="active">النشطون آخر 30 يوم</option>
+              <option value="inactive">غير النشطين أكثر من 30 يوم</option>
+            </select>
+          </label>
+          <div id="targetUserRow" class="stage10-user-picker hidden">
+            <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="notificationUserSearch" class="search" placeholder="ابحث بالاسم أو @username"></div>
+            <div id="notificationUserResults" class="stage10-user-results"></div>
+            <div id="notificationSelectedUsers" class="stage10-selected-users"></div>
+          </div>
+          <div id="notificationRecipientPreview" class="stage10-recipient-preview">سيتم حساب المستلمين قبل الإرسال.</div>
+          <div class="grid2 fields">
+            <label><span>نوع الوجهة عند الضغط</span><select id="notificationEntityType"><option value="">بدون وجهة</option><option value="profile">حساب</option><option value="post">منشور</option><option value="reel">ريلز</option><option value="support_ticket">تذكرة دعم</option></select></label>
+            <label><span>معرف الوجهة</span><input id="notificationEntityId" placeholder="UUID اختياري"></label>
+          </div>
+          <label><span>موعد الإرسال (اختياري)</span><input id="notificationScheduledAt" type="datetime-local"></label>
+          <div class="stage10-actions">
+            <button class="primary" id="notificationSubmitButton">إرسال / جدولة الإشعار</button>
+            <button class="small" id="saveNotificationTemplate" type="button">حفظ كقالب</button>
+          </div>
+          <p id="notificationMessage" class="message"></p>
+        </form>
+
+        <aside class="panel stage10-preview-panel">
+          <div class="panel-head"><div><span class="eyebrow">المعاينة</span><h3>شكل الإشعار</h3></div></div>
+          <div id="notificationPreviewCard" class="stage10-notification-preview">
+            <span>آشور</span><b>عنوان الإشعار</b><p>سيظهر نص الإشعار هنا.</p>
+          </div>
+          <div class="stage10-preview-meta">
+            <div><span>المستلمون</span><b id="notificationPreviewCount">—</b></div>
+            <div><span>الإرسال</span><b id="notificationPreviewTime">فوري</b></div>
+            <div><span>الوجهة</span><b id="notificationPreviewLink">بدون وجهة</b></div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="panel stage10-template-panel">
+        <div class="panel-head"><div><span class="eyebrow">القوالب</span><h3>قوالب الإشعارات</h3></div></div>
+        <div id="notificationTemplates" class="stage10-template-list"></div>
+      </div>
+
+      <div class="panel stage10-history-panel">
+        <div class="panel-head"><div><span class="eyebrow">السجل</span><h3>سجل الإشعارات</h3></div></div>
+        <div class="toolbar admin-filter-bar stage10-history-filter">
+          <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="notificationHistorySearch" class="search" placeholder="العنوان أو النص"></div>
+          <select id="notificationHistoryStatus"><option value="">كل الحالات</option><option value="sent">مرسل</option><option value="scheduled">مجدول</option><option value="processing">قيد الإرسال</option><option value="failed">فشل</option><option value="cancelled">ملغي</option></select>
+          <select id="notificationHistoryAudience"><option value="">كل الاستهدافات</option><option value="all">الجميع</option><option value="user">مستخدم</option><option value="users">مستخدمون</option><option value="verified">موثقون</option><option value="active">نشطون</option><option value="inactive">غير نشطين</option></select>
+          <button id="resetNotificationHistoryFilters" class="small" type="button">مسح الفلاتر</button>
+        </div>
+        <div id="notificationHistory" class="table-list"></div>
+        <div id="notificationHistoryPager" class="admin-pager hidden">
+          <button id="notificationHistoryPrev" class="small" type="button">السابق</button>
+          <span id="notificationHistoryPageLabel">1 / 1</span>
+          <button id="notificationHistoryNext" class="small" type="button">التالي</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="admins" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 7</span><h2>المشرفون والصلاحيات</h2><p>إضافة المشرف بالاسم أو اليوزر، تحديد الدور، ومنح أو منع صلاحية كل قسم بشكل مستقل.</p></div></div>
+      <div class="panel admin-summary stage7-admin-summary">
+        <div><b>الإدارة العليا</b><span>المالك والمدير الثانوي يملكان كامل الصلاحيات.</span></div>
+        <button id="addAdminButton" class="small" type="button">إضافة مشرف</button>
+      </div>
+      <div id="ownerManagementPanel" data-owner-only class="panel stage7-owner-panel hidden">
+        <div class="panel-head">
+          <div><span class="eyebrow">للمالك الرئيسي فقط</span><h3>إدارة مالك التطبيق</h3></div>
+          <span class="pill ok">Owner only</span>
+        </div>
+        <div id="ownerCurrentSummary" class="stage7-owner-summary"></div>
+        <div class="info-banner"><span></span><p>نقل الملكية يغيّر UUID المالك الأساسي. المدير الثانوي والمشرفون لا يمكنهم رؤية هذا القسم أو استدعاء عملية النقل.</p></div>
+        <div class="stage7-owner-transfer">
+          <label class="grow"><span>UUID الحساب الجديد</span><input id="ownerNewUserId" autocomplete="off" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></label>
+          <label><span>المالك السابق بعد النقل</span>
+            <select id="ownerPreviousAction">
+              <option value="secondary_admin">تحويله إلى مدير ثانوي</option>
+              <option value="remove">إزالة صلاحيات الإدارة</option>
+            </select>
+          </label>
+          <button id="ownerTransferButton" class="danger" type="button">نقل الملكية</button>
+        </div>
+        <p id="ownerTransferMessage" class="message"></p>
+      </div>
+      <div id="adminAddPanel" class="panel stage7-admin-panel hidden">
+        <div class="panel-head"><div><span class="eyebrow">إضافة مشرف</span><h3>ابحث عن الحساب</h3></div><button id="closeAdminAddPanel" class="small" type="button">إغلاق</button></div>
+        <div class="stage7-admin-search">
+          <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="adminCandidateSearch" class="search" placeholder="الاسم أو @username"></div>
+          <select id="newAdminRole"><option value="moderator">مشرف</option><option value="content_moderator">مشرف محتوى</option><option value="support">الدعم</option><option value="analyst">محلل</option><option value="secondary_admin">مدير ثانوي</option></select>
+        </div>
+        <div id="adminCandidateResults" class="table-list compact"><div class="meta">اكتب حرفين على الأقل للبحث.</div></div>
+        <div id="newAdminSelected" class="stage7-selected-admin hidden"></div>
+        <div id="newAdminPermissions" class="stage7-permissions"></div>
+        <button id="confirmAddAdmin" class="primary hidden" type="button">إضافة المشرف</button>
+        <p id="addAdminMessage" class="message"></p>
+      </div>
+      <div id="adminPermissionPanel" class="panel stage7-admin-panel hidden"></div>
+      <div id="adminsList" class="table-list"></div>
+    </section>
+
+    <section id="audit" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 14</span><h2>سجل الإدارة والأمان</h2><p>سجل غير قابل للحذف لكل العمليات الإدارية مع هوية المشرف والدور والهدف والتفاصيل.</p></div></div>
+      <div id="auditSummary" class="stage14-summary"></div>
+      <div class="info-banner stage14-append-only"><span></span><p>هذا السجل Append-only على مستوى قاعدة البيانات. لا توجد وظيفة حذف للسجل من لوحة الإدارة أو الـAPI.</p></div>
+      <div class="toolbar admin-filter-bar stage14-filter-bar">
+        <div class="search-wrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="auditSearch" class="search" placeholder="عملية، هدف، مشرف أو معرف"></div>
+        <input id="auditActor" placeholder="اسم المشرف، @username أو UUID" aria-label="المشرف">
+        <select id="auditRole">
+          <option value="">كل الأدوار</option>
+          <option value="owner">المالك</option>
+          <option value="secondary_admin">مدير ثانوي</option>
+          <option value="moderator">مشرف</option>
+          <option value="content_moderator">مشرف محتوى</option>
+          <option value="support">الدعم</option>
+          <option value="analyst">محلل</option>
+        </select>
+        <input id="auditAction" placeholder="اسم العملية" aria-label="العملية">
+        <input id="auditTargetType" placeholder="نوع الهدف" aria-label="نوع الهدف">
+        <label class="compact-date"><span>من</span><input id="auditFrom" type="date"></label>
+        <label class="compact-date"><span>إلى</span><input id="auditTo" type="date"></label>
+        <button id="resetAuditFilters" class="small" type="button">مسح الفلاتر</button>
+      </div>
+      <div id="auditList" class="stage14-audit-list"></div>
+      <div id="auditPager" class="admin-pager hidden">
+        <button id="auditPrevPage" class="small" type="button">السابق</button>
+        <span id="auditPageLabel">1 / 1</span>
+        <button id="auditNextPage" class="small" type="button">التالي</button>
+      </div>
+    </section>
+
+    <section id="releases" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 11</span><h2>الإصدارات والتحديثات</h2><p>إدارة APK والتحقق من SHA-256 ونشر التحديث إلى التطبيق والموقع من سجل واحد.</p></div></div>
+      <div id="releaseSummary" class="stage11-summary"></div>
+      <div id="currentPublishedRelease" class="panel stage11-current-release"></div>
+      <form id="releaseForm" class="panel form stage11-release-form">
+        <div class="panel-head">
+          <div><span class="eyebrow">بيانات الإصدار</span><h3 id="releaseFormTitle">إضافة إصدار</h3></div>
+          <button id="releaseCancelEdit" class="small hidden" type="button">إلغاء التعديل</button>
+        </div>
+        <div class="grid2 fields">
+          <label><span>Version</span><input id="releaseVersion" placeholder="1.7.0" required></label>
+          <label><span>Version Code</span><input id="releaseCode" type="number" min="1" required></label>
+        </div>
+        <label><span>رابط APK</span><input id="releaseUrl" inputmode="url" placeholder="https://...apk"></label>
+        <label><span>SHA-256</span><input id="releaseSha256" maxlength="64" inputmode="text" autocomplete="off" placeholder="64 hexadecimal characters"></label>
+        <label><span>رسالة التحديث</span><textarea id="releaseUpdateMessage" maxlength="1000" placeholder="النص الذي سيظهر للمستخدم عند توفر التحديث"></textarea></label>
+        <label><span>ملاحظات الإصدار</span><textarea id="releaseNotes" maxlength="4000" placeholder="تغييرات الإصدار والسجل الداخلي"></textarea></label>
+        <div class="grid2 fields">
+          <label><span>أقل إصدار مسموح</span><input id="releaseMinimum" placeholder="1.0.0"></label>
+          <label><span>الحالة</span><select id="releaseStatus"><option value="draft">مسودة</option><option value="testing">اختبار</option><option value="published">منشور</option><option value="retired">متقاعد</option></select></label>
+        </div>
+        <label class="switch"><span><b>تحديث إجباري</b><small>يمنع متابعة استخدام الإصدارات الأقل من الحد الأدنى</small></span><input id="releaseRequired" type="checkbox"></label>
+        <div class="stage11-release-actions">
+          <button id="releaseSubmitButton" class="primary" type="submit">إضافة الإصدار</button>
+        </div>
+        <p id="releaseMessage" class="message"></p>
+      </form>
+      <div class="panel stage11-release-history">
+        <div class="panel-head"><div><span class="eyebrow">السجل</span><h3>كل الإصدارات</h3></div></div>
+        <div id="releasesList" class="table-list"></div>
+      </div>
+    </section>
+
+    <section id="appSettings" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 12</span><h2>إعدادات التطبيق</h2><p>التحكم بالتحديث والصيانة والمزايا وحدود الرفع مع تاريخ كامل وإمكانية الاستعادة.</p></div></div>
+      <div id="appSettingsSummary" class="stage12-summary"></div>
+      <form id="appSettingsForm" class="settings-grid stage12-settings-grid">
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">التحديث</span><h3>الإصدار الحالي</h3></div></div>
+          <div class="grid2 fields">
+            <label><span>آخر إصدار</span><input id="latestVersion" placeholder="1.7.0"></label>
+            <label><span>Version Code</span><input id="latestVersionCode" type="number" min="0"></label>
+          </div>
+          <label><span>أقل إصدار مسموح</span><input id="minimumVersion" placeholder="1.0.0"></label>
+          <label><span>رابط التحميل</span><input id="appDownloadUrl" inputmode="url"></label>
+          <label><span>SHA-256</span><input id="appUpdateSha256" maxlength="64" autocomplete="off"></label>
+          <label><span>رسالة التحديث</span><textarea id="appUpdateMessage" maxlength="1000"></textarea></label>
+          <label class="switch"><span><b>تحديث إجباري</b><small>منع استخدام الإصدارات الأقل من الحد الأدنى</small></span><input id="requiredUpdate" type="checkbox"></label>
+        </article>
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الحالة</span><h3>الصيانة</h3></div></div>
+          <label class="switch"><span><b>وضع الصيانة</b><small>تفعيل رسالة توقف الخدمة ضمن الفترة المحددة</small></span><input id="maintenanceEnabled" type="checkbox"></label>
+          <label><span>عنوان الصيانة</span><input id="maintenanceTitle" maxlength="120" placeholder="آشور"></label>
+          <label><span>رسالة الصيانة</span><textarea id="maintenanceMessage" maxlength="1000"></textarea></label>
+          <div class="grid2 fields">
+            <label><span>بدء الصيانة</span><input id="maintenanceStartAt" type="datetime-local"></label>
+            <label><span>انتهاء الصيانة</span><input id="maintenanceEndAt" type="datetime-local"></label>
+          </div>
+        </article>
+        <article class="panel form stage12-features-panel">
+          <div class="panel-head"><div><span class="eyebrow">المزايا</span><h3>تشغيل الأقسام</h3></div></div>
+          <div class="stage12-feature-grid">
+            <label class="switch"><span><b>القصص</b></span><input id="featureStories" type="checkbox"></label>
+            <label class="switch"><span><b>الريلز</b></span><input id="featureReels" type="checkbox"></label>
+            <label class="switch"><span><b>الرسائل</b></span><input id="featureMessages" type="checkbox"></label>
+            <label class="switch"><span><b>المجموعات</b></span><input id="featureGroups" type="checkbox"></label>
+            <label class="switch"><span><b>التسجيل</b></span><input id="featureRegistration" type="checkbox"></label>
+            <label class="switch"><span><b>التعليقات</b></span><input id="featureComments" type="checkbox"></label>
+            <label class="switch"><span><b>البحث</b></span><input id="featureSearch" type="checkbox"></label>
+            <label class="switch"><span><b>الاكتشاف</b></span><input id="featureExplore" type="checkbox"></label>
+            <label class="switch"><span><b>المحفوظات</b></span><input id="featureSaved" type="checkbox"></label>
+            <label class="switch"><span><b>الإشعارات</b></span><input id="featureNotifications" type="checkbox"></label>
+            <label class="switch"><span><b>رفع الملفات</b></span><input id="featureUploads" type="checkbox"></label>
+          </div>
+        </article>
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الحدود</span><h3>أحجام الرفع</h3></div></div>
+          <div class="stage12-limits-grid">
+            <label><span>الحد العام MB</span><input id="limitGeneral" type="number" min="1" max="60"></label>
+            <label><span>القصة MB</span><input id="limitStory" type="number" min="1" max="60"></label>
+            <label><span>الريلز MB</span><input id="limitReel" type="number" min="1" max="60"></label>
+            <label><span>الصورة MB</span><input id="limitImage" type="number" min="1" max="60"></label>
+            <label><span>فيديو المحادثة MB</span><input id="limitChatVideo" type="number" min="1" max="60"></label>
+            <label><span>الصوت MB</span><input id="limitAudio" type="number" min="1" max="60"></label>
+          </div>
+        </article>
+        <article class="panel form stage12-save-panel">
+          <div class="panel-head"><div><span class="eyebrow">الحفظ</span><h3>تسجيل التغيير</h3></div></div>
+          <label><span>سبب التعديل</span><input id="appSettingsReason" maxlength="500" placeholder="مثال: تجهيز الإصدار الجديد"></label>
+          <button class="primary save-settings" type="submit">حفظ إعدادات التطبيق</button>
+          <p id="appSettingsMessage" class="message"></p>
+        </article>
+      </form>
+      <div class="panel stage12-history-panel">
+        <div class="panel-head"><div><span class="eyebrow">النسخ السابقة</span><h3>سجل الإعدادات</h3></div><button id="refreshSettingsHistory" class="small" type="button">تحديث</button></div>
+        <div id="settingsHistory" class="stage12-history-list"></div>
+      </div>
+    </section>
+
+    <section id="siteSettings" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 13</span><h2>إدارة الموقع الرسمي</h2><p>تحكم كامل بالنصوص وروابط التوزيع والمميزات والتحديث والدعم دون تعديل ملفات الموقع يدويًا.</p></div></div>
+      <div id="siteSettingsSummary" class="stage13-summary"></div>
+      <form id="siteSettingsForm" class="settings-grid stage13-settings-grid">
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الهوية</span><h3>واجهة الموقع</h3></div></div>
+          <label><span>اسم المنصة</span><input id="siteTitle" maxlength="80"></label>
+          <label><span>الوصف الرئيسي</span><textarea id="siteSubtitle" maxlength="240"></textarea></label>
+        </article>
+
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">التوزيع</span><h3>Android والويب</h3></div></div>
+          <label><span>رابط تحميل Android</span><input id="siteAndroidUrl" inputmode="url"></label>
+          <label><span>رابط نسخة الويب</span><input id="siteWebUrl" inputmode="url"></label>
+          <div class="grid2 fields">
+            <label><span>رقم الإصدار</span><input id="siteVersion" maxlength="40"></label>
+            <label><span>حجم التطبيق</span><input id="siteSize" maxlength="40" placeholder="مثال: 12.4 MB"></label>
+          </div>
+          <label><span>SHA-256</span><input id="siteSha256" maxlength="64" autocomplete="off"></label>
+        </article>
+
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">التحديث</span><h3>رسالة الموقع</h3></div></div>
+          <label><span>عنوان الرسالة</span><input id="siteUpdateLabel" maxlength="80" placeholder="آخر تحديث"></label>
+          <label><span>نص التحديث</span><textarea id="siteUpdateText" maxlength="500" placeholder="يظهر أسفل معلومات الإصدار في الموقع"></textarea></label>
+        </article>
+
+        <article class="panel form">
+          <div class="panel-head"><div><span class="eyebrow">الدعم</span><h3>التواصل والروابط</h3></div></div>
+          <label><span>اسم زر الدعم</span><input id="siteSupportLabel" maxlength="80"></label>
+          <label><span>رابط الدعم</span><input id="siteSupportUrl" inputmode="url"></label>
+          <label><span>بريد الدعم</span><input id="siteSupportEmail" type="email"></label>
+          <label><span>سياسة الخصوصية</span><input id="sitePrivacyUrl" inputmode="url"></label>
+          <label><span>شروط الاستخدام</span><input id="siteTermsUrl" inputmode="url"></label>
+        </article>
+
+        <article class="panel form stage13-features-panel">
+          <div class="panel-head"><div><span class="eyebrow">المميزات</span><h3>بطاقات الموقع</h3></div><span class="meta">حتى 6 بطاقات</span></div>
+          <div id="siteFeatureEditor" class="stage13-feature-editor">
+            <div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 1</span><input id="siteFeatureTitle0" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription0" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled0" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 2</span><input id="siteFeatureTitle1" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription1" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled1" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 3</span><input id="siteFeatureTitle2" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription2" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled2" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 4</span><input id="siteFeatureTitle3" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription3" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled3" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 5</span><input id="siteFeatureTitle4" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription4" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled4" type="checkbox"></label>
+            </div><div class="stage13-feature-row">
+              <label class="grow"><span>العنوان 6</span><input id="siteFeatureTitle5" maxlength="80"></label>
+              <label class="grow"><span>الوصف</span><input id="siteFeatureDescription5" maxlength="240"></label>
+              <label class="switch compact"><span><b>إظهار</b></span><input id="siteFeatureEnabled5" type="checkbox"></label>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel form stage13-save-panel">
+          <div class="panel-head"><div><span class="eyebrow">النشر</span><h3>حفظ الموقع</h3></div></div>
+          <p class="meta">بعد الحفظ يقرأ الموقع القيم الجديدة مباشرة من إعداداته العامة.</p>
+          <button class="primary" type="submit">حفظ إعدادات الموقع</button>
+          <p id="siteSettingsMessage" class="message"></p>
+        </article>
+      </form>
+    </section>
+
+    <section id="health" class="page">
+      <div class="page-title"><div><span class="eyebrow">المرحلة 9</span><h2>حالة النظام</h2><p>فحص الخدمات والطوابير والإصدار واستهلاك الخادم من شاشة واحدة.</p></div></div>
+      <div id="healthRuntime" class="stage9-runtime"></div>
+      <div id="healthCards" class="cards stage9-health-grid"></div>
+      <div class="panel stage9-queue-panel"><div class="panel-head"><div><span class="eyebrow">الطوابير</span><h3>العمليات الحالية</h3></div><button id="refreshSystemHealth" class="small" type="button">تحديث</button></div><div id="healthQueues" class="stage9-queues"></div></div>
+    </section>
+  </main>
+
+  <nav class="bottom">
+    <button class="mobile-nav active" data-page="dashboard"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3Z"/><path d="M9 20v-6h6v6"/></svg><span>الرئيسية</span></button>
+    <button class="mobile-nav" data-page="content"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>المحتوى</span></button>
+    <button class="mobile-nav" data-page="users"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21c1-5 4-7 7-7s6 2 7 7"/><path d="M16 5c3 0 5 2 5 5M18 14c2 1 3 3 4 6"/></svg><span>المستخدمون</span></button>
+    <button class="mobile-nav" data-page="reports"><svg viewBox="0 0 24 24"><path d="M5 3h14v18l-7-3-7 3Z"/><path d="M9 8h6M9 12h6"/></svg><span>البلاغات</span></button>
+    <button id="moreAdminButton" class="mobile-nav" type="button"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>المزيد</span></button>
+  </nav>
+</div>
+
+<div id="connectionBanner" class="connection-banner hidden" role="status">
+  <span class="connection-dot"></span>
+  <div><b>لا يوجد اتصال بالإنترنت</b><small>يمكنك البقاء في الصفحة، وسنعيد المحاولة عند عودة الاتصال.</small></div>
+  <button id="retryConnectionButton" type="button">إعادة المحاولة</button>
+</div>
+
+<div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+
+<dialog id="contentPreviewDialog" class="admin-dialog content-preview-dialog">
+  <div class="content-preview-card">
+    <div class="admin-dialog-head">
+      <div><span class="eyebrow">معاينة المحتوى</span><h3 id="contentPreviewTitle">المحتوى</h3></div>
+      <button id="closeContentPreview" class="dialog-close" type="button" aria-label="إغلاق">×</button>
+    </div>
+    <div id="contentPreviewBody"></div>
+  </div>
+</dialog>
+
+<dialog id="adminActionDialog" class="admin-dialog">
+  <form id="adminActionForm" method="dialog" class="admin-dialog-card">
+    <div class="admin-dialog-head">
+      <div><span id="adminDialogEyebrow" class="eyebrow">إدارة آشور</span><h3 id="adminDialogTitle">تأكيد الإجراء</h3></div>
+      <button id="adminDialogClose" class="dialog-close" type="button" aria-label="إغلاق">×</button>
+    </div>
+    <p id="adminDialogText" class="admin-dialog-text"></p>
+    <label id="adminDialogInputRow" class="hidden"><span id="adminDialogInputLabel">القيمة</span><input id="adminDialogInput" autocomplete="off"></label>
+    <div class="admin-dialog-actions">
+      <button id="adminDialogCancel" class="dialog-secondary" type="button">إلغاء</button>
+      <button id="adminDialogAccept" class="primary" type="submit">تأكيد</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="./config.js"></script>
+<script>
+(() => {
+  const sources=["./vendor/supabase.min.js","https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.1/dist/umd/supabase.min.js"];
+  let i=0;
+  const next=()=>{
+    if(i>=sources.length){
+      document.getElementById("loginMessage").textContent="تعذر تحميل مكونات الإدارة.";
+      return;
+    }
+    const s=document.createElement("script");
+    s.src=sources[i++];
+    s.onload=()=>{
+      if(!window.supabase?.createClient)return next();
+      const app=document.createElement("script");
+      app.src="./app.js?v=1.3.3-authfix";
+      document.body.appendChild(app);
+    };
+    s.onerror=next;
+    document.head.appendChild(s);
+  };
+  next();
+})();
+</script>
+</body>
+</html>

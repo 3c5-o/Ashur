@@ -1,0 +1,1 @@
+(()=>{window.AshurPages?.register("searchPage",{enter:async({api})=>{await api?.loadExplore?.();document.querySelector("#searchInput")?.setAttribute("aria-label","البحث في آشور")}})})();

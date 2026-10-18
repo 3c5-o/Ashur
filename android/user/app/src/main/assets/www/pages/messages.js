@@ -1,0 +1,1 @@
+(()=>{window.AshurPages?.register("messagesPage",{enter:async({api})=>{await api?.loadConversations?.();api?.subscribeInboxRealtime?.()},leave:async({api})=>{api?.closeInboxRealtime?.()}})})();

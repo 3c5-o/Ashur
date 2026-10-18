@@ -1,0 +1,1 @@
+(()=>{window.AshurPages?.register("homePage",{enter:async()=>{document.querySelector("#homePage")?.setAttribute("aria-current","page")},leave:async()=>{document.querySelector("#homePage")?.removeAttribute("aria-current")}})})();

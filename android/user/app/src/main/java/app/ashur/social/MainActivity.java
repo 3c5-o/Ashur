@@ -57,13 +57,7 @@ public class MainActivity extends Activity {
         webView = new WebView(this);
         setContentView(webView);
 
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        ViewCompat.setOnApplyWindowInsetsListener(webView, (view, insets) -> {
-            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            view.setPadding(0, bars.top, 0, bars.bottom);
-            return WindowInsetsCompat.CONSUMED;
-        });
-        ViewCompat.requestApplyInsets(webView);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         applySystemTheme(false);
 
         WebSettings settings = webView.getSettings();

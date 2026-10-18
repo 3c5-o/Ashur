@@ -241,9 +241,36 @@
     if(!editableTarget(event.target))event.preventDefault();
   },{capture:true});
 
+  const AVATAR_PALETTES = [
+    ["#10b981", "#047857"],
+    ["#3b82f6", "#1d4ed8"],
+    ["#8b5cf6", "#6d28d9"],
+    ["#ec4899", "#be185d"],
+    ["#f59e0b", "#b45309"],
+    ["#06b6d4", "#0e7490"]
+  ];
+
+  function svgAvatarDataUri(initial, name){
+    let hash = 0;
+    const str = name || initial || "آشور";
+    for(let i = 0; i < str.length; i++) hash = (hash << 5) - hash + str.charCodeAt(i);
+    const idx = Math.abs(hash) % AVATAR_PALETTES.length;
+    const [c1, c2] = AVATAR_PALETTES[idx];
+    const safeChar = (initial || "آ").slice(0, 2);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><defs><linearGradient id="g${idx}" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs><rect width="96" height="96" rx="48" fill="url(#g${idx})"/><text x="50%" y="54%" font-family="system-ui, -apple-system, sans-serif" font-size="40" font-weight="700" fill="#ffffff" dominant-baseline="middle" text-anchor="middle">${safeChar}</text></svg>`;
+    return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  }
+
   function avatar(profile, cls="avatar"){
-    if (profile?.avatar_media_id) return `<img class="${cls}" data-media-id="${profile.avatar_media_id}" alt="">`;
-    return `<div class="${cls} avatar-fallback">${initials(profile?.name)}</div>`;
+    const name = profile?.name || profile?.username || "آشور";
+    const initial = initials(name);
+    const placeholder = svgAvatarDataUri(initial, name);
+    const fullCls = cls.includes("avatar") ? cls : `${cls} avatar`;
+    const safeMediaId = profile?.avatar_media_id ? escapeHtml(profile.avatar_media_id) : "";
+    if (safeMediaId) {
+      return `<img class="${fullCls}" src="${placeholder}" data-media-id="${safeMediaId}" data-initial="${initial}" alt="${escapeHtml(name)}" onerror="this.src='${placeholder}'">`;
+    }
+    return `<img class="${fullCls}" src="${placeholder}" alt="${escapeHtml(name)}" data-initial="${initial}">`;
   }
 
   async function mediaAccess(mediaId){
@@ -567,8 +594,18 @@
           enhanceMediaNode(finalNode,access);
         }catch(_){
           if(node?.isConnected){
-            node.removeAttribute("src");
-            node.dataset.mediaError="1";
+            if(node.classList.contains("avatar") || node.dataset.initial || node.classList.contains("search-account-avatar")){
+              const initial = node.dataset.initial || initials(node.alt || "آشور");
+              node.src = svgAvatarDataUri(initial, node.alt || "آشور");
+              node.dataset.mediaReady = "1";
+            } else if(node.closest(".reel")){
+              const reel = node.closest(".reel");
+              reel?.classList.remove("is-loading");
+              node.dataset.mediaError="1";
+            } else {
+              node.removeAttribute("src");
+              node.dataset.mediaError="1";
+            }
           }
         }
       }
@@ -2656,7 +2693,7 @@
         const metric=counts[r.id]||{likes:0,comments:0};
         return `<article class="reel is-loading" data-reel-id="${r.id}" data-cover-id="${r.cover_media_id||""}" data-view-count="${Number(r.view_count||0)}">
           ${r.cover_media_id?`<img class="reel-poster" data-media-id="${r.cover_media_id}" alt="">`:""}
-          <video playsinline muted loop preload="none" data-media-id="${r.media_id}"></video>
+          <video playsinline muted loop preload="auto" data-media-id="${r.media_id}"></video>
           <div class="reel-loader" aria-hidden="true"></div>
           <div class="reel-shade"></div>
           <div class="reel-like-burst" aria-hidden="true">${icon("like")}</div>
@@ -2811,11 +2848,15 @@
       else{
         video.addEventListener("loadeddata",markReady,{once:true});
         video.addEventListener("canplay",markReady,{once:true});
+        video.addEventListener("play",markReady,{once:true});
+        video.addEventListener("timeupdate",markReady,{once:true});
       }
       video.addEventListener("error",()=>{
         reel.classList.remove("is-loading");
-        reel.classList.add("load-error");
       },{once:true});
+      setTimeout(()=>{
+        reel.classList.remove("is-loading");
+      },800);
 
       const togglePlay=()=>{
         if(video.paused){
@@ -2890,24 +2931,42 @@
       $("#conversationList").innerHTML=items.map(row=>{
         const p=row.peer_profile||{};
         const isGroup=row.kind==="group";
+        const title=row.title||p.name||p.username||(isGroup?"مجموعة":"محادثة");
+        const initial=initials(title);
+        const avatarPlaceholder=svgAvatarDataUri(initial, title);
         const avatarHtml=isGroup
           ?(row.image_media_id
-            ?'<img class="conversation-avatar group-avatar" data-media-id="'+escapeHtml(row.image_media_id)+'" alt="">'
-            :'<div class="conversation-avatar group-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">'+initials(row.title||"م")+'</div>')
+            ?`<img class="conversation-avatar group-avatar avatar" src="${avatarPlaceholder}" data-media-id="${escapeHtml(row.image_media_id)}" alt="">`
+            :`<img class="conversation-avatar group-avatar avatar" src="${avatarPlaceholder}" alt="">`)
           :(p.avatar_media_id
-            ?'<img class="conversation-avatar" data-media-id="'+escapeHtml(p.avatar_media_id)+'" alt="">'
-            :'<div class="conversation-avatar" style="display:grid;place-items:center;color:var(--brand);font-weight:900">'+initials(row.title||p.name||"م")+'</div>');
+            ?`<img class="conversation-avatar avatar" src="${avatarPlaceholder}" data-media-id="${escapeHtml(p.avatar_media_id)}" alt="">`
+            :`<img class="conversation-avatar avatar" src="${avatarPlaceholder}" alt="">`);
         const unread=row.unread_count?'<span class="conversation-unread">'+Number(row.unread_count||0)+'</span>':"";
         const badge=isGroup?'<span class="conversation-kind-badge">مجموعة</span>':"";
         const updated=row.updated_at?new Date(row.updated_at).toLocaleTimeString("ar-IQ",{hour:"2-digit",minute:"2-digit"}):"";
         const preview=escapeHtml(row.last_message|| (isGroup?"ابدأ الحديث في المجموعة":"ابدأ المحادثة"));
         return '<button class="conversation-item" data-conversation="'+escapeHtml(row.id)+'" type="button">'+
           avatarHtml+
-          '<div class="conversation-main"><div class="conversation-title-row"><b>'+escapeHtml(row.title||p.name||"محادثة")+'</b>'+badge+unread+'<time>'+updated+'</time></div>'+
-          '<div class="conversation-preview">'+preview+'</div></div></button>';
-      }).join("")||'<div class="empty">لا توجد محادثات مطابقة.</div>';
+          '<div class="conversation-main"><div class="conversation-title-row"><b>'+escapeHtml(title)+'</b>'+badge+unread+'<time>'+updated+'</time></div>'+
+          '<p class="conversation-preview">'+preview+'</p></div></button>';
+      }).join("") || `
+        <div class="conversation-empty-state">
+          <div class="conversation-empty-icon">${icon("message")}</div>
+          <h3>ابدأ محادثتك الأولى</h3>
+          <p>تواصل مع أصدقائك في آشور عبر الرسائل الفورية الخاصة أو المجموعات</p>
+          <button id="emptyStartChatBtn" class="primary start-chat-cta" type="button">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            <span>بدء محادثة جديدة</span>
+          </button>
+        </div>
+      `;
 
       await hydrateMedia($("#conversationList"));
+      $("#emptyStartChatBtn")?.addEventListener("click",()=>{
+        const btn = $("#newMessageButton") || document.querySelector('[data-action="new-message"]');
+        if(btn) btn.click();
+        else openNewConversationDialog?.();
+      });
       $("#conversationList").querySelectorAll("[data-conversation]").forEach(button=>button.onclick=()=>{
         const row=state.conversationCache.get(button.dataset.conversation);
         if(row)openChat(row.id,row.title,row);

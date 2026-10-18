@@ -1090,4 +1090,712 @@ dialog[open]{
   margin:10px auto 14px!important;
 }
 
+/* ===================================================
+   NATIVE APK FIXES FOR SCREENSHOT ISSUES
+   =================================================== */
+
+/* 1. Status Bar & Topbar Insets */
+.topbar{
+  top:0!important;
+  left:0!important;
+  right:0!important;
+  height:58px!important;
+  min-height:58px!important;
+  padding:0 14px!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  background:color-mix(in srgb, var(--ref-card) 96%, transparent)!important;
+  border-bottom:1px solid var(--ref-line)!important;
+  backdrop-filter:blur(20px)!important;
+  z-index:100!important;
+}
+.main-shell{
+  padding-top:58px!important;
+}
+
+/* 2. Avatar System & Vibrant Fallbacks (No solid black circles) */
+.avatar{
+  border-radius:50%!important;
+  object-fit:cover!important;
+  background:var(--ref-card-2, #f3f4f6)!important;
+  border:1.5px solid var(--ref-line-strong, #e2e8f0)!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  flex-shrink:0!important;
+}
+.avatar-fallback{
+  background:linear-gradient(135deg, #10b981, #059669)!important;
+  color:#ffffff!important;
+  font-weight:800!important;
+  font-size:15px!important;
+  text-shadow:0 1px 2px rgba(0,0,0,.2)!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  border:1.5px solid rgba(255,255,255,.2)!important;
+}
+.post-head .avatar{
+  width:44px!important;
+  height:44px!important;
+  min-width:44px!important;
+}
+.search-account-card .avatar, .list-card .avatar{
+  width:46px!important;
+  height:46px!important;
+  min-width:46px!important;
+}
+
+/* 3. Search Page Filter Chips (Threads/Instagram Style) */
+.search-filter-bar, .chips{
+  display:flex!important;
+  gap:8px!important;
+  overflow-x:auto!important;
+  scrollbar-width:none!important;
+  padding:6px 0 10px!important;
+}
+.search-filter-bar::-webkit-scrollbar, .chips::-webkit-scrollbar{ display:none!important; }
+.search-filter-bar .chip, .chips .chip{
+  background:var(--ref-card-2, #f1f5f2)!important;
+  color:var(--ref-text-2, #475569)!important;
+  border:1px solid var(--ref-line, #e2e8f0)!important;
+  border-radius:999px!important;
+  padding:8px 18px!important;
+  font-size:13px!important;
+  font-weight:700!important;
+  cursor:pointer!important;
+  transition:all .18s ease!important;
+}
+html[data-theme="dark"] .search-filter-bar .chip, html[data-theme="dark"] .chips .chip{
+  background:#141d17!important;
+  color:#94a3b8!important;
+  border-color:rgba(255,255,255,.1)!important;
+}
+.search-filter-bar .chip.active, .chips .chip.active{
+  background:var(--ref-green, #08783f)!important;
+  color:#ffffff!important;
+  border-color:var(--ref-green, #08783f)!important;
+  box-shadow:0 3px 10px rgba(8,120,63,.24)!important;
+}
+.search-account-card{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  padding:12px 14px!important;
+  border-radius:18px!important;
+  border:1px solid var(--ref-line)!important;
+  background:var(--ref-card)!important;
+  box-shadow:0 2px 10px rgba(0,0,0,.03)!important;
+}
+.search-account-card .grow{
+  display:flex!important;
+  flex-direction:column!important;
+  text-align:right!important;
+  margin-inline:12px!important;
+  flex:1!important;
+}
+.search-account-card .grow b{
+  font-size:14px!important;
+  color:var(--ref-text)!important;
+}
+.search-account-card .grow small{
+  font-size:12px!important;
+  color:var(--ref-muted)!important;
+}
+.search-account-card .small-button{
+  padding:7px 16px!important;
+  border-radius:999px!important;
+  font-size:12.5px!important;
+  font-weight:700!important;
+  background:var(--ref-green-soft)!important;
+  color:var(--ref-green)!important;
+  border:1px solid var(--ref-green-line)!important;
+}
+.search-account-card .small-button.active{
+  background:var(--ref-card-2)!important;
+  color:var(--ref-muted)!important;
+  border-color:var(--ref-line)!important;
+}
+
+/* 4. Profile Layout (No avatar overlapping text) */
+.profile-card{
+  margin:8px 10px 0!important;
+  background:var(--ref-card)!important;
+  border:1px solid var(--ref-line)!important;
+  border-radius:24px!important;
+  overflow:hidden!important;
+  box-shadow:0 4px 20px rgba(0,0,0,.04)!important;
+}
+.profile-cover{
+  width:100%!important;
+  height:136px!important;
+  min-height:136px!important;
+  max-height:136px!important;
+  background:linear-gradient(135deg, #064e3b 0%, #047857 50%, #059669 100%)!important;
+  position:relative!important;
+}
+.profile-settings-fab{
+  position:absolute!important;
+  top:12px!important;
+  left:12px!important;
+  width:40px!important;
+  height:40px!important;
+  border-radius:50%!important;
+  background:rgba(0,0,0,.35)!important;
+  backdrop-filter:blur(8px)!important;
+  border:1px solid rgba(255,255,255,.2)!important;
+  color:#fff!important;
+  display:grid!important;
+  place-items:center!important;
+}
+.profile-main{
+  position:relative!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:flex-start!important;
+  padding:0 16px 16px!important;
+}
+.profile-avatar-wrap{
+  margin-top:-48px!important;
+  margin-bottom:10px!important;
+  position:relative!important;
+  z-index:5!important;
+  width:92px!important;
+  height:92px!important;
+  flex-shrink:0!important;
+}
+.profile-avatar-wrap .avatar{
+  width:92px!important;
+  height:92px!important;
+  min-width:92px!important;
+  border:4px solid var(--ref-card)!important;
+  box-shadow:0 6px 20px rgba(0,0,0,.14)!important;
+}
+.profile-info{
+  width:100%!important;
+  padding:0!important;
+  display:flex!important;
+  flex-direction:column!important;
+  gap:5px!important;
+}
+.profile-name-row{
+  display:flex!important;
+  align-items:center!important;
+  gap:8px!important;
+}
+.profile-name-row h2{
+  font-size:20px!important;
+  font-weight:800!important;
+  margin:0!important;
+  color:var(--ref-text)!important;
+}
+.profile-username{
+  font-size:13.5px!important;
+  color:var(--ref-muted)!important;
+  font-weight:500!important;
+}
+.profile-bio{
+  font-size:13.5px!important;
+  line-height:1.6!important;
+  color:var(--ref-text-2)!important;
+  margin:4px 0 0!important;
+}
+.profile-stats{
+  display:grid!important;
+  grid-template-columns:repeat(3, 1fr)!important;
+  text-align:center!important;
+  margin-top:14px!important;
+  padding:12px 0!important;
+  border-top:1px solid var(--ref-line)!important;
+  border-bottom:1px solid var(--ref-line)!important;
+}
+.profile-stats b{
+  font-size:17px!important;
+  font-weight:800!important;
+  color:var(--ref-text)!important;
+}
+.profile-stats span{
+  font-size:12px!important;
+  color:var(--ref-muted)!important;
+  margin-top:2px!important;
+}
+.profile-buttons{
+  display:flex!important;
+  gap:10px!important;
+  margin-top:12px!important;
+}
+.profile-buttons .small-button{
+  flex:1!important;
+  min-height:44px!important;
+  border-radius:14px!important;
+  font-size:13.5px!important;
+  font-weight:700!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:8px!important;
+  border:1px solid var(--ref-line)!important;
+  background:var(--ref-card-2)!important;
+  color:var(--ref-text)!important;
+}
+
+/* 5. Native Material Switches & Settings Dialog */
+#settingsDialog .dialog-head{
+  padding:16px 16px 12px!important;
+}
+.switch-row{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  padding:14px 16px!important;
+  background:var(--ref-card)!important;
+  border:1px solid var(--ref-line)!important;
+  border-radius:16px!important;
+  margin-bottom:8px!important;
+}
+.switch-row span{
+  display:flex!important;
+  flex-direction:column!important;
+  gap:3px!important;
+  text-align:right!important;
+}
+.switch-row b{
+  font-size:13.5px!important;
+  color:var(--ref-text)!important;
+  font-weight:700!important;
+}
+.switch-row small{
+  font-size:11.5px!important;
+  color:var(--ref-muted)!important;
+}
+.switch-row input[type="checkbox"]{
+  appearance:none!important;
+  -webkit-appearance:none!important;
+  width:50px!important;
+  height:28px!important;
+  min-height:28px!important;
+  border-radius:999px!important;
+  background:#cbd5e1!important;
+  border:2px solid transparent!important;
+  position:relative!important;
+  cursor:pointer!important;
+  transition:all .24s cubic-bezier(.2,.8,.4,1)!important;
+  outline:none!important;
+  flex-shrink:0!important;
+}
+html[data-theme="dark"] .switch-row input[type="checkbox"]{
+  background:#334155!important;
+}
+.switch-row input[type="checkbox"]::before{
+  content:""!important;
+  position:absolute!important;
+  top:2px!important;
+  right:2px!important;
+  width:20px!important;
+  height:20px!important;
+  border-radius:50%!important;
+  background:#ffffff!important;
+  box-shadow:0 2px 6px rgba(0,0,0,.25)!important;
+  transition:transform .24s cubic-bezier(.2,.8,.4,1)!important;
+}
+.switch-row input[type="checkbox"]:checked{
+  background:var(--ref-green, #10b981)!important;
+}
+.switch-row input[type="checkbox"]:checked::before{
+  transform:translateX(-22px)!important;
+}
+
+/* 6. Reels Resilience */
+.reel.load-error{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  background:radial-gradient(circle at center, #102419 0%, #050806 80%)!important;
+}
+.reel.load-error::before{
+  content:"🎬 ريلز آشور";
+  color:rgba(255,255,255,.8);
+  font-size:17px;
+  font-weight:700;
+  text-shadow:0 2px 8px rgba(0,0,0,.7);
+}
+.reel.load-error .reel-loader{
+  display:none!important;
+}
+
+/* 7. Messages Zero-State */
+.conversation-empty-state{
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  text-align:center!important;
+  padding:44px 20px!important;
+  gap:12px!important;
+}
+.conversation-empty-icon{
+  width:68px!important;
+  height:68px!important;
+  border-radius:22px!important;
+  background:var(--ref-green-soft)!important;
+  color:var(--ref-green)!important;
+  display:grid!important;
+  place-items:center!important;
+}
+.conversation-empty-icon svg{
+  width:34px!important;
+  height:34px!important;
+}
+.conversation-empty-state h3{
+  font-size:17px!important;
+  font-weight:800!important;
+  color:var(--ref-text)!important;
+  margin:0!important;
+}
+.conversation-empty-state p{
+  font-size:13px!important;
+  color:var(--ref-muted)!important;
+  margin:0!important;
+  max-width:280px!important;
+  line-height:1.6!important;
+}
+.conversation-empty-state button{
+  margin-top:6px!important;
+  padding:10px 22px!important;
+  border-radius:999px!important;
+  background:linear-gradient(135deg, var(--ref-green), var(--ref-green-2))!important;
+  color:#fff!important;
+  border:0!important;
+  font-size:13.5px!important;
+  font-weight:750!important;
+  box-shadow:0 4px 14px rgba(8,120,63,.25)!important;
+  cursor:pointer!important;
+}
+
+/* Search Account Cards Layout */
+.search-account-avatar{
+  width:48px!important;
+  height:48px!important;
+  min-width:48px!important;
+  border-radius:50%!important;
+  font-size:16px!important;
+}
+.search-account-main{
+  display:flex!important;
+  align-items:center!important;
+  gap:12px!important;
+  background:transparent!important;
+  border:0!important;
+  padding:0!important;
+  cursor:pointer!important;
+  text-align:right!important;
+  flex:1!important;
+  min-width:0!important;
+}
+.search-account-copy{
+  display:flex!important;
+  flex-direction:column!important;
+  gap:2px!important;
+  min-width:0!important;
+}
+.search-account-copy b{
+  font-size:14px!important;
+  font-weight:750!important;
+  color:var(--ref-text)!important;
+}
+.search-account-copy small{
+  font-size:12px!important;
+  color:var(--ref-muted)!important;
+  direction:ltr!important;
+  text-align:right!important;
+}
+.search-account-copy em{
+  font-size:11.5px!important;
+  color:var(--ref-text-2)!important;
+  font-style:normal!important;
+  margin-top:2px!important;
+}
+/* Search Follow Button */
+.search-follow-button{
+  padding:8px 18px!important;
+  border-radius:999px!important;
+  font-size:13px!important;
+  font-weight:750!important;
+  background:var(--ref-green-soft)!important;
+  color:var(--ref-green)!important;
+  border:1px solid var(--ref-green-line)!important;
+  cursor:pointer!important;
+  transition:all .18s ease!important;
+}
+.search-follow-button.active{
+  background:var(--ref-card-2)!important;
+  color:var(--ref-muted)!important;
+  border-color:var(--ref-line)!important;
+}
+
+/* ==========================================================
+   ASHUR NATIVE-GRADE MOBILE SYSTEM POLISH (ISSUES 1-6)
+   ========================================================== */
+
+/* 1. Safe Insets & Status Bar Clearance */
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), 36px) !important;
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), 16px) !important;
+}
+.topbar {
+  padding-top: var(--safe-top) !important;
+  height: calc(56px + var(--safe-top)) !important;
+  min-height: calc(56px + var(--safe-top)) !important;
+  display: grid !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  z-index: 50 !important;
+}
+.main-shell {
+  padding-top: calc(56px + var(--safe-top)) !important;
+  box-sizing: border-box !important;
+}
+#searchPage {
+  padding-top: calc(8px + var(--safe-top)) !important;
+}
+
+/* 2. Vibrant Avatars & No Black Circles */
+.avatar, .avatar-fallback, .search-account-avatar, .conversation-avatar {
+  border-radius: 50% !important;
+  object-fit: cover !important;
+  background: linear-gradient(135deg, #10b981, #047857) !important;
+  border: 1.5px solid var(--ref-line-strong, #e2e8f0) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+
+/* 3. Cinematic Reels Player & No Endless Loader */
+.reel {
+  position: relative !important;
+  overflow: hidden !important;
+  background: #000000 !important;
+  min-height: calc(100dvh - 56px - var(--safe-top)) !important;
+  height: calc(100dvh - 56px - var(--safe-top)) !important;
+}
+.reel video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+}
+.reel-poster {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+  transition: opacity 0.3s ease !important;
+}
+.reel.video-ready .reel-loader,
+.reel.video-ready .reel-poster {
+  display: none !important;
+}
+.reel-center-play {
+  position: absolute !important;
+  inset: 0 !important;
+  margin: auto !important;
+  width: 64px !important;
+  height: 64px !important;
+  border-radius: 50% !important;
+  background: rgba(0, 0, 0, 0.55) !important;
+  color: #ffffff !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+  display: grid !important;
+  place-items: center !important;
+  z-index: 4 !important;
+  cursor: pointer !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.2s ease, transform 0.2s ease !important;
+}
+.reel-center-play.show {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: scale(1.05) !important;
+}
+.reel-center-play svg {
+  width: 28px !important;
+  height: 28px !important;
+  fill: currentColor !important;
+}
+
+/* 4. Messages Empty State Action */
+.conversation-empty-state .start-chat-cta {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 12px 26px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(135deg, var(--ref-green), var(--ref-green-2)) !important;
+  color: #ffffff !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  box-shadow: 0 4px 16px rgba(8, 120, 63, 0.28) !important;
+  border: none !important;
+  cursor: pointer !important;
+  margin-top: 10px !important;
+}
+
+/* 5. Profile Header Precision Layout (Zero Overlap) */
+.profile-card {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
+  background: var(--ref-card) !important;
+  border-radius: 24px !important;
+  border-bottom: 1px solid var(--ref-line) !important;
+}
+.profile-cover {
+  width: 100% !important;
+  height: 160px !important;
+  min-height: 160px !important;
+  position: relative !important;
+  overflow: hidden !important;
+  background: linear-gradient(135deg, #064e3b 0%, #065f46 45%, #047857 100%) !important;
+}
+.profile-main {
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 0 16px 16px !important;
+  position: relative !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+.profile-avatar-wrap {
+  width: 88px !important;
+  height: 88px !important;
+  min-width: 88px !important;
+  min-height: 88px !important;
+  margin-top: -44px !important;
+  margin-bottom: 12px !important;
+  position: relative !important;
+  z-index: 5 !important;
+  display: block !important;
+  align-self: flex-start !important;
+  border-radius: 50% !important;
+}
+.profile-avatar-wrap .avatar, 
+.profile-avatar-wrap img {
+  width: 100% !important;
+  height: 100% !important;
+  border: 4px solid var(--ref-card) !important;
+  border-radius: 50% !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18) !important;
+  object-fit: cover !important;
+}
+.profile-info {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin-top: 0 !important;
+  clear: both !important;
+}
+.profile-name-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+.profile-name-row h2 {
+  font-size: 19px !important;
+  font-weight: 800 !important;
+  margin: 0 !important;
+  color: var(--ref-text) !important;
+}
+.profile-username {
+  font-size: 13px !important;
+  color: var(--ref-muted) !important;
+  margin-top: 2px !important;
+}
+.profile-bio {
+  font-size: 13.5px !important;
+  color: var(--ref-text-2) !important;
+  line-height: 1.6 !important;
+  margin: 8px 0 !important;
+}
+
+/* 6. Modern Android Material 3 Toggle Switches */
+.switch-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 12px 14px !important;
+  background: var(--ref-card) !important;
+  border: 1px solid var(--ref-line) !important;
+  border-radius: 14px !important;
+  margin-bottom: 8px !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+}
+.switch-row span {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  flex: 1 !important;
+  min-width: 0 !important;
+  text-align: right !important;
+}
+.switch-row b {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  color: var(--ref-text) !important;
+}
+.switch-row small {
+  font-size: 11.5px !important;
+  color: var(--ref-muted) !important;
+  line-height: 1.4 !important;
+}
+.switch-row input[type="checkbox"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 50px !important;
+  height: 30px !important;
+  min-width: 50px !important;
+  min-height: 30px !important;
+  border-radius: 15px !important;
+  background: #cbd5e1 !important;
+  border: none !important;
+  cursor: pointer !important;
+  outline: none !important;
+  position: relative !important;
+  transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+}
+html[data-theme="dark"] .switch-row input[type="checkbox"] {
+  background: #334155 !important;
+}
+.switch-row input[type="checkbox"]::before {
+  content: "" !important;
+  position: absolute !important;
+  top: 3px !important;
+  right: 3px !important;
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 50% !important;
+  background: #ffffff !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28) !important;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.switch-row input[type="checkbox"]:checked {
+  background: #10b981 !important;
+}
+.switch-row input[type="checkbox"]:checked::before {
+  transform: translateX(-20px) !important;
+}
+
+
+
 
